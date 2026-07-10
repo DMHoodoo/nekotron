@@ -222,9 +222,26 @@ def _fg(c):
     return f"\033[38;2;{(c >> 16) & 255};{(c >> 8) & 255};{c & 255}m"
 
 
+def vtrunc(s, limit):
+    """Truncate to `limit` visible chars, preserving ANSI, closing with reset."""
+    if vlen(s) <= limit:
+        return s
+    out, n = [], 0
+    for tok in re.split(r"(\033\[[0-9;]*m)", s):
+        if tok.startswith("\033["):
+            out.append(tok)
+            continue
+        room = limit - 1 - n
+        if room <= 0:
+            break
+        out.append(tok[:room])
+        n += min(len(tok), room)
+    return "".join(out) + RST + "…"
+
+
 def panel_row(content, width, bg=PANEL, caps=True):
     """One row of a card: plain text — the panel itself is a z=-1 underlay."""
-    return " " + pad(content, width - 2) + " "
+    return " " + pad(vtrunc(content, width - 2), width - 2) + " "
 
 
 def pill(text, bg, fg=0xE8ECFF, panel=None):
@@ -421,7 +438,17 @@ def _diorama_png(phase_bucket, h_px):
     horizon = int(total * 0.72)
     water_top = int(total * 0.44)
     water_bottom = int(total * 0.62)
-    strip = ac.draw_bg_color_strip(total, water_top, water_bottom, horizon, pal)
+    strip = bytearray(ac.draw_bg_color_strip(total, water_top, water_bottom, horizon, pal))
+    # mute the scene into the board's world: keep hue, pull toward the void,
+    # and fade the sky to nothing at the top so there are no hard edges
+    for y in range(total):
+        i = y * 4
+        k = 0.42  # how much of the scene's own color survives
+        strip[i] = int(VOID[0] + (strip[i] - VOID[0]) * k)
+        strip[i + 1] = int(VOID[1] + (strip[i + 1] - VOID[1]) * k)
+        strip[i + 2] = int(VOID[2] + (strip[i + 2] - VOID[2]) * k)
+        fade = min(1.0, y / (total * 0.35))
+        strip[i + 3] = int(230 * fade)
     return _png_rgba(bytes(strip), 1, total)
 
 
@@ -966,13 +993,13 @@ def ops_column(cards, v, width, tall, frame):
         L.append(P("  " + f"{DIM}  ·  {RST}".join(info)))
     if v.get("tmux") is not None:
         att, tot = v["tmux"]
-        row = f"  {INK}{att}{RST}{DIM} tmux attached · {tot - att} detached{RST}"
-        if v.get("kitty") is not None:
-            krss, conns = v["kitty"]
-            cc = _fg(0x4CC38A) if conns < 60 else (_fg(0xFFB65C) if conns < 90 else _fg(0xF0803C))
-            row += f"{DIM}  ·  kitty {human(krss)} · {RST}{cc}{conns} conns{RST}"
-            if conns >= 60:
-                row += f" {AMBER}restart soon{RST}" if conns < 90 else f" {ST['attention'][0]}RESTART{RST}"
+        L.append(P(f"  {INK}{att}{RST}{DIM} tmux attached · {tot - att} detached{RST}"))
+    if v.get("kitty") is not None:
+        krss, conns = v["kitty"]
+        cc = _fg(0x4CC38A) if conns < 60 else (_fg(0xFFB65C) if conns < 90 else _fg(0xF0803C))
+        row = f"  {DIM}kitty {human(krss)} · {RST}{cc}{conns} conns{RST}"
+        if conns >= 60:
+            row += f" {AMBER}· restart soon{RST}" if conns < 90 else f" {ST['attention'][0]}· RESTART{RST}"
         L.append(P(row))
     L.append(P(""))
     L.append("")
@@ -992,7 +1019,7 @@ def ops_column(cards, v, width, tall, frame):
         L.append("")
 
     L.append(P(f" {DIM}1-9 jump · ⌘⇧A attention · ⌘⇧B broadcast{RST}"))
-    L.append(P(f" {DIM}s cat · c pet · ⌘⇧K keys · any other key exits{RST}"))
+    L.append(P(f" {DIM}s cat · c pet · ⌘⇧K keys · other exits{RST}"))
     return L, gauges, gauge_rel, chart_rel
 
 
