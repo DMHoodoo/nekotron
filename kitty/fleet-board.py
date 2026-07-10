@@ -366,6 +366,25 @@ def _aurora_underlay(w, h):
     return _png_rgba(bytes(buf), w, h)
 
 
+def _identicon_png(seed, scale=8):
+    """Symmetric 5x5 identicon: a face for every session."""
+    import hashlib
+    h = hashlib.md5(seed.split("|")[0].encode()).digest()
+    hue = {"glow-platform": (95, 233, 223), "glow-core": (255, 95, 168),
+           "glow-aws-sync": (255, 182, 92)}.get(seed.split("|")[-1], (139, 139, 150))
+    size = 5 * scale
+    buf = bytearray(size * size * 4)
+    for gy in range(5):
+        for gx in range(3):
+            if h[gy * 3 + gx] % 2:
+                for mx in {gx, 4 - gx}:
+                    for dy in range(scale):
+                        for dx in range(scale):
+                            i = ((gy * scale + dy) * size + mx * scale + dx) * 4
+                            buf[i:i + 4] = bytes((*hue, 230))
+    return _png_rgba(bytes(buf), size, size)
+
+
 def underlay_escapes(placements):
     """placements: [(row, col, cols, rows, kind)] -> transmit/place at z=-1."""
     out = []
@@ -377,6 +396,11 @@ def underlay_escapes(placements):
             w_px, h_px = cw * CELL_W, rh * CELL_H
             if kind == "aurora":
                 _ul_pngs[_ul_ids[key]] = _aurora_underlay(w_px, h_px)
+            elif kind.startswith("icon:"):
+                _ul_pngs[_ul_ids[key]] = _identicon_png(kind[5:])
+            elif kind.startswith("ring:"):
+                pct, color = kind[5:].split(",")
+                _ul_pngs[_ul_ids[key]] = _ring_png_cached(int(pct), color)
             else:
                 _ul_pngs[_ul_ids[key]] = _panel_underlay(w_px, h_px, hi=(kind == "card_hi"))
         gid = _ul_ids[key]
@@ -745,7 +769,7 @@ def gather(sock, kpid, feed_n):
                     s_epoch = os.path.getmtime(sfile)
                 except OSError:
                     pass
-            cards.append({"title": title[:80], "state": state, "s_epoch": s_epoch, "size": tsize,
+            cards.append({"sid": sid, "title": title[:80], "state": state, "s_epoch": s_epoch, "size": tsize,
                           "repo": next((r for r in REPO_HUE if r in cwd), None),
                           "meta": (meta + f" · ${scost:.2f}" if scost is not None and meta
                                    else (f"${scost:.2f}" if scost is not None else meta)),
@@ -962,6 +986,7 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii"):
         left.append("")
     now = time.time()
     card_spans = []
+    card_marks = []
     for i, c in enumerate(cards, 1):
         color, glyph, label = ST[c["state"]]
         if c["state"] == "working":
@@ -974,9 +999,14 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii"):
         ctxs = ""
         if c.get("ctx") is not None:
             cc = DIM if c["ctx"] < 70 else (AMBER if c["ctx"] < 88 else ST["attention"][0])
-            ctxs = f"{grad_bar(c['ctx'])} {cc}{c['ctx']:>2}%{RST}  "
+            ring_color = "good" if c["ctx"] < 70 else ("warn" if c["ctx"] < 88 else "bad")
+            card_marks.append((len(left) + 1, left_w - 22,
+                               f"ring:{5 * round(c['ctx'] / 5)},{ring_color}"))
+            ctxs = f"{cc}{c['ctx']:>2}%{RST}    "
+        if c.get("sid"):
+            card_marks.append((len(left) + 1, 2, f"icon:{c['sid']}|{c['repo'] or ''}"))
         b = BOLD if c["focused"] else ""
-        head = f" {b}{INK}{i}{RST} {hue}▎{RST}{color}{glyph}{RST} {b}{INK}{c['title'][:left_w - 44]}{RST}"
+        head = f"    {b}{INK}{i}{RST} {hue}▎{RST}{color}{glyph}{RST} {b}{INK}{c['title'][:left_w - 48]}{RST}"
         tail = ctxs + pill(f" {label} ", PILL_BG[c["state"]], panel=bg) + (f" {DIM}{age:<4}{RST}" if age else "")
         gap = left_w - 2 - vlen(head) - vlen(tail)
         left.append(Pc(""))
@@ -1023,6 +1053,9 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii"):
     for start, h, focused in card_spans:
         if start + h < rows:
             placements.append((start + 1, 1, left_w, h, "card_hi" if focused else "card"))
+    for row, col, kind in card_marks:
+        if row < rows:
+            placements.append((row + 1, col, 2, 1, kind))
     ops_h = len(ops_lines)
     if prefix + ops_h < rows:
         placements.append((prefix + 1, left_w + 6, right_w - 2, ops_h, "card"))
