@@ -333,7 +333,7 @@ def _panel_underlay(w, h, hi=False):
     top = (27, 37, 66) if hi else (23, 31, 56)
     bot = (19, 26, 48) if hi else (16, 22, 42)
     rad = 14
-    pad = 8               # room for the shadow to breathe
+    pad = 4               # slim inset; shadow hugs the rect
     buf = bytearray(w * h * 4)
     for y in range(h):
         for x in range(w):
@@ -427,35 +427,50 @@ def _chart_png(series, w, h):
     return _png_rgba(bytes(buf), w, h)
 
 
-def _diorama_png(phase_bucket, h_px):
-    """1px-wide scene strip (sky/fog/water/sand/grass) from animated-cat's
-    palette engine; kitty stretches it across the yard. Day-night accurate."""
+def _diorama_png(phase_bucket, h_px, w_px=440):
+    """The cat's yard as a proper rounded panel with the (muted) time-of-day
+    scene inside — same corner mask + shadow language as every other card."""
+    import math
     ac = _animated_cat()
     if not ac:
         return _png_rgba(bytes(4), 1, 1)
     pal = ac.palette_at(phase_bucket / 144.0)
-    total = max(20, h_px // 2)
+    total = max(20, h_px)
     horizon = int(total * 0.72)
-    water_top = int(total * 0.44)
-    water_bottom = int(total * 0.62)
-    strip = bytearray(ac.draw_bg_color_strip(total, water_top, water_bottom, horizon, pal))
-    # mute the scene into the board's world: keep hue, pull toward the void,
-    # and fade the sky to nothing at the top so there are no hard edges
+    strip = bytearray(ac.draw_bg_color_strip(total, int(total * 0.44),
+                                             int(total * 0.62), horizon, pal))
+    k = 0.42
     for y in range(total):
         i = y * 4
-        k = 0.42  # how much of the scene's own color survives
         strip[i] = int(VOID[0] + (strip[i] - VOID[0]) * k)
         strip[i + 1] = int(VOID[1] + (strip[i + 1] - VOID[1]) * k)
         strip[i + 2] = int(VOID[2] + (strip[i + 2] - VOID[2]) * k)
-        fade = min(1.0, y / (total * 0.35))
-        strip[i + 3] = int(230 * fade)
-    return _png_rgba(bytes(strip), 1, total)
+    rad, pad_ = 14, 4
+    buf = bytearray(w_px * h_px * 4)
+    for y in range(h_px):
+        srow = strip[min(total - 1, y * total // h_px) * 4:][:4]
+        for x in range(w_px):
+            dx = max(rad + pad_ - x, 0, x - (w_px - 1 - rad - pad_))
+            dy = max(rad + pad_ - y, 0, y - (h_px - 1 - rad - pad_))
+            m = rad + 1.0 - math.hypot(dx, dy) + pad_
+            i = (y * w_px + x) * 4
+            if m >= pad_:
+                a = 255 if m >= pad_ + 1.5 else int(255 * (m - pad_) / 1.5)
+                buf[i:i + 3] = srow[:3]
+                buf[i + 3] = a
+            elif m > 0:
+                fall = m / pad_
+                a = int(50 * fall * fall)
+                if a > 2:
+                    buf[i:i + 4] = bytes((3, 4, 9, a))
+    return _png_rgba(bytes(buf), w_px, h_px)
 
 
 def underlay_escapes(placements):
     """placements: [(row, col, cols, rows, kind)] -> transmit/place at z=-1."""
     out = []
-    used = set()
+    for gid in _ul_ids.values():
+        out.append(_gfx({"a": "d", "d": "i", "i": gid, "q": 2}))
     for row, col, cw, rh, kind in placements:
         key = (kind, cw, rh)
         if key not in _ul_ids:
@@ -471,13 +486,10 @@ def underlay_escapes(placements):
             elif kind.startswith("chart:"):
                 _ul_pngs[_ul_ids[key]] = _chart_png(_chart_series.get(kind[6:], []), w_px, h_px)
             elif kind.startswith("dio:"):
-                _ul_pngs[_ul_ids[key]] = _diorama_png(int(kind[4:]), h_px)
+                _ul_pngs[_ul_ids[key]] = _diorama_png(int(kind[4:]), h_px, w_px)
             else:
                 _ul_pngs[_ul_ids[key]] = _panel_underlay(w_px, h_px, hi=(kind == "card_hi"))
         gid = _ul_ids[key]
-        if gid not in used:
-            out.append(_gfx({"a": "d", "d": "i", "i": gid, "q": 2}))
-            used.add(gid)
         if gid not in _ul_sent:
             out.append(_gfx({"a": "t", "f": 100, "i": gid, "q": 2}, _ul_pngs[gid]))
             _ul_sent.add(gid)
@@ -638,8 +650,8 @@ def sprite_patch(cards, geo, frame):
     if _prev_sprite is not None and _prev_sprite != sid:
         out.append(_gfx({"a": "d", "d": "i", "i": _prev_sprite, "q": 2}))
     _prev_sprite = sid
-    out.append(f"\033[{top + 7};{col}H" + pad(FAINT + "▁" * max(0, width - 2) + RST, width) + "\033[K")
-    out.append(f"\033[{top + 8};{col}H" + pad(f" {mc}{mood}{RST}", width) + "\033[K")
+    out.append(f"\033[{top + 7};{col}H" + pad("", width) + "\033[K")
+    out.append(f"\033[{top + 8};{col}H" + pad(f"   {mc}{mood}{RST}", width) + "\033[K")
     return "".join(out)
 
 
@@ -1062,8 +1074,8 @@ def cat_yard(cards, width, height, frame, sprite=False):
         hearts = " " * (x + 3) + MAG + ["♥  ♥", " ♥ ♥", "  ♥  "][frame // 2 % 3] + RST
     rows = [hearts]
     rows += [" " * x + AMBER + row + RST for row in art]
-    rows.append(FAINT + "▁" * max(0, width - 2) + RST)
-    rows.append(f" {mc}{mood}{RST}")
+    rows.append("")
+    rows.append(f"   {mc}{mood}{RST}")
     rows += [""] * max(0, height - len(rows))
     return [pad(r, width) for r in rows[:height]] if height > 0 else []
 
@@ -1154,14 +1166,14 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii"):
     if tall:
         placements.append((1, 1, min(cols, left_w + 5), 9, "aurora"))
     for start, h, focused in card_spans:
-        if start + h < rows:
-            placements.append((start + 1, 1, left_w, h, "card_hi" if focused else "card"))
+        if start + h + 1 < rows:
+            placements.append((start + 1, 1, left_w, h + 1, "card_hi" if focused else "card"))
     for row, col, kind in card_marks:
         if row < rows:
             placements.append((row + 1, col, 2, 1, kind))
     ops_h = len(ops_lines)
-    if prefix + ops_h < rows:
-        placements.append((prefix + 1, left_w + 6, right_w - 2, ops_h, "card"))
+    if prefix + ops_h + 1 < rows:
+        placements.append((prefix + 1, left_w + 6, right_w - 2, ops_h + 1, "card"))
     if chart_rel is not None and v.get("spend"):
         ck = str(hash(tuple(round(x, 2) for x in v["spend"])) & 0xFFFFFF)
         _chart_series[ck] = v["spend"]
