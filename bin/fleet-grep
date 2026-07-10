@@ -1,0 +1,30 @@
+#!/bin/bash
+# fleet-grep [-d days] <pattern> — find which Claude session said something.
+# Searches transcripts (newest first), joins the session ledger for context,
+# prints the resume command for each hit.
+
+days=7
+if [ "$1" = "-d" ]; then days="$2"; shift 2; fi
+pat="$*"
+[ -z "$pat" ] && { echo "usage: fleet-grep [-d days] <pattern>"; exit 1; }
+
+CYAN=$'\033[38;2;95;233;223m'; DIM=$'\033[38;2;107;115;148m'
+AMBER=$'\033[38;2;255;182;92m'; RST=$'\033[0m'
+hits=0
+
+for f in $(find ~/.claude/projects -maxdepth 2 -name '*.jsonl' -mtime -"${days}"d 2>/dev/null \
+           -exec ls -t {} +); do
+    n=$(/usr/bin/grep -ci -- "$pat" "$f" 2>/dev/null)
+    [ "${n:-0}" -gt 0 ] || continue
+    hits=$((hits + 1))
+    sid=$(basename "$f" .jsonl)
+    proj=$(basename "$(dirname "$f")" | sed 's/^-Users-hassankhan-*//')
+    when=$(ls -laT "$f" | awk '{print $6, $7, $8}')
+    led=$(/usr/bin/grep -m1 "$sid" ~/.claude/session-ledger.tsv 2>/dev/null | awk -F'\t' '{print " · started "$1" · kitty "$4}')
+    snip=$(/usr/bin/grep -im1 -- "$pat" "$f" | /usr/bin/grep -io -- ".\{0,50\}${pat}.\{0,50\}" | head -1)
+    printf '%s● %s%s  %s%s hits · %s · last write %s%s%s\n' \
+        "$AMBER" "$RST$CYAN" "$sid" "$DIM" "$n" "${proj:-?}" "$when" "$led" "$RST"
+    [ -n "$snip" ] && printf '  %s…%s…%s\n' "$DIM" "$snip" "$RST"
+    printf '  claude --resume %s\n\n' "$sid"
+done
+[ "$hits" -eq 0 ] && echo "no sessions matched '$pat' in the last $days days"

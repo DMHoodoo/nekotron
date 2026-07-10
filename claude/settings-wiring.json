@@ -1,0 +1,90 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "/Users/hassankhan/.claude/hooks/claude-statusline.sh"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/hassankhan/.claude/hooks/jest-guardrail.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/hassankhan/.claude/hooks/kitty-tab-status.sh done",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/hassankhan/.claude/hooks/kitty-tab-status.sh attention",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/hassankhan/.claude/hooks/kitty-tab-status.sh working",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/hassankhan/.claude/hooks/kitty-tab-status.sh working",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/hassankhan/.claude/hooks/kitty-tab-status.sh reset",
+            "async": true
+          },
+          {
+            "type": "command",
+            "command": "/Users/hassankhan/.claude/hooks/session-ledger.sh",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/hassankhan/.claude/hooks/kitty-tab-status.sh reset",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}

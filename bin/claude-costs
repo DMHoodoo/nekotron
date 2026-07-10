@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Today's Claude spend per session, from the statusline cost ledger.
+Alias: costs"""
+import datetime
+import os
+
+CYAN, AMBER, DIM, RST = "\033[38;2;95;233;223m", "\033[38;2;255;182;92m", "\033[38;2;107;115;148m", "\033[0m"
+led = os.path.expanduser("~/.claude/cost-ledger.tsv")
+ses = os.path.expanduser("~/.claude/session-ledger.tsv")
+today = datetime.date.today().isoformat()
+
+first, last, model = {}, {}, {}
+try:
+    for line in open(led):
+        p = line.rstrip("\n").split("\t")
+        if len(p) < 4 or not p[0].startswith(today):
+            continue
+        sid, cost = p[1], float(p[2])
+        first.setdefault(sid, cost)
+        last[sid] = cost
+        model[sid] = p[3]
+except OSError:
+    print("no cost ledger yet — it fills as sessions take turns"); raise SystemExit
+
+cwds = {}
+try:
+    for line in open(ses):
+        p = line.rstrip("\n").split("\t")
+        if len(p) >= 3:
+            cwds[p[1]] = os.path.basename(p[2])
+except OSError:
+    pass
+
+rows = sorted(((max(0.0, last[s] - first[s]), last[s], s) for s in last), reverse=True)
+total = sum(r[0] for r in rows)
+print(f"\n  {AMBER}ᓚᘏᗢ{RST}  {CYAN}spend today ≈ ${total:.2f}{RST} {DIM}across {len(rows)} session(s){RST}\n")
+for spent, lifetime, sid in rows:
+    bar = "▓" * min(20, round(spent / max(total, 0.01) * 20))
+    print(f"  {AMBER}${spent:7.2f}{RST} {DIM}{bar:<20} lifetime ${lifetime:8.2f} · "
+          f"{cwds.get(sid, '?'):<16} {sid[:8]} · {model.get(sid, '')}{RST}")
+print(f"\n  {DIM}today = growth since first sample today (sessions predating the ledger undercount){RST}")

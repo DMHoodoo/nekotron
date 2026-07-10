@@ -1,0 +1,29 @@
+#!/bin/bash
+# new <template> — open a tab in the right repo with Claude primed.
+
+case "$1" in
+    crs)       dir="$HOME/Documents/GlowDevelopment/glow-platform"
+               p="WCIRB CRS session — check the decision log (docs/wcirb-crs-decision-log.md) before starting." ;;
+    core)      dir="$HOME/Documents/GlowDevelopment/glow-core";      p="" ;;
+    platform)  dir="$HOME/Documents/GlowDevelopment/glow-platform";  p="" ;;
+    leads)     dir="$HOME/Documents/GlowDevelopment/glow-aws-sync"
+               p="Lead assignment / funnel ops session." ;;
+    analytics) dir="$HOME/Library/CloudStorage/Dropbox/Engineering/analytics"
+               p="Analytics session — read the workspace CLAUDE.md first." ;;
+    *) echo "templates: crs · core · platform · leads · analytics"; exit 0 ;;
+esac
+
+sock=""
+for s in $(ls -t /tmp/kitty-ctl-* 2>/dev/null); do
+    kill -0 "${s##*-}" 2>/dev/null && sock="$s" && break
+done
+[ -n "$sock" ] || { echo "no live kitty socket"; exit 1; }
+KITTEN="$(command -v kitten || echo /Applications/kitty.app/Contents/MacOS/kitten)"
+
+if [ -n "$p" ]; then
+    "$KITTEN" @ --to "unix:$sock" launch --type=tab --cwd "$dir" --env "NEW_PROMPT=$p" \
+        zsh -l -i -c 'claude "$NEW_PROMPT"; exec zsh' >/dev/null
+else
+    "$KITTEN" @ --to "unix:$sock" launch --type=tab --cwd "$dir" \
+        zsh -l -i -c 'claude; exec zsh' >/dev/null
+fi

@@ -1,0 +1,15 @@
+#!/bin/bash
+# Sticky note for THIS kitty tab's session — shows on its fleet-board card.
+#   note <text>   set   ·   note   show   ·   note -   clear
+
+d=/tmp/claude-kitty-status
+mkdir -p "$d" 2>/dev/null
+f="$d/note-${KITTY_PID:-0}-${KITTY_WINDOW_ID:-0}"
+
+if [ "$1" = "-" ]; then
+    rm -f "$f" && echo "note cleared"
+elif [ -z "$1" ]; then
+    if [ -f "$f" ]; then cat "$f"; echo; else echo "(no note) — usage: note <text> · note -"; fi
+else
+    printf '%s' "$*" > "$f" && echo "✎ noted"
+fi

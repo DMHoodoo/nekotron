@@ -1,0 +1,12 @@
+#!/bin/bash
+# Open the fleet board as a dedicated always-on OS window (drag to a spare
+# monitor once; macOS remembers). Close the window to dismiss.
+
+sock=""
+for s in $(ls -t /tmp/kitty-ctl-* 2>/dev/null); do
+    kill -0 "${s##*-}" 2>/dev/null && sock="$s" && break
+done
+[ -n "$sock" ] || { echo "no live kitty socket"; exit 1; }
+KITTEN="$(command -v kitten || echo /Applications/kitty.app/Contents/MacOS/kitten)"
+"$KITTEN" @ --to "unix:$sock" launch --type=os-window --title "ᓚᘏᗢ fleet wall" \
+    /Users/hassankhan/.config/kitty/fleet-board.py --watch >/dev/null && echo "fleet wall up — drag it to a spare monitor"
