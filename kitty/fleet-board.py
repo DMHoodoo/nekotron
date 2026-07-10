@@ -668,12 +668,12 @@ def sprite_patch(cards, geo, frame):
     hrow = ""
     if frame < _pet_until:
         hrow = " " * (x + 5) + MAG + ["♥  ♥", " ♥ ♥", "  ♥  "][t // 2 % 3] + RST
-    out.append(f"\033[{top};{col}H" + pad(hrow, width) + "\033[K")
+    out.append(f"\033[{top + max(0, height - 10)};{col}H" + pad(hrow, width) + "\033[K")
     sid = 4200 + sorted(reg).index(name)
     if name not in _transmitted:
         out.append(_gfx({"a": "t", "f": 100, "i": sid, "q": 2}, reg[name]))
         _transmitted.add(name)
-    out.append(f"\033[{top + 1};{col + x}H")
+    out.append(f"\033[{top + max(1, height - 9)};{col + x}H")
     out.append(_gfx({"a": "p", "i": sid, "c": 18, "r": 6, "q": 2}))
     if _prev_sprite is not None and _prev_sprite != sid:
         out.append(_gfx({"a": "d", "d": "i", "i": _prev_sprite, "q": 2}))
@@ -1101,7 +1101,9 @@ def cat_yard(cards, width, height, frame, sprite=False):
     hearts = ""
     if frame < _pet_until:
         hearts = " " * (x + 3) + MAG + ["♥  ♥", " ♥ ♥", "  ♥  "][frame // 2 % 3] + RST
-    rows = [hearts]
+    lead = max(0, height - 9)  # sink the cat: feet on the beach band
+    rows = [""] * lead
+    rows.append(hearts)
     rows += [" " * x + AMBER + row + RST for row in art]
     rows += [""] * max(0, height - 1 - len(rows))
     rows = rows[:height - 1]
