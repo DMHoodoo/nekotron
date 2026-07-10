@@ -385,6 +385,46 @@ def _identicon_png(seed, scale=8):
     return _png_rgba(bytes(buf), size, size)
 
 
+_chart_series = {}
+
+
+def _chart_png(series, w, h):
+    """Filled area chart: cumulative spend today, cyan fading downward."""
+    buf = bytearray(w * h * 4)
+    peak = max(series) if series and max(series) > 0 else 1.0
+    n = len(series) or 1
+    for x in range(w):
+        f = x / max(1, w - 1) * (n - 1)
+        i0 = int(f)
+        val = series[i0] + (series[min(n - 1, i0 + 1)] - series[i0]) * (f - i0)
+        level = int((1 - val / peak * 0.9) * (h - 3)) + 1
+        for y in range(level, h):
+            t = (y - level) / max(1, h - level)
+            a = int(150 * (1 - t * 0.8))
+            i = (y * w + x) * 4
+            buf[i:i + 4] = bytes((95, 233, 223, a))
+        for y in (level - 1, level):  # crisp top line
+            if 0 <= y < h:
+                i = (y * w + x) * 4
+                buf[i:i + 4] = bytes((95, 233, 223, 255))
+    return _png_rgba(bytes(buf), w, h)
+
+
+def _diorama_png(phase_bucket, h_px):
+    """1px-wide scene strip (sky/fog/water/sand/grass) from animated-cat's
+    palette engine; kitty stretches it across the yard. Day-night accurate."""
+    ac = _animated_cat()
+    if not ac:
+        return _png_rgba(bytes(4), 1, 1)
+    pal = ac.palette_at(phase_bucket / 144.0)
+    total = max(20, h_px // 2)
+    horizon = int(total * 0.72)
+    water_top = int(total * 0.44)
+    water_bottom = int(total * 0.62)
+    strip = ac.draw_bg_color_strip(total, water_top, water_bottom, horizon, pal)
+    return _png_rgba(bytes(strip), 1, total)
+
+
 def underlay_escapes(placements):
     """placements: [(row, col, cols, rows, kind)] -> transmit/place at z=-1."""
     out = []
@@ -401,6 +441,10 @@ def underlay_escapes(placements):
             elif kind.startswith("ring:"):
                 pct, color = kind[5:].split(",")
                 _ul_pngs[_ul_ids[key]] = _ring_png_cached(int(pct), color)
+            elif kind.startswith("chart:"):
+                _ul_pngs[_ul_ids[key]] = _chart_png(_chart_series.get(kind[6:], []), w_px, h_px)
+            elif kind.startswith("dio:"):
+                _ul_pngs[_ul_ids[key]] = _diorama_png(int(kind[4:]), h_px)
             else:
                 _ul_pngs[_ul_ids[key]] = _panel_underlay(w_px, h_px, hi=(kind == "card_hi"))
         gid = _ul_ids[key]
@@ -824,6 +868,31 @@ def vitals():
             v["limits"] = json.load(f)
     except Exception:
         v["limits"] = None
+    try:  # today's spend curve from the statusline cost ledger
+        today = datetime.date.today().isoformat()
+        first, latest = {}, {}
+        bins = [0.0] * 48
+        for line in open(os.path.expanduser("~/.claude/cost-ledger.tsv")):
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 4 or not parts[0].startswith(today):
+                continue
+            hh, mm = parts[0][11:13], parts[0][14:16]
+            b = min(47, int(hh) * 2 + int(mm) // 30)
+            sid, cost = parts[1], float(parts[2])
+            if sid not in first:
+                first[sid] = cost
+            delta = max(0.0, cost - first[sid])
+            latest[sid] = (b, delta)
+            spent = sum(d for _, d in latest.values())
+            bins[b] = max(bins[b], spent)
+        peak = 0.0
+        for i in range(48):
+            peak = max(peak, bins[i])
+            bins[i] = peak
+        v["spend"] = bins
+        v["spend_total"] = peak
+    except Exception:
+        v["spend"] = None
     return v
 
 
@@ -879,6 +948,13 @@ def ops_column(cards, v, width, tall, frame):
                 resets.append(f"{dt // 86400}d" if dt >= 86400 else f"{dt // 3600}h" if dt >= 3600 else f"{dt // 60}m")
         if resets:
             L.append(P(f"  {FAINT}resets {' · '.join(resets)}{RST}"))
+    chart_rel = None
+    if v.get("spend") and v.get("spend_total", 0) > 0.5:
+        L.append(P(""))
+        L.append(P(f" {FAINT}spend today{RST}   {INK}${v['spend_total']:.2f}{RST}"))
+        chart_rel = len(L)
+        for _ in range(3):
+            L.append(P(""))
     info = []
     if v.get("disk") is not None:
         info.append(f"{INK}{v['disk']}G{RST}{DIM} disk{RST}")
@@ -917,7 +993,7 @@ def ops_column(cards, v, width, tall, frame):
 
     L.append(P(f" {DIM}1-9 jump · ⌘⇧A attention · ⌘⇧B broadcast{RST}"))
     L.append(P(f" {DIM}s cat · c pet · ⌘⇧K keys · any other key exits{RST}"))
-    return L, gauges, gauge_rel
+    return L, gauges, gauge_rel, chart_rel
 
 
 def fleet_mode(cards):
@@ -1026,7 +1102,7 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii"):
         card_spans.append((card_start, len(left) - card_start, c["focused"]))
         left.append("")
 
-    ops_lines, gauges, gauge_rel = ops_column(cards, v, right_w - 4, tall, frame)
+    ops_lines, gauges, gauge_rel, chart_rel = ops_column(cards, v, right_w - 4, tall, frame)
     right = [""] * (4 if not tall else 3) + ops_lines
     yard_top = len(right) + 2          # 1-indexed row where the yard begins
     yard_col = left_w + 6              # 1-indexed column of the right block
@@ -1059,6 +1135,14 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii"):
     ops_h = len(ops_lines)
     if prefix + ops_h < rows:
         placements.append((prefix + 1, left_w + 6, right_w - 2, ops_h, "card"))
+    if chart_rel is not None and v.get("spend"):
+        ck = str(hash(tuple(round(x, 2) for x in v["spend"])) & 0xFFFFFF)
+        _chart_series[ck] = v["spend"]
+        placements.append((prefix + chart_rel + 1, left_w + 8, right_w - 10, 3, f"chart:{ck}"))
+    if yard_h >= 6:
+        now_t = time.localtime()
+        pb = (now_t.tm_hour * 3600 + now_t.tm_min * 60) * 144 // 86400
+        placements.append((yard_top, yard_col, right_w - 2, yard_h, f"dio:{pb}"))
     frame_str += underlay_escapes(placements)
     return frame_str, (yard_top, yard_col, right_w - 2, yard_h)
 
