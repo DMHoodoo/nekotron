@@ -658,7 +658,10 @@ def sprite_patch(cards, geo, frame):
         out.append(_gfx({"a": "d", "d": "i", "i": _prev_sprite, "q": 2}))
     _prev_sprite = sid
     out.append(f"\033[{top + 7};{col}H" + pad("", width) + "\033[K")
-    out.append(f"\033[{top + 8};{col}H" + pad(f"   {mc}{mood}{RST}", width) + "\033[K")
+    chip_bg = 0x0D1120
+    chip = ("  " + _fg(chip_bg) + "\ue0b6" + RST + _bg(chip_bg)
+            + mc + f" {mood} " + RST + _fg(chip_bg) + "\ue0b4" + RST)
+    out.append(f"\033[{top + 8};{col}H" + pad(chip, width) + "\033[K")
     return "".join(out)
 
 
@@ -1082,7 +1085,9 @@ def cat_yard(cards, width, height, frame, sprite=False):
     rows = [hearts]
     rows += [" " * x + AMBER + row + RST for row in art]
     rows.append("")
-    rows.append(f"   {mc}{mood}{RST}")
+    chip_bg = 0x0D1120
+    rows.append("  " + _fg(chip_bg) + "\ue0b6" + RST + _bg(chip_bg)
+                + mc + f" {mood} " + RST + _fg(chip_bg) + "\ue0b4" + RST)
     rows += [""] * max(0, height - len(rows))
     return [pad(r, width) for r in rows[:height]] if height > 0 else []
 
