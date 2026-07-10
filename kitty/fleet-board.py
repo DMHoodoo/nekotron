@@ -427,7 +427,7 @@ def _chart_png(series, w, h):
     return _png_rgba(bytes(buf), w, h)
 
 
-def _diorama_png(phase_bucket, h_px, w_px=440):
+def _diorama_png(phase_bucket, h_px, w_px=440, chip_cells=0):
     """The cat's yard as a proper rounded panel with the (muted) time-of-day
     scene inside — same corner mask + shadow language as every other card."""
     import math
@@ -470,6 +470,26 @@ def _diorama_png(phase_bucket, h_px, w_px=440):
                 a = int(50 * fall * fall)
                 if a > 2:
                     buf[i:i + 4] = bytes((3, 4, 9, a))
+    if chip_cells:  # caption plate: rounded slate chip baked at the mood row
+        cy0 = h_px - 2 * CELL_H + 2
+        cy1 = h_px - CELL_H - 2
+        cx0 = 3 * CELL_W - 6
+        cx1 = cx0 + chip_cells * CELL_W + 12
+        crad = (cy1 - cy0) / 2
+        for y in range(max(0, cy0 - 2), min(h_px, cy1 + 3)):
+            for x in range(max(0, cx0 - 2), min(w_px, cx1 + 3)):
+                dx = max(cx0 + crad - x, 0, x - (cx1 - crad))
+                dy = max(cy0 + crad - y, 0, y - (cy1 - crad))
+                m = crad + 1.0 - math.hypot(dx, dy)
+                if m > 0:
+                    a2 = 255 if m >= 1.5 else int(255 * m / 1.5)
+                    i = (y * w_px + x) * 4
+                    er = buf[i:i + 4]
+                    s = a2 / 255
+                    buf[i] = int(er[0] * (1 - s) + 28 * s)
+                    buf[i + 1] = int(er[1] * (1 - s) + 36 * s)
+                    buf[i + 2] = int(er[2] * (1 - s) + 64 * s)
+                    buf[i + 3] = max(er[3], a2)
     return _png_rgba(bytes(buf), w_px, h_px)
 
 
@@ -493,7 +513,8 @@ def underlay_escapes(placements):
             elif kind.startswith("chart:"):
                 _ul_pngs[_ul_ids[key]] = _chart_png(_chart_series.get(kind[6:], []), w_px, h_px)
             elif kind.startswith("dio:"):
-                _ul_pngs[_ul_ids[key]] = _diorama_png(int(kind[4:]), h_px, w_px)
+                pb, chip_cells = kind[4:].split(":")
+                _ul_pngs[_ul_ids[key]] = _diorama_png(int(pb), h_px, w_px, int(chip_cells))
             else:
                 _ul_pngs[_ul_ids[key]] = _panel_underlay(w_px, h_px, hi=(kind == "card_hi"))
         gid = _ul_ids[key]
@@ -658,10 +679,8 @@ def sprite_patch(cards, geo, frame):
         out.append(_gfx({"a": "d", "d": "i", "i": _prev_sprite, "q": 2}))
     _prev_sprite = sid
     out.append(f"\033[{top + 7};{col}H" + pad("", width) + "\033[K")
-    chip_bg = 0x1C2440  # panel-family slate — visibly elevated off the scrim
-    chip = ("  " + _fg(chip_bg) + "\ue0b6" + RST + _bg(chip_bg)
-            + mc + f" {mood} " + RST + _fg(chip_bg) + "\ue0b4" + RST)
-    out.append(f"\033[{top + 8};{col}H" + pad(chip, width) + "\033[K")
+    out.append(f"\033[{top + max(8, height - 2)};{col}H"
+               + pad("    " + mc + mood + RST, width) + "\033[K")
     return "".join(out)
 
 
@@ -1084,10 +1103,9 @@ def cat_yard(cards, width, height, frame, sprite=False):
         hearts = " " * (x + 3) + MAG + ["♥  ♥", " ♥ ♥", "  ♥  "][frame // 2 % 3] + RST
     rows = [hearts]
     rows += [" " * x + AMBER + row + RST for row in art]
-    rows.append("")
-    chip_bg = 0x1C2440  # panel-family slate — visibly elevated off the scrim
-    rows.append("  " + _fg(chip_bg) + "\ue0b6" + RST + _bg(chip_bg)
-                + mc + f" {mood} " + RST + _fg(chip_bg) + "\ue0b4" + RST)
+    rows += [""] * max(0, height - 1 - len(rows))
+    rows = rows[:height - 1]
+    rows.insert(height - 2, "    " + mc + mood + RST)
     rows += [""] * max(0, height - len(rows))
     return [pad(r, width) for r in rows[:height]] if height > 0 else []
 
@@ -1193,7 +1211,8 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii"):
     if yard_h >= 6:
         now_t = time.localtime()
         pb = (now_t.tm_hour * 3600 + now_t.tm_min * 60) * 144 // 86400
-        placements.append((yard_top, yard_col, right_w - 2, yard_h, f"dio:{pb}"))
+        mood_cells = len(fleet_mode(cards)[1]) + 2
+        placements.append((yard_top, yard_col, right_w - 2, yard_h, f"dio:{pb}:{mood_cells}"))
     frame_str += underlay_escapes(placements)
     return frame_str, (yard_top, yard_col, right_w - 2, yard_h)
 
