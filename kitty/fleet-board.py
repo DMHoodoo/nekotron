@@ -223,22 +223,14 @@ def _fg(c):
 
 
 def panel_row(content, width, bg=PANEL, caps=True):
-    """One row of a raised card: rounded ends, solid bg, content re-grounded
-    onto the panel bg after every ANSI reset inside it."""
-    inner = width - (2 if caps else 0)
-    body = pad(content.replace(RST, RST + _bg(bg)), inner)[: ]
-    if vlen(body) > inner:
-        body = body  # pad never over-trims; truncation handled upstream
-    row = _bg(bg) + body + RST
-    if caps:
-        row = _fg(bg) + "\ue0b6" + RST + row + _fg(bg) + "\ue0b4" + RST
-    return row
+    """One row of a card: plain text — the panel itself is a z=-1 underlay."""
+    return " " + pad(content, width - 2) + " "
 
 
-def pill(text, bg, fg=0xE8ECFF, panel=PANEL):
-    """Rounded state chip sitting on a panel background."""
-    return (_fg(bg) + _bg(panel) + "\ue0b6" + RST + _bg(bg) + _fg(fg)
-            + text + RST + _fg(bg) + _bg(panel) + "\ue0b4" + RST)
+def pill(text, bg, fg=0xE8ECFF, panel=None):
+    """Rounded chip; caps on default bg so underlays show through around it."""
+    return (_fg(bg) + "\ue0b6" + RST + _bg(bg) + _fg(fg)
+            + text + RST + _fg(bg) + "\ue0b4" + RST)
 
 
 def _ring_png_cached(pct, color):
@@ -308,6 +300,96 @@ def gauge_escapes(row, col, gauges):
         out.append(_gfx({"a": "p", "i": gid, "c": 6, "r": 3, "q": 2}))
     return "".join(out)
 
+
+
+# ── underlay engine: images composited UNDER the text (z=-1) ───────────
+CELL_W, CELL_H = 10, 20   # assumed cell pixel size; radius distortion is minor
+VOID = (10, 13, 24)
+_ul_ids = {}              # (kind, cols, rows) -> image id
+_ul_pngs = {}             # id -> png bytes
+_ul_sent = set()
+
+
+def _panel_underlay(w, h, hi=False):
+    """Rounded panel: vertical sheen, soft bottom shadow, alpha-faded edges."""
+    import math
+    top = (27, 37, 66) if hi else (23, 31, 56)
+    bot = (19, 26, 48) if hi else (16, 22, 42)
+    rad = 14
+    pad = 8               # room for the shadow to breathe
+    buf = bytearray(w * h * 4)
+    for y in range(h):
+        for x in range(w):
+            dx = max(rad + pad - x, 0, x - (w - 1 - rad - pad))
+            dy = max(rad + pad - y, 0, y - (h - 1 - rad - pad))
+            m = rad + 1.0 - math.hypot(dx, dy) + pad
+            i = (y * w + x) * 4
+            if m >= pad:  # inside the rounded rect
+                t = y / h
+                a = 255 if m >= pad + 1.5 else int(255 * (m - pad) / 1.5)
+                buf[i] = int(top[0] + (bot[0] - top[0]) * t)
+                buf[i + 1] = int(top[1] + (bot[1] - top[1]) * t)
+                buf[i + 2] = int(top[2] + (bot[2] - top[2]) * t)
+                buf[i + 3] = a
+            elif m > 0:   # shadow halo, strongest below
+                fall = m / pad
+                bias = 1.3 if y > h // 2 else 0.6
+                a = int(60 * fall * fall * bias)
+                if a > 2:
+                    buf[i:i + 4] = bytes((3, 4, 9, a))
+    return _png_rgba(bytes(buf), w, h)
+
+
+def _aurora_underlay(w, h):
+    """Ambient glow blobs that alpha-fade to nothing — blends with any bg."""
+    import math
+    buf = bytearray(w * h * 4)
+    blobs = [(int(w * 0.16), int(h * 0.55), h * 1.9, (95, 233, 223), 34),
+             (int(w * 0.46), int(h * 0.25), h * 1.5, (79, 142, 247), 22),
+             (int(w * 0.82), int(h * 0.75), h * 1.6, (255, 95, 168), 14)]
+    for y in range(h):
+        for x in range(w):
+            r = g = b = a = 0.0
+            for bx, by, rad, c, amp in blobs:
+                d = math.hypot((x - bx) * 0.55, y - by)  # squash horizontally
+                if d < rad:
+                    t = (1 - d / rad) ** 2 * amp
+                    r += c[0] * t / 255
+                    g += c[1] * t / 255
+                    b += c[2] * t / 255
+                    a += t
+            if a > 1.5:
+                a = min(64, a)
+                i = (y * w + x) * 4
+                buf[i:i + 4] = bytes((int(min(255, r * 4)), int(min(255, g * 4)),
+                                      int(min(255, b * 4)), int(a)))
+    return _png_rgba(bytes(buf), w, h)
+
+
+def underlay_escapes(placements):
+    """placements: [(row, col, cols, rows, kind)] -> transmit/place at z=-1."""
+    out = []
+    used = set()
+    for row, col, cw, rh, kind in placements:
+        key = (kind, cw, rh)
+        if key not in _ul_ids:
+            _ul_ids[key] = 4400 + len(_ul_ids)
+            w_px, h_px = cw * CELL_W, rh * CELL_H
+            if kind == "aurora":
+                _ul_pngs[_ul_ids[key]] = _aurora_underlay(w_px, h_px)
+            else:
+                _ul_pngs[_ul_ids[key]] = _panel_underlay(w_px, h_px, hi=(kind == "card_hi"))
+        gid = _ul_ids[key]
+        if gid not in used:
+            out.append(_gfx({"a": "d", "d": "i", "i": gid, "q": 2}))
+            used.add(gid)
+        if gid not in _ul_sent:
+            out.append(_gfx({"a": "t", "f": 100, "i": gid, "q": 2}, _ul_pngs[gid]))
+            _ul_sent.add(gid)
+        out.append(f"\033[{row};{col}H")
+        out.append(_gfx({"a": "p", "i": gid, "c": cw, "r": rh, "z": -1,
+                         "p": len(out), "q": 2}))
+    return "".join(out)
 
 
 def _animated_cat():
@@ -879,12 +961,14 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii"):
         left.append(f"  {AMBER}ᓚᘏᗢ{RST}  {BOLD}{CYAN}FLEET BOARD{RST}   {DIM}{time.strftime('%a %H:%M')}{RST}")
         left.append("")
     now = time.time()
+    card_spans = []
     for i, c in enumerate(cards, 1):
         color, glyph, label = ST[c["state"]]
         if c["state"] == "working":
             glyph = SPIN[frame % len(SPIN)]
         hue = REPO_HUE.get(c["repo"], FAINT)
         bg = PANEL_HI if c["focused"] else PANEL
+        card_start = len(left)
         Pc = lambda content: panel_row(content, left_w, bg)
         age = fmt_age(now - c["s_epoch"]) if c["s_epoch"] else ""
         ctxs = ""
@@ -909,7 +993,7 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii"):
                 txt = txt[: len(txt) - (vlen(txt) - (left_w - 17))] + "…"
             left.append(Pc(f"      {DIM}{fmt_age(now - e) if e else '':>4}{RST} {txt}{RST}"))
         left.append(Pc(""))
-        left.append(" " + _fg(0x05070C) + "▀" * (left_w - 2) + RST)
+        card_spans.append((card_start, len(left) - card_start, c["focused"]))
         left.append("")
 
     ops_lines, gauges, gauge_rel = ops_column(cards, v, right_w - 4, tall, frame)
@@ -928,11 +1012,21 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii"):
     for i, line in enumerate(lines[:rows]):
         buf.append(f"\033[{i + 1};1H{line}\033[K")
     frame_str = "".join(buf) + "\033[J"
+    prefix = 4 if not tall else 3
     if gauges and gauge_rel is not None:
-        prefix = 4 if not tall else 3
         g_row = prefix + gauge_rel + 1
         if g_row + 2 < rows:
             frame_str += gauge_escapes(g_row, left_w + 8, gauges)
+    placements = []
+    if tall:
+        placements.append((1, 1, min(cols, left_w + 5), 9, "aurora"))
+    for start, h, focused in card_spans:
+        if start + h < rows:
+            placements.append((start + 1, 1, left_w, h, "card_hi" if focused else "card"))
+    ops_h = len(ops_lines)
+    if prefix + ops_h < rows:
+        placements.append((prefix + 1, left_w + 6, right_w - 2, ops_h, "card"))
+    frame_str += underlay_escapes(placements)
     return frame_str, (yard_top, yard_col, right_w - 2, yard_h)
 
 
