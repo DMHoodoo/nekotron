@@ -456,7 +456,14 @@ def _diorama_png(phase_bucket, h_px, w_px=440):
             i = (y * w_px + x) * 4
             if m >= pad_:
                 a = 255 if m >= pad_ + 1.5 else int(255 * (m - pad_) / 1.5)
-                buf[i:i + 3] = srow[:3]
+                r, g, b = srow[0], srow[1], srow[2]
+                scrim_top = h_px * 0.60
+                if y > scrim_top:  # caption scrim: text sits on this, not on raw scene
+                    s = min(1.0, (y - scrim_top) / (h_px * 0.28)) ** 1.4 * 0.72
+                    r = int(r + (6 - r) * s)
+                    g = int(g + (8 - g) * s)
+                    b = int(b + (15 - b) * s)
+                buf[i:i + 3] = bytes((r, g, b))
                 buf[i + 3] = a
             elif m > 0:
                 fall = m / pad_
