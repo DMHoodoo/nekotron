@@ -1101,7 +1101,7 @@ def cat_yard(cards, width, height, frame, sprite=False):
     hearts = ""
     if frame < _pet_until:
         hearts = " " * (x + 3) + MAG + ["♥  ♥", " ♥ ♥", "  ♥  "][frame // 2 % 3] + RST
-    lead = max(0, height - 9)  # sink the cat: feet on the beach band
+    lead = max(0, height - 7)  # sink the cat: feet on the beach band
     rows = [""] * lead
     rows.append(hearts)
     rows += [" " * x + AMBER + row + RST for row in art]
