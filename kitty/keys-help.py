@@ -17,6 +17,7 @@ DESC = {
     "fleet-board.py": "fleet board — every session, states, vitals; digits jump",
     "jump-attention.sh": "jump to the session that needs you",
     "fleet-say.py": "broadcast one message to every Claude",
+    "fleet-peek.py": "peek any tab's live screen without switching",
     "keys-help.py": "this cheatsheet",
     "goto_tab": "go to tab",
     "send_key page_up": "page up (Claude Code scrollback)",

@@ -13,8 +13,9 @@ Built 2026-07-09/10. Everything is event-driven — no daemons, no timers.
   timeline; ring gauges (memory / 5h / weekly usage); vitals incl. kitty
   socket health; animated cat (ASCII or pixel sprite, toggle `s`, pet `c`).
 - **Fleet actions** — `⌘⇧A` jump to the session that needs you, `⌘⇧B`
-  broadcast one message to every Claude, `⌘⇧X` open a Claude about whatever
-  is on screen, `⌘⇧K` self-updating keybind cheatsheet.
+  broadcast one message to every Claude, `⌘⇧P` peek any tab's live screen
+  without switching, `⌘⇧X` open a Claude about whatever is on screen,
+  `⌘⇧K` self-updating keybind cheatsheet.
 - **Session safety** — crash-proof workspace restore (startup_session +
   auto-snapshots), session ledger (TSV black box), fleet-grep transcript
   search, cost ledger + costs command, context watchdog (purr at 90%),
