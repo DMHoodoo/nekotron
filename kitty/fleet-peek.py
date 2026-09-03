@@ -67,8 +67,12 @@ def live_sock():
 
 
 def tab_list(sock, kpid):
-    ls = json.loads(subprocess.run([KITTEN, "@", "--to", f"unix:{sock}", "ls"],
-                                   capture_output=True, text=True, timeout=5).stdout)
+    out = subprocess.run([KITTEN, "@", "--to", f"unix:{sock}", "ls"],
+                         capture_output=True, text=True, timeout=5).stdout
+    if not out.strip():
+        raise SystemExit("kitty control socket is WEDGED (leaked connections) — "
+                         "restart kitty to recover")
+    ls = json.loads(out)
     tabs = []
     for osw in ls:
         for tab in osw.get("tabs", []):
@@ -199,6 +203,10 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except SystemExit as e:  # deliberate diagnosis (e.g. wedged control socket)
+        if e.code and not isinstance(e.code, int):
+            print(f"\033[38;2;240;128;60m{e.code}\033[0m")
+            time.sleep(6)
     except Exception as e:
         print(f"tab peek error: {e}")
         time.sleep(2)

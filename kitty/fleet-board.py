@@ -803,9 +803,25 @@ def claude_meta(pid):
         return None, None, None
 
 
+def kitty_ls(sock):
+    """`kitten @ ls`, diagnosing the control-socket wedge instead of a JSON error."""
+    out = subprocess.run([KITTEN, "@", "--to", f"unix:{sock}", "ls"],
+                         capture_output=True, text=True, timeout=5).stdout
+    if not out.strip():
+        pid = sock.rsplit("-", 1)[-1]
+        try:
+            conns = subprocess.run(["/usr/sbin/lsof", "-p", pid], capture_output=True,
+                                   text=True, timeout=10).stdout.count("kitty-ctl")
+        except Exception:
+            conns = "?"
+        raise SystemExit(f"kitty control socket is WEDGED ({conns} leaked connections, "
+                         f"pid {pid}) — restart kitty to recover; sessions restore via "
+                         f"claude-restore.session")
+    return json.loads(out)
+
+
 def gather(sock, kpid, feed_n):
-    ls = json.loads(subprocess.run([KITTEN, "@", "--to", f"unix:{sock}", "ls"],
-                                   capture_output=True, text=True, timeout=5).stdout)
+    ls = kitty_ls(sock)
     cards = []
     for osw in ls:
         for tab in osw.get("tabs", []):
@@ -1365,6 +1381,10 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except SystemExit as e:  # deliberate diagnosis (e.g. wedged control socket)
+        if e.code and not isinstance(e.code, int):
+            print(f"\033[38;2;240;128;60m{e.code}\033[0m")
+            time.sleep(6)
     except Exception as e:
         print(f"fleet board error: {e}")
         time.sleep(2)
