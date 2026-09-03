@@ -17,7 +17,10 @@ Built 2026-07-09/10. Everything is event-driven — no daemons, no timers.
   without switching, `⌘⇧X` open a Claude about whatever is on screen,
   `⌘⇧K` self-updating keybind cheatsheet. The board is
   mouse-aware: click a card to jump, hover one for a live peek of that tab,
-  click the yard to pet the cat; `/` filters cards fuzzily (enter jumps).
+  click the yard to pet the cat; `/` filters cards fuzzily (enter jumps);
+  `:` opens a command palette of every fleet action; `d` toggles compact
+  one-line cards. Closing a Claude session prints a two-line exit receipt
+  (duration · cost · resume command).
   `⌘⇧M` previews any on-screen file path in-terminal (glow for markdown).
 
 ## Charm lane

@@ -68,6 +68,20 @@ TAILS = ["ﾉ~", "ﾉ,", "ﾉ~", "ﾉ`"]
 
 # ── pixel-art sprite mode (toggle with `s` inside the board) ──────────
 CAT_MODE_FILE = os.path.expanduser("~/.config/kitty/.fleet-cat-mode")
+DENSITY_FILE = "/tmp/claude-kitty-status/board-density"
+_NK = os.path.expanduser("~/Documents/GlowDevelopment/nekotron")
+PALETTE = [
+    ("jump to the session that needs you", "run_quit", _NK + "/kitty/jump-attention.sh"),
+    ("broadcast to every Claude", "overlay", _NK + "/kitty/fleet-say.py"),
+    ("peek a tab", "overlay", _NK + "/kitty/fleet-peek.py"),
+    ("keybind cheatsheet", "overlay", _NK + "/kitty/keys-help.py"),
+    ("snapshot workspace now", "run", _NK + "/bin/kitty-claude-snapshot.sh"),
+    ("board-shot \u2192 Desktop PNG", "run", _NK + "/bin/board-shot"),
+    ("theme day/night shift", "run", _NK + "/kitty/nekotron-theme.sh"),
+    ("toggle compact density", "density", ""),
+    ("toggle pixel/ascii cat", "sprite", ""),
+    ("pet the cat", "pet", ""),
+]
 PAL = {"D": (74, 50, 22, 255), "O": (255, 182, 92, 255), "S": (199, 126, 46, 255),
        "W": (240, 236, 255, 255), "P": (255, 95, 168, 255), "B": (24, 26, 40, 255)}
 SPRITE_MAPS = {
@@ -1080,6 +1094,7 @@ def ops_column(cards, v, width, tall, frame):
         L.append("")
 
     L.append(P(f" {DIM}1-9 jump · ⌘⇧A attention · ⌘⇧B broadcast{RST}"))
+    L.append(P(f" {DIM}/ filter · : palette · d density{RST}"))
     L.append(P(f" {DIM}s cat · c pet · ⌘⇧K keys · other exits{RST}"))
     return L, gauges, gauge_rel, chart_rel
 
@@ -1151,7 +1166,8 @@ def _match(filt, c):
     return all(ch in it for ch in filt.lower())  # fzf-style subsequence
 
 
-def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek=None):
+def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek=None,
+                compact=False, pal=None):
     """Full frame string + the cat yard geometry for partial repaints."""
     right_w = 46
     hdr_f = (f"{AMBER}/{filt}\u258e{RST}  {DIM}{len(cards)} match \u00b7 enter jumps \u00b7 esc clears{RST}"
@@ -1183,6 +1199,24 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
         bg = PANEL_HI if c["focused"] else PANEL
         card_start = len(left)
         Pc = lambda content: panel_row(content, left_w, bg)
+        if compact:  # one row per session
+            b = BOLD if c["focused"] else ""
+            row_idx = len(left)
+            if c.get("sid"):
+                card_marks.append((row_idx, 2, f"icon:{c['sid']}|{c['repo'] or ''}"))
+            ctxs = ""
+            if c.get("ctx") is not None:
+                cc = DIM if c["ctx"] < 70 else (AMBER if c["ctx"] < 88 else ST["attention"][0])
+                card_marks.append((row_idx, left_w - 22, f"ring:{5 * round(c['ctx'] / 5)},{'good' if c['ctx'] < 70 else ('warn' if c['ctx'] < 88 else 'bad')}"))
+                ctxs = f"{cc}{c['ctx']:>2}%{RST}    "
+            age = fmt_age(now - c["s_epoch"]) if c["s_epoch"] else ""
+            head = f"    {b}{INK}{c.get('idx', i)}{RST} {hue}\u258e{RST}{color}{glyph}{RST} {b}{INK}{c['title'][:left_w - 52]}{RST}"
+            tail = ctxs + pill(f" {label} ", PILL_BG[c["state"]], panel=bg) + (f" {DIM}{age:<4}{RST}" if age else "")
+            gap = left_w - 2 - vlen(head) - vlen(tail)
+            left.append(Pc(head + " " * max(1, gap) + tail))
+            card_spans.append((card_start, 1, c["focused"], c.get("idx", i)))
+            left.append("")
+            continue
         age = fmt_age(now - c["s_epoch"]) if c["s_epoch"] else ""
         ctxs = ""
         if c.get("ctx") is not None:
@@ -1214,7 +1248,22 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
         card_spans.append((card_start, len(left) - card_start, c["focused"], c.get("idx", i)))
         left.append("")
 
-    if peek:  # hover-peek: the right column becomes a live glimpse of that tab
+    if pal is not None:  # command palette owns the right column
+        gauges, gauge_rel, chart_rel = None, None, None
+        q, acts = pal
+        right = ["", ""]
+        right.append(f"   {CYAN}\u2318{RST} {BOLD}{INK}palette{RST}   {DIM}enter runs top \u00b7 esc closes{RST}")
+        right.append(f"   {AMBER}: {q}\u258e{RST}")
+        right.append("   " + FAINT + "\u2500" * (right_w - 8) + RST)
+        for j, lbl in enumerate(acts[: rows - 12]):
+            mk = f"{MAG}\u25b8{RST} " if j == 0 else "  "
+            cl = INK if j == 0 else DIM
+            right.append(f"   {mk}{cl}{lbl}{RST}")
+        if not acts:
+            right.append(f"   {DIM}(no matching action){RST}")
+        ops_lines = right[2:]
+        yard_top, yard_col, yard_h = len(right) + 2, left_w + 6, 0
+    elif peek:  # hover-peek: the right column becomes a live glimpse of that tab
         gauges, gauge_rel, chart_rel = None, None, None
         right = ["", ""]
         right.append(f"   {CYAN}\u2316{RST} {BOLD}{INK}{vtrunc(peek['title'], right_w - 12)}{RST}")
@@ -1270,7 +1319,7 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
         pb = (now_t.tm_hour * 3600 + now_t.tm_min * 60) * 144 // 86400
         mood_cells = len(fleet_mode(cards)[1]) + 2
         placements.append((yard_top, yard_col, right_w - 2, yard_h, f"dio:{pb}:{mood_cells}"))
-    if peek:  # the peek column owns the right side: evict ring + cat images
+    if peek or pal is not None:  # right column repurposed: evict ring + cat images
         for gid in sorted(_gauge_placed):
             frame_str += _gfx({"a": "d", "d": "i", "i": gid, "q": 2})
         _gauge_placed.clear()
@@ -1370,6 +1419,8 @@ def main():
     choice = None
     peek_on = False
     filt = None
+    pal = None
+    compact = os.path.exists(DENSITY_FILE)
     hover_idx = None
     hover_since = 0
     peek = None
@@ -1394,13 +1445,17 @@ def main():
             except Exception:
                 fails += 1  # keep showing the previous data; retry later
             vis = cards if filt is None else [c for c in cards if _match(filt, c)]
-            if interactive and bool(peek) != peek_on:
-                peek_on = bool(peek)
+            pal_view = None
+            if pal is not None:
+                pal_view = (pal, [l for l, _k, _a in PALETTE if _match(pal, {"title": l})])
+            if interactive and (bool(peek) or pal is not None) != peek_on:
+                peek_on = bool(peek) or pal is not None
                 sys.stdout.write("\033[2J")
                 geo = None
                 full = True
             if full:
-                frame_str, geo = build_frame(vis, v, ts.columns, ts.lines, tall, frame, mode, filt, peek)
+                frame_str, geo = build_frame(vis, v, ts.columns, ts.lines, tall, frame, mode, filt, peek,
+                                             compact, pal_view)
                 sys.stdout.write(frame_str)
             elif mode == "ascii" and peek is None:
                 sys.stdout.write(yard_patch(vis, geo, frame))
@@ -1438,7 +1493,50 @@ def main():
                                 except Exception:
                                     pass
                     for ch in keys:
-                        if filt is not None:  # filter mode: typing edits the query
+                        if pal is not None:  # palette mode: typing filters actions
+                            if ch == "\x1b":
+                                pal, geo = None, None
+                            elif ch in ("\r", "\n"):
+                                acts = [(l, k, a) for l, k, a in PALETTE if _match(pal, {"title": l})]
+                                pal, geo = None, None
+                                if acts:
+                                    _lbl, kind, arg = acts[0]
+                                    if kind == "pet":
+                                        globals()["_pet_until"] = frame + 30
+                                    elif kind == "sprite":
+                                        mode = "sprite" if mode == "ascii" else "ascii"
+                                        try:
+                                            with open(CAT_MODE_FILE, "w") as f:
+                                                f.write(mode)
+                                        except OSError:
+                                            pass
+                                        sys.stdout.write(_gfx({"a": "d", "d": "A", "q": 2}))
+                                        _transmitted.clear()
+                                        globals()["_prev_sprite"] = None
+                                    elif kind == "density":
+                                        compact = not compact
+                                        try:
+                                            open(DENSITY_FILE, "w").close() if compact else os.unlink(DENSITY_FILE)
+                                        except OSError:
+                                            pass
+                                    elif kind == "run":
+                                        subprocess.Popen([arg], stdout=subprocess.DEVNULL,
+                                                         stderr=subprocess.DEVNULL)
+                                    elif kind in ("overlay", "run_quit"):
+                                        if kind == "overlay":
+                                            subprocess.Popen([KITTEN, "@", "--to", f"unix:{sock}", "launch",
+                                                              "--type=overlay", arg],
+                                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                        else:
+                                            subprocess.Popen([arg], stdout=subprocess.DEVNULL,
+                                                             stderr=subprocess.DEVNULL)
+                                        quit_ = True
+                            elif ch in ("\x7f", "\x08"):
+                                pal, geo = (pal[:-1] if pal else None), None
+                            elif ch.isprintable():
+                                pal += ch
+                                geo = None
+                        elif filt is not None:  # filter mode: typing edits the query
                             if ch == "\x1b":
                                 filt, geo = None, None
                             elif ch in ("\r", "\n"):
@@ -1452,6 +1550,15 @@ def main():
                                 geo = None
                         elif ch == "/":
                             filt, geo = "", None
+                        elif ch == ":":
+                            pal, geo = "", None
+                        elif ch == "d":
+                            compact = not compact
+                            try:
+                                open(DENSITY_FILE, "w").close() if compact else os.unlink(DENSITY_FILE)
+                            except OSError:
+                                pass
+                            geo = None
                         elif ch == "c":
                             globals()["_pet_until"] = frame + 30
                             try:
