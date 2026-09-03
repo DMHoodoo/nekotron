@@ -5,6 +5,6 @@ f="$1"
 [ -e "$f" ] || { echo "not a file here: $f"; sleep 1.5; exit 1; }
 GLOW="$(command -v glow || echo /opt/homebrew/bin/glow)"
 case "$f" in
-    *.md|*.markdown|*.mdx) exec "$GLOW" -p "$f" ;;
+    *.md|*.markdown|*.mdx) exec "$GLOW" -p -s "$HOME/Documents/GlowDevelopment/nekotron/glow/nekotron.json" "$f" ;;
     *) exec /usr/bin/less -R "$f" ;;
 esac

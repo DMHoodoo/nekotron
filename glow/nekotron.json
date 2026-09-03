@@ -1,0 +1,50 @@
+{
+  "document": {
+    "block_prefix": "\n",
+    "block_suffix": "\n",
+    "color": "#d7deff",
+    "margin": 2
+  },
+  "block_quote": { "indent": 1, "indent_token": "│ ", "color": "#6b7394", "italic": true },
+  "paragraph": {},
+  "list": { "level_indent": 2 },
+  "heading": { "block_suffix": "\n", "color": "#5fe9df", "bold": true },
+  "h1": { "block_prefix": "\n", "prefix": "  ", "suffix": "  ", "color": "#0a0d18", "background_color": "#5fe9df", "bold": true },
+  "h2": { "block_prefix": "\n", "prefix": "", "color": "#5fe9df", "bold": true, "underline": true },
+  "h3": { "prefix": "", "color": "#ffb65c", "bold": true },
+  "h4": { "prefix": "", "color": "#e8ecff", "bold": true },
+  "h5": { "prefix": "", "color": "#6b7394", "bold": true },
+  "h6": { "prefix": "", "color": "#6b7394" },
+  "text": {},
+  "strong": { "bold": true, "color": "#e8ecff" },
+  "emph": { "italic": true, "color": "#ffb65c" },
+  "strikethrough": { "crossed_out": true },
+  "hr": { "color": "#3a4160", "format": "\n──────────────────────────────\n" },
+  "item": { "block_prefix": "• " },
+  "enumeration": { "block_prefix": ". " },
+  "task": { "ticked": "✓ ", "unticked": "· " },
+  "link": { "color": "#5fe9df", "underline": true },
+  "link_text": { "color": "#ffb65c", "bold": true },
+  "image": { "color": "#ff5fa8", "underline": true },
+  "image_text": { "color": "#6b7394", "format": "image: {{.text}}" },
+  "code": { "color": "#ffb65c", "background_color": "#1b2542" },
+  "code_block": {
+    "margin": 2,
+    "chroma": {
+      "text": { "color": "#d7deff" },
+      "keyword": { "color": "#5fe9df" },
+      "name_function": { "color": "#ffb65c" },
+      "name_builtin": { "color": "#ffb65c" },
+      "literal_string": { "color": "#7ee787" },
+      "literal_number": { "color": "#ff5fa8" },
+      "comment": { "color": "#6b7394" },
+      "background": { "background_color": "#10162b" }
+    }
+  },
+  "table": { "center_separator": "┼", "column_separator": "│", "row_separator": "─" },
+  "definition_list": {},
+  "definition_term": { "bold": true, "color": "#5fe9df" },
+  "definition_description": {},
+  "html_block": {},
+  "html_span": {}
+}
