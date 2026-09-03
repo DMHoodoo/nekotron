@@ -12,5 +12,14 @@ prompt="$*"
 
 $prompt"
 # always hand the prompt over stdin: ollama run ignores the arg when stdin
-# is not a tty, so the arg form breaks piped and scripted use
-printf '%s' "$prompt" | "$OLLAMA" run --think=false gemma4:latest
+# is not a tty, so the arg form breaks piped and scripted use.
+# On a tty, typeset the (markdown) answer through glow.
+GLOW="$(command -v glow || echo /opt/homebrew/bin/glow)"
+STYLE="$HOME/Documents/GlowDevelopment/nekotron/glow/nekotron.json"
+if [ -t 1 ] && [ -x "$GLOW" ]; then
+    printf '%s' "$prompt" | "$OLLAMA" run --think=false gemma4:latest \
+        | /usr/bin/perl -pe 's/\x1b\[[0-9;?]*[A-Za-z]//g; s/\r//g' \
+        | CLICOLOR_FORCE=1 "$GLOW" -s "$STYLE" -w $(( $(tput cols 2>/dev/null || echo 100) - 4 )) -
+else
+    printf '%s' "$prompt" | "$OLLAMA" run --think=false gemma4:latest
+fi

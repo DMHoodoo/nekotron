@@ -1,0 +1,16 @@
+#!/bin/bash
+# md-shot — render a markdown file (Nekotron glow style) to a shareable PNG.
+#   md-shot brief.md [out.png]
+f="$1"
+[ -f "$f" ] || { echo "usage: md-shot <file.md> [out.png]"; exit 1; }
+out="${2:-$HOME/Desktop/$(basename "${f%.*}")-$(date +%H%M%S).png}"
+FREEZE="$(command -v freeze || echo /opt/homebrew/bin/freeze)"
+GLOW="$(command -v glow || echo /opt/homebrew/bin/glow)"
+STYLE="$HOME/Documents/GlowDevelopment/nekotron/glow/nekotron.json"
+# freeze --execute doesn't go through a shell — hand it a tiny script
+tmp=$(mktemp /tmp/md-shot.XXXXXX)
+printf '#!/bin/sh\nCLICOLOR_FORCE=1 exec "%s" -s "%s" -w 100 "%s" </dev/null\n' \
+    "$GLOW" "$STYLE" "$(cd "$(dirname "$f")" && pwd)/$(basename "$f")" > "$tmp"
+chmod +x "$tmp"
+"$FREEZE" --execute "$tmp" --output "$out" && echo "🧊 $out" && open -R "$out"
+rc=$?; rm -f "$tmp"; exit $rc

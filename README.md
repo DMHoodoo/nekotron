@@ -31,6 +31,21 @@ Built 2026-07-09/10. Everything is event-driven — no daemons, no timers.
 - **`board-shot [out.png]`** — freeze the fleet board's text layer to a PNG.
 - **`md`** — alias for `glow -p` (markdown pager).
 - **`docs/demo.tape`** — vhs recording script (`vhs docs/demo.tape`).
+
+## Markdown lane
+
+All rendering uses the Nekotron glamour style (`glow/nekotron.json`,
+exported as `GLAMOUR_STYLE`): real headings, palette-matched, no `##`.
+
+- **`mdv <file.md>`** — full-fat viewer: glow text + `![images]()` drawn
+  inline via kitty icat + ```mermaid fences rendered to real diagrams
+  (mmdc, dark theme). Scrolls in normal scrollback.
+- **`md <file.md>`** — styled pager (also behind `⌘⇧M` path-hints).
+- **`docs [dir]`** — glow's library browser over a directory of markdown.
+- **`slides <file.md>`** — terminal presentation; `---` = slide breaks.
+- **`md-shot <file.md> [out.png]`** — styled PNG of a doc (for Slack).
+- **`q`** answers are typeset through glow on a tty.
+- **`docs/showcase.md`** — one document that exercises all of the above.
 - **Session safety** — crash-proof workspace restore (startup_session +
   auto-snapshots), session ledger (TSV black box), fleet-grep transcript
   search, cost ledger + costs command, context watchdog (purr at 90%),

@@ -13,3 +13,4 @@ alias theme="$HOME/Documents/GlowDevelopment/nekotron/kitty/nekotron-theme.sh"
 alias costs="$HOME/bin/claude-costs"
 export GLAMOUR_STYLE="$HOME/Documents/GlowDevelopment/nekotron/glow/nekotron.json"
 alias md="glow -p"
+docs() { glow "${1:-.}"; }  # markdown library browser (styled via GLAMOUR_STYLE)
