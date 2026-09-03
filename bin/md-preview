@@ -5,6 +5,10 @@ f="${1/#\~/$HOME}"   # hints hands paths over verbatim — expand a leading ~
 [ -e "$f" ] || { echo "not a file here: $f"; sleep 1.5; exit 1; }
 GLOW="$(command -v glow || echo /opt/homebrew/bin/glow)"
 case "$f" in
-    *.md|*.markdown|*.mdx) exec "$GLOW" -p -s "$HOME/Documents/GlowDevelopment/nekotron/glow/nekotron.json" "$f" ;;
+    *.md|*.markdown|*.mdx)
+        "$HOME/Documents/GlowDevelopment/nekotron/bin/mdv" "$f"
+        printf '\n\033[38;2;107;115;148m— any key to close (wheel scrolls) —\033[0m'
+        IFS= read -rsn1
+        exit 0 ;;
     *) exec /usr/bin/less -R "$f" ;;
 esac

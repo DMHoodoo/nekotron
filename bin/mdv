@@ -42,19 +42,45 @@ def show_image(path, alt):
     print(f"  {DIM}[image: {alt or os.path.basename(path)}]{RST}\n")
 
 
+CACHE = os.path.expanduser("~/.cache/nekotron/mermaid")
+
+
+def _mmdc_env():
+    """mmdc is a node script; overlays get a minimal PATH without node."""
+    import glob
+    env = dict(os.environ)
+    have = env.get("PATH", "").split(":")
+    extra = ["/opt/homebrew/bin", "/usr/local/bin"]
+    node_bins = sorted(glob.glob(os.path.expanduser("~/.nvm/versions/node/*/bin")))
+    if node_bins:
+        extra.append(node_bins[-1])
+    env["PATH"] = ":".join([e for e in extra if e not in have] + have)
+    return env
+
+
 def show_mermaid(code, width):
-    if os.path.exists(MMDC) or shutil.which("mmdc"):
-        with tempfile.TemporaryDirectory() as td:
-            src = os.path.join(td, "d.mmd")
-            out = os.path.join(td, "d.png")
-            open(src, "w").write(code)
-            r = subprocess.run([MMDC, "-i", src, "-o", out, "-t", "dark",
+    # Render into a persistent cache: kitty icat hands the terminal a file
+    # PATH read asynchronously — a temp file is deleted before kitty reads
+    # it and the diagram silently never appears. Cache also = instant reuse.
+    import hashlib
+    os.makedirs(CACHE, exist_ok=True)
+    out = os.path.join(CACHE, hashlib.sha1(code.encode()).hexdigest()[:16] + ".png")
+    if not os.path.exists(out):
+        mmdc = shutil.which("mmdc") or MMDC
+        if os.path.exists(mmdc):
+            try:
+                with tempfile.NamedTemporaryFile("w", suffix=".mmd", delete=False) as tf:
+                    tf.write(code)
+                subprocess.run([mmdc, "-i", tf.name, "-o", out, "-t", "dark",
                                 "-b", "transparent", "-q", "--scale", "2"],
-                               capture_output=True, text=True, timeout=60)
-            if r.returncode == 0 and os.path.exists(out):
-                show_image(out, "")
-                return
-    glow_text(f"```\n{code}```\n", width)  # fallback: styled code block
+                               capture_output=True, text=True, timeout=90, env=_mmdc_env())
+                os.unlink(tf.name)
+            except Exception:
+                pass
+    if os.path.exists(out):
+        show_image(out, "")
+    else:
+        glow_text(f"```\n{code}```\n", width)  # fallback: styled code block
 
 
 def main():
