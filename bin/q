@@ -4,4 +4,8 @@
 #   q how do i undo a git commit      ·      cat err.log | q what broke
 [ $# -gt 0 ] || { echo "usage: q <question>   (or pipe stdin + question)"; exit 1; }
 CRUSH="$(command -v crush || echo /opt/homebrew/bin/crush)"
+# pin the model in ollama for 24h so the next q is warm (fire-and-forget;
+# without this ollama evicts after 5 idle minutes and every q pays ~60s)
+(/usr/bin/curl -s --max-time 2 http://localhost:11434/api/generate \
+    -d '{"model":"gemma4:latest","keep_alive":"24h"}' >/dev/null 2>&1 &)
 exec "$CRUSH" run -q "$*"
