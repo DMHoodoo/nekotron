@@ -1,0 +1,8 @@
+#!/bin/bash
+# qa — agentic LOCAL one-shot via crush (tools, file reads, sessions).
+# Slower than q (~40s: the agent preamble is real inference), still free.
+[ $# -gt 0 ] || { echo "usage: qa <task>"; exit 1; }
+CRUSH="$(command -v crush || echo /opt/homebrew/bin/crush)"
+(/usr/bin/curl -s --max-time 2 http://localhost:11434/api/generate \
+    -d '{"model":"gemma4:latest","keep_alive":"24h"}' >/dev/null 2>&1 &)
+exec "$CRUSH" run -q "$*"

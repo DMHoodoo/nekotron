@@ -1,11 +1,16 @@
 #!/bin/bash
-# q — quick LOCAL-model one-shot via crush + ollama (gemma4). Zero Claude
-# quota, zero API spend. First call after a while is slow (model load).
-#   q how do i undo a git commit      ·      cat err.log | q what broke
-[ $# -gt 0 ] || { echo "usage: q <question>   (or pipe stdin + question)"; exit 1; }
-CRUSH="$(command -v crush || echo /opt/homebrew/bin/crush)"
-# pin the model in ollama for 24h so the next q is warm (fire-and-forget;
-# without this ollama evicts after 5 idle minutes and every q pays ~60s)
+# q — quick LOCAL-model answer (ollama gemma4, direct). ~6s warm, free.
+# Pipe context in:  cat err.log | q what broke
+# For an AGENTIC local ask (tools, file access) use qa (crush lane).
+[ $# -gt 0 ] || { echo "usage: q <question>   (stdin becomes context)"; exit 1; }
+OLLAMA="$(command -v ollama || echo /usr/local/bin/ollama)"
+# keep the model pinned so the next q stays warm (ollama evicts after 5 min)
 (/usr/bin/curl -s --max-time 2 http://localhost:11434/api/generate \
     -d '{"model":"gemma4:latest","keep_alive":"24h"}' >/dev/null 2>&1 &)
-exec "$CRUSH" run -q "$*"
+prompt="$*"
+[ -t 0 ] || prompt="$(cat)
+
+$prompt"
+# always hand the prompt over stdin: ollama run ignores the arg when stdin
+# is not a tty, so the arg form breaks piped and scripted use
+printf '%s' "$prompt" | "$OLLAMA" run --think=false gemma4:latest

@@ -22,8 +22,10 @@ Built 2026-07-09/10. Everything is event-driven — no daemons, no timers.
 
 ## Charm lane
 
-- **`q <question>`** — one-shot answer from the LOCAL model (crush → ollama
-  gemma4); zero Claude quota, zero API spend. Config: `crush/crush.json`.
+- **`q <question>`** — sub-second answer from the LOCAL model (ollama gemma4,
+  direct, thinking off); pipe stdin for context. Zero Claude quota or spend.
+- **`qa <task>`** — agentic local one-shot via crush (tools, file access;
+  ~40s of preamble inference). Config: `crush/crush.json`.
 - **`resume`** — gum-powered fuzzy picker over the session ledger; resumes the
   chosen Claude session in the current window (● marks already-running).
 - **`board-shot [out.png]`** — freeze the fleet board's text layer to a PNG.
