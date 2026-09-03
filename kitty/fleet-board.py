@@ -306,11 +306,15 @@ def grad_bar(pct, cells=6):
     return "".join(out)
 
 
+_gauge_placed = set()  # ring image ids currently on screen
+
+
 def gauge_escapes(row, col, gauges):
     """Place antialiased ring PNGs at (row, col): [(pct, color, label), ...]."""
     out = []
     for i, (pct, color, _label) in enumerate(gauges):
         gid = 4300 + i
+        _gauge_placed.add(gid)
         out.append(_gfx({"a": "d", "d": "i", "i": gid, "q": 2}))
         out.append(_gfx({"a": "t", "f": 100, "i": gid, "q": 2}, _ring_png_cached(pct, color)))
         out.append(f"\033[{row};{col + i * 9}H")
@@ -1266,6 +1270,12 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
         pb = (now_t.tm_hour * 3600 + now_t.tm_min * 60) * 144 // 86400
         mood_cells = len(fleet_mode(cards)[1]) + 2
         placements.append((yard_top, yard_col, right_w - 2, yard_h, f"dio:{pb}:{mood_cells}"))
+    if peek:  # the peek column owns the right side: evict ring + cat images
+        for gid in sorted(_gauge_placed):
+            frame_str += _gfx({"a": "d", "d": "i", "i": gid, "q": 2})
+        _gauge_placed.clear()
+        if _prev_sprite is not None:
+            frame_str += _gfx({"a": "d", "d": "i", "i": _prev_sprite, "q": 2})
     frame_str += underlay_escapes(placements)
     return frame_str, (yard_top, yard_col, right_w - 2, yard_h)
 
@@ -1358,6 +1368,7 @@ def main():
     if interactive:
         sys.stdout.write("\033[?1003h\033[?1006h")  # SGR any-motion mouse tracking
     choice = None
+    peek_on = False
     filt = None
     hover_idx = None
     hover_since = 0
@@ -1383,6 +1394,11 @@ def main():
             except Exception:
                 fails += 1  # keep showing the previous data; retry later
             vis = cards if filt is None else [c for c in cards if _match(filt, c)]
+            if interactive and bool(peek) != peek_on:
+                peek_on = bool(peek)
+                sys.stdout.write("\033[2J")
+                geo = None
+                full = True
             if full:
                 frame_str, geo = build_frame(vis, v, ts.columns, ts.lines, tall, frame, mode, filt, peek)
                 sys.stdout.write(frame_str)
