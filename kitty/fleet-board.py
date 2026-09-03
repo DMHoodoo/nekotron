@@ -1147,6 +1147,51 @@ def cat_yard(cards, width, height, frame, sprite=False):
     return [pad(r, width) for r in rows[:height]] if height > 0 else []
 
 
+_WM_STOPS = [(95, 233, 223), (79, 142, 247), (255, 95, 168), (79, 142, 247)]
+_WM_BITS = {  # 5-row letterforms, one bit per cell column
+    "N": (7, [0b1100011, 0b1110011, 0b1101011, 0b1100111, 0b1100011]),
+    "E": (6, [0b111111, 0b110000, 0b111110, 0b110000, 0b111111]),
+    "K": (6, [0b110011, 0b110110, 0b111100, 0b110110, 0b110011]),
+    "O": (6, [0b111111, 0b110011, 0b110011, 0b110011, 0b111111]),
+    "T": (6, [0b111111, 0b001100, 0b001100, 0b001100, 0b001100]),
+    "R": (6, [0b111110, 0b110011, 0b111110, 0b110110, 0b110011]),
+}
+
+
+def _wm_grad(t):
+    t = t % 1.0
+    seg = t * (len(_WM_STOPS) - 1)
+    i = int(seg)
+    f = seg - i
+    a, b = _WM_STOPS[i], _WM_STOPS[min(i + 1, len(_WM_STOPS) - 1)]
+    return tuple(int(a[k] + (b[k] - a[k]) * f) for k in range(3))
+
+
+def _wm_fg(t):
+    r, g, b = _wm_grad(t)
+    return f"\033[38;2;{r};{g};{b}m"
+
+
+def _wm_hex(t):
+    r, g, b = _wm_grad(t)
+    return (r << 16) | (g << 8) | b
+
+
+def _wordmark_rows(phase, word="NEKOTRON", stretch_idx=6, extra=4):
+    """crush-style letterform wordmark, per-letter gradient, one stretched O."""
+    rows = ["", "", "", "", ""]
+    for i, chl in enumerate(word):
+        w, bits = _WM_BITS[chl]
+        col = _wm_fg(phase + i * 0.09)
+        for r in range(5):
+            row = "".join("\u2588" if bits[r] >> (w - 1 - b) & 1 else " " for b in range(w))
+            if i == stretch_idx:
+                mid = w // 2
+                row = row[:mid] + row[mid] * extra + row[mid:]
+            rows[r] += col + row + RST + " "
+    return rows
+
+
 _hit = {"cards": [], "left_w": 0, "yard": None}  # mouse hit-map, rebuilt per full frame
 
 
@@ -1175,15 +1220,16 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
     left_w = max(50, min(cols - right_w - 8, 150))
     left = [""]
     if tall:
-        left.append(f"  {AMBER}ᓚᘏᗢ{RST}  {BOLD}{CYAN}FLEET BOARD{RST}   {hdr_f or DIM + time.strftime('%A %b %-d') + RST}")
-        left.append("")
+        wm = _wordmark_rows(frame * 0.045)
         clock_rows = ["", "", "", "", ""]
         for ch in time.strftime("%H:%M"):
             g = DIGITS.get(ch)
             for i in range(5):
                 clock_rows[i] += g[i] + "  "
-        for row in clock_rows:
-            left.append(f"  {DKCYAN}{row}{RST}")
+        for r in range(5):
+            left.append("  " + wm[r] + "    " + DKCYAN + clock_rows[r] + RST)
+        left.append("")
+        left.append("  " + (hdr_f or f"{AMBER}\u14da\u160f\u15e2{RST}   {DIM}{time.strftime('%A %b %-d')} \u00b7 fleet board{RST}"))
         left.append("")
     else:
         left.append(f"  {AMBER}ᓚᘏᗢ{RST}  {BOLD}{CYAN}FLEET BOARD{RST}   {hdr_f or DIM + time.strftime('%a %H:%M') + RST}")
@@ -1195,6 +1241,7 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
         color, glyph, label = ST[c["state"]]
         if c["state"] == "working":
             glyph = SPIN[frame % len(SPIN)]
+            color = _wm_fg(frame * 0.02)
         hue = REPO_HUE.get(c["repo"], FAINT)
         bg = PANEL_HI if c["focused"] else PANEL
         card_start = len(left)
@@ -1211,7 +1258,9 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
                 ctxs = f"{cc}{c['ctx']:>2}%{RST}    "
             age = fmt_age(now - c["s_epoch"]) if c["s_epoch"] else ""
             head = f"    {b}{INK}{c.get('idx', i)}{RST} {hue}\u258e{RST}{color}{glyph}{RST} {b}{INK}{c['title'][:left_w - 52]}{RST}"
-            tail = ctxs + pill(f" {label} ", PILL_BG[c["state"]], panel=bg) + (f" {DIM}{age:<4}{RST}" if age else "")
+            tail = ctxs + pill(f" {label} ", PILL_BG[c["state"]],
+                           fg=(_wm_hex(frame * 0.02) if c["state"] == "working" else 0xE8ECFF),
+                           panel=bg) + (f" {DIM}{age:<4}{RST}" if age else "")
             gap = left_w - 2 - vlen(head) - vlen(tail)
             left.append(Pc(head + " " * max(1, gap) + tail))
             card_spans.append((card_start, 1, c["focused"], c.get("idx", i)))
@@ -1229,7 +1278,9 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
             card_marks.append((len(left) + 1, 2, f"icon:{c['sid']}|{c['repo'] or ''}"))
         b = BOLD if c["focused"] else ""
         head = f"    {b}{INK}{c.get('idx', i)}{RST} {hue}▎{RST}{color}{glyph}{RST} {b}{INK}{c['title'][:left_w - 48]}{RST}"
-        tail = ctxs + pill(f" {label} ", PILL_BG[c["state"]], panel=bg) + (f" {DIM}{age:<4}{RST}" if age else "")
+        tail = ctxs + pill(f" {label} ", PILL_BG[c["state"]],
+                           fg=(_wm_hex(frame * 0.02) if c["state"] == "working" else 0xE8ECFF),
+                           panel=bg) + (f" {DIM}{age:<4}{RST}" if age else "")
         gap = left_w - 2 - vlen(head) - vlen(tail)
         left.append(Pc(""))
         left.append(Pc(head + " " * max(1, gap) + tail))
@@ -1461,6 +1512,9 @@ def main():
                 sys.stdout.write(yard_patch(vis, geo, frame))
             if mode == "sprite" and peek is None:
                 sys.stdout.write(sprite_patch(vis, geo, frame))
+            if interactive and tall and not full:
+                wmp = _wordmark_rows(frame * 0.045)
+                sys.stdout.write("".join(f"\033[{2 + r};3H" + wmp[r] for r in range(5)))
             sys.stdout.flush()
             last_size = size
             if test_frames and frame >= test_frames:

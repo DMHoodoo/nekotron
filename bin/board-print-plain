@@ -1,4 +1,10 @@
 #!/bin/bash
-# fleet board text layer only — graphics APC escapes stripped (freeze/vhs food)
+# fleet board text layer as PLAIN LINES: graphics APC stripped, cursor
+# addressing converted to newlines (freeze/vhs only understand SGR).
 env COLUMNS=210 LINES=62 "$HOME/.config/kitty/fleet-board.py" --print \
-    | /usr/bin/perl -pe 's/\x1b_G[^\x1b]*\x1b\\//g'
+    | /usr/bin/perl -pe '
+        s/\x1b_G[^\x1b]*\x1b\\//g;        # kitty graphics APC
+        s/\x1b\[\d+;1H/\n/g;              # row starts -> newlines
+        s/\x1b\[\d+;\d+H//g;              # other cursor moves
+        s/\x1b\[[0-9]*[JK]//g;            # clears
+    '
