@@ -45,7 +45,7 @@ ST = {
 }
 SPIN = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 REPO_HUE = {"glow-platform": CYAN, "glow-core": MAG, "glow-aws-sync": AMBER}
-ANSI = re.compile(r"\033\[[0-9;]*m")
+ANSI = re.compile(r"\033\[[0-9;:]*m")
 
 DIGITS = {
     "0": ["██████", "██  ██", "██  ██", "██  ██", "██████"],
@@ -227,7 +227,7 @@ def vtrunc(s, limit):
     if vlen(s) <= limit:
         return s
     out, n = [], 0
-    for tok in re.split(r"(\033\[[0-9;]*m)", s):
+    for tok in re.split(r"(\033\[[0-9;:]*m)", s):
         if tok.startswith("\033["):
             out.append(tok)
             continue
@@ -897,7 +897,7 @@ def gather(sock, kpid, feed_n):
                     s_epoch = os.path.getmtime(sfile)
                 except OSError:
                     pass
-            cards.append({"sid": sid, "title": title[:80], "state": state, "s_epoch": s_epoch, "size": tsize,
+            cards.append({"sid": sid, "wid": wins[0].get("id"), "title": title[:80], "state": state, "s_epoch": s_epoch, "size": tsize,
                           "repo": next((r for r in REPO_HUE if r in cwd), None),
                           "meta": (meta + f" · ${scost:.2f}" if scost is not None and meta
                                    else (f"${scost:.2f}" if scost is not None else meta)),
@@ -1128,13 +1128,34 @@ def cat_yard(cards, width, height, frame, sprite=False):
     return [pad(r, width) for r in rows[:height]] if height > 0 else []
 
 
-def build_frame(cards, v, cols, rows, tall, frame, mode="ascii"):
+_hit = {"cards": [], "left_w": 0, "yard": None}  # mouse hit-map, rebuilt per full frame
+
+
+def _tag(cards):
+    for j, c in enumerate(cards, 1):
+        c["idx"] = j
+    return cards
+
+
+def _match(filt, c):
+    if not filt:
+        return True
+    hay = f"{c.get('title', '')} {c.get('repo') or ''} {c.get('meta') or ''}".lower()
+    if filt.lower() in hay:
+        return True
+    it = iter(hay)
+    return all(ch in it for ch in filt.lower())  # fzf-style subsequence
+
+
+def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek=None):
     """Full frame string + the cat yard geometry for partial repaints."""
     right_w = 46
+    hdr_f = (f"{AMBER}/{filt}\u258e{RST}  {DIM}{len(cards)} match \u00b7 enter jumps \u00b7 esc clears{RST}"
+             if filt is not None else None)
     left_w = max(50, min(cols - right_w - 8, 150))
     left = [""]
     if tall:
-        left.append(f"  {AMBER}ᓚᘏᗢ{RST}  {BOLD}{CYAN}FLEET BOARD{RST}   {DIM}{time.strftime('%A %b %-d')}{RST}")
+        left.append(f"  {AMBER}ᓚᘏᗢ{RST}  {BOLD}{CYAN}FLEET BOARD{RST}   {hdr_f or DIM + time.strftime('%A %b %-d') + RST}")
         left.append("")
         clock_rows = ["", "", "", "", ""]
         for ch in time.strftime("%H:%M"):
@@ -1145,7 +1166,7 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii"):
             left.append(f"  {DKCYAN}{row}{RST}")
         left.append("")
     else:
-        left.append(f"  {AMBER}ᓚᘏᗢ{RST}  {BOLD}{CYAN}FLEET BOARD{RST}   {DIM}{time.strftime('%a %H:%M')}{RST}")
+        left.append(f"  {AMBER}ᓚᘏᗢ{RST}  {BOLD}{CYAN}FLEET BOARD{RST}   {hdr_f or DIM + time.strftime('%a %H:%M') + RST}")
         left.append("")
     now = time.time()
     card_spans = []
@@ -1169,7 +1190,7 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii"):
         if c.get("sid"):
             card_marks.append((len(left) + 1, 2, f"icon:{c['sid']}|{c['repo'] or ''}"))
         b = BOLD if c["focused"] else ""
-        head = f"    {b}{INK}{i}{RST} {hue}▎{RST}{color}{glyph}{RST} {b}{INK}{c['title'][:left_w - 48]}{RST}"
+        head = f"    {b}{INK}{c.get('idx', i)}{RST} {hue}▎{RST}{color}{glyph}{RST} {b}{INK}{c['title'][:left_w - 48]}{RST}"
         tail = ctxs + pill(f" {label} ", PILL_BG[c["state"]], panel=bg) + (f" {DIM}{age:<4}{RST}" if age else "")
         gap = left_w - 2 - vlen(head) - vlen(tail)
         left.append(Pc(""))
@@ -1186,16 +1207,28 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii"):
                 txt = txt[: len(txt) - (vlen(txt) - (left_w - 17))] + "…"
             left.append(Pc(f"      {DIM}{fmt_age(now - e) if e else '':>4}{RST} {txt}{RST}"))
         left.append(Pc(""))
-        card_spans.append((card_start, len(left) - card_start, c["focused"]))
+        card_spans.append((card_start, len(left) - card_start, c["focused"], c.get("idx", i)))
         left.append("")
 
-    ops_lines, gauges, gauge_rel, chart_rel = ops_column(cards, v, right_w - 4, tall, frame)
-    right = [""] * (4 if not tall else 3) + ops_lines
-    yard_top = len(right) + 2          # 1-indexed row where the yard begins
-    yard_col = left_w + 6              # 1-indexed column of the right block
-    yard_h = max(0, min(10, rows - yard_top))  # perch under the keys, not the horizon
-    right += [""]
-    right += cat_yard(cards, right_w - 2, yard_h, frame, sprite=(mode == "sprite"))
+    if peek:  # hover-peek: the right column becomes a live glimpse of that tab
+        gauges, gauge_rel, chart_rel = None, None, None
+        right = ["", ""]
+        right.append(f"   {CYAN}\u2316{RST} {BOLD}{INK}{vtrunc(peek['title'], right_w - 12)}{RST}")
+        right.append(f"   {DIM}live \u00b7 click the card to jump{RST}")
+        right.append("   " + FAINT + "\u2500" * (right_w - 8) + RST)
+        for ln in peek["lines"][: rows - 8]:
+            right.append("   " + vtrunc(ln, right_w - 8))
+        ops_lines = right[2:]
+        yard_top, yard_col, yard_h = len(right) + 2, left_w + 6, 0
+    else:
+        ops_lines, gauges, gauge_rel, chart_rel = ops_column(cards, v, right_w - 4, tall, frame)
+        right = [""] * (4 if not tall else 3) + ops_lines
+        yard_top = len(right) + 2          # 1-indexed row where the yard begins
+        yard_col = left_w + 6              # 1-indexed column of the right block
+        yard_h = max(0, min(10, rows - yard_top))  # perch under the keys, not the horizon
+        right += [""]
+        right += cat_yard(cards, right_w - 2, yard_h, frame, sprite=(mode == "sprite"))
+        _hit["yard"] = (yard_top, yard_top + yard_h, yard_col)
 
     n_rows = max(len(left), len(right))
     left += [""] * (n_rows - len(left))
@@ -1213,7 +1246,9 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii"):
     placements = []
     if tall:
         placements.append((1, 1, min(cols, left_w + 5), 9, "aurora"))
-    for start, h, focused in card_spans:
+    _hit["cards"] = [(s + 1, s + h + 1, ix) for s, h, _f, ix in card_spans]
+    _hit["left_w"] = left_w
+    for start, h, focused, _ix in card_spans:
         if start + h + 1 < rows:
             placements.append((start + 1, 1, left_w, h + 1, "card_hi" if focused else "card"))
     for row, col, kind in card_marks:
@@ -1244,23 +1279,40 @@ def yard_patch(cards, geo, frame):
     return "".join(f"\033[{top + i};{col}H{row}\033[K" for i, row in enumerate(rows))
 
 
+def _sock_answers(s):
+    """A socket that accepts but never replies (starved/wedged kitty) is useless."""
+    try:
+        r = subprocess.run([KITTEN, "@", "--to", f"unix:{s}", "ls"],
+                           capture_output=True, text=True, timeout=3)
+        return bool(r.stdout.strip())
+    except Exception:
+        return False
+
+
 def _live_sock():
-    """Newest socket whose kitty is actually alive; unlink corpses."""
-    best = None
+    cands = []
+    kp = os.environ.get("KITTY_PID")
+    if kp and os.path.exists(f"/tmp/kitty-ctl-{kp}"):
+        cands.append(f"/tmp/kitty-ctl-{kp}")  # our own kitty first
     for s in sorted(glob.glob("/tmp/kitty-ctl-*"), key=os.path.getmtime, reverse=True):
-        pid = s.rsplit("-", 1)[-1]
+        if s not in cands:
+            cands.append(s)
+    best = None
+    for s in cands:
         try:
-            os.kill(int(pid), 0)
-            if best is None:
-                best = s
+            os.kill(int(s.rsplit("-", 1)[-1]), 0)
         except (ValueError, ProcessLookupError):
             try:
                 os.unlink(s)  # crash leftover
             except OSError:
                 pass
+            continue
         except PermissionError:
-            if best is None:
-                best = s
+            pass
+        if best is None:
+            best = s  # liveliest fallback if none answer
+        if _sock_answers(s):
+            return s
     return best
 
 
@@ -1278,7 +1330,7 @@ def main():
 
     ts = shutil.get_terminal_size((140, 40))
     feed_n = max(1, min(4, (ts.lines - 14) // 6 - 3))
-    cards = gather(sock, kpid, feed_n)
+    cards = _tag(gather(sock, kpid, feed_n))
     v = vitals()
 
     mode = cat_mode()
@@ -1303,7 +1355,13 @@ def main():
         old = termios.tcgetattr(fd)
         tty.setraw(fd)
     sys.stdout.write("\033[?25l\033[2J")
+    if interactive:
+        sys.stdout.write("\033[?1003h\033[?1006h")  # SGR any-motion mouse tracking
     choice = None
+    filt = None
+    hover_idx = None
+    hover_since = 0
+    peek = None
     frame = 0
     geo = None
     last_size = None
@@ -1318,58 +1376,124 @@ def main():
                 every = 20 if fails < 2 else 150  # back off hard when kitty is slow
                 if frame and frame % every == 0:
                     feed_n = max(1, min(4, (ts.lines - 14) // max(1, len(cards) or 1) - 3))
-                    cards = gather(sock, kpid, feed_n)
+                    cards = _tag(gather(sock, kpid, feed_n))
                     fails = 0
                 if frame and frame % 60 == 0:  # vitals every ~6s
                     v = vitals()
             except Exception:
                 fails += 1  # keep showing the previous data; retry later
+            vis = cards if filt is None else [c for c in cards if _match(filt, c)]
             if full:
-                frame_str, geo = build_frame(cards, v, ts.columns, ts.lines, tall, frame, mode)
+                frame_str, geo = build_frame(vis, v, ts.columns, ts.lines, tall, frame, mode, filt, peek)
                 sys.stdout.write(frame_str)
-            elif mode == "ascii":
-                sys.stdout.write(yard_patch(cards, geo, frame))
-            if mode == "sprite":
-                sys.stdout.write(sprite_patch(cards, geo, frame))
+            elif mode == "ascii" and peek is None:
+                sys.stdout.write(yard_patch(vis, geo, frame))
+            if mode == "sprite" and peek is None:
+                sys.stdout.write(sprite_patch(vis, geo, frame))
             sys.stdout.flush()
             last_size = size
+            if (interactive and hover_idx is not None and frame - hover_since >= 3
+                    and (peek is None or peek["idx"] != hover_idx
+                         or time.monotonic() - peek["t"] > 1.0)):
+                pc = next((c for c in cards if c.get("idx") == hover_idx), None)
+                if pc and pc.get("wid"):
+                    try:
+                        gt = subprocess.run([KITTEN, "@", "--to", f"unix:{sock}", "get-text",
+                                             "--match", f"id:{pc['wid']}", "--ansi", "--extent", "screen"],
+                                            capture_output=True, text=True, timeout=3)
+                        if gt.returncode == 0:
+                            peek = {"idx": hover_idx, "title": pc["title"],
+                                    "lines": gt.stdout.splitlines(), "t": time.monotonic()}
+                            geo = None  # full redraw carries the peek column
+                    except Exception:
+                        pass
             if test_frames and frame >= test_frames:
                 break
             if interactive:
                 r, _, _ = select.select([sys.stdin], [], [], 0.1)
                 if r:
-                    ch = sys.stdin.read(1)
-                    if ch == "c":
-                        globals()["_pet_until"] = frame + 30
-                        try:
-                            subprocess.Popen(["/usr/bin/afplay", "/System/Library/Sounds/Purr.aiff"],
-                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        except Exception:
-                            pass
-                        frame += 1
-                        continue
-                    if ch == "s":
-                        mode = "sprite" if mode == "ascii" else "ascii"
-                        try:
-                            with open(CAT_MODE_FILE, "w") as f:
-                                f.write(mode)
-                        except OSError:
-                            pass
-                        sys.stdout.write(_gfx({"a": "d", "d": "A", "q": 2}))
-                        _transmitted.clear()
-                        globals()["_prev_sprite"] = None
-                        geo = None  # force full redraw next tick
-                        frame += 1
-                        continue
-                    if ch.isdigit() and 0 < int(ch) <= len(cards):
-                        choice = int(ch)
-                    break
+                    data = os.read(fd, 64).decode("utf-8", "replace")
+                    while select.select([sys.stdin], [], [], 0.004)[0]:
+                        more = os.read(fd, 512)
+                        if not more:
+                            break
+                        data += more.decode("utf-8", "replace")
+                    mouse = re.findall(r"\x1b\[<(\d+);(\d+);(\d+)([Mm])", data)
+                    keys = re.sub(r"\x1b\[<\d+;\d+;\d+[Mm]", "", data)
+                    quit_ = False
+                    for mb_, mx_, my_, kind in mouse:
+                        mb_, mx_, my_ = int(mb_), int(mx_), int(my_)
+                        if kind == "M" and mb_ == 0:  # left click
+                            hitc = next((ix for r0, r1, ix in _hit["cards"]
+                                         if r0 <= my_ <= r1 and mx_ <= _hit["left_w"] + 2), None)
+                            if hitc:
+                                choice = hitc
+                            elif (_hit["yard"] and peek is None and mx_ >= _hit["yard"][2]
+                                  and _hit["yard"][0] <= my_ <= _hit["yard"][1]):
+                                globals()["_pet_until"] = frame + 30  # click the yard = pet
+                                try:
+                                    subprocess.Popen(["/usr/bin/afplay", "/System/Library/Sounds/Purr.aiff"],
+                                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                except Exception:
+                                    pass
+                    mot = [m for m in mouse if int(m[0]) & 32]
+                    if mot and choice is None:
+                        mx_, my_ = int(mot[-1][1]), int(mot[-1][2])
+                        h2 = next((ix for r0, r1, ix in _hit["cards"]
+                                   if r0 <= my_ <= r1 and mx_ <= _hit["left_w"] + 2), None)
+                        if h2 != hover_idx:
+                            hover_idx, hover_since = h2, frame
+                            if h2 is None and peek is not None:
+                                peek, geo = None, None  # pointer left the cards: restore ops + yard
+                    for ch in keys:
+                        if filt is not None:  # filter mode: typing edits the query
+                            if ch == "\x1b":
+                                filt, geo = None, None
+                            elif ch in ("\r", "\n"):
+                                vis0 = [c for c in cards if _match(filt, c)]
+                                if vis0:
+                                    choice = vis0[0]["idx"]
+                            elif ch in ("\x7f", "\x08"):
+                                filt, geo = (filt[:-1] if filt else None), None
+                            elif ch.isprintable():
+                                filt += ch
+                                geo = None
+                        elif ch == "/":
+                            filt, geo = "", None
+                        elif ch == "c":
+                            globals()["_pet_until"] = frame + 30
+                            try:
+                                subprocess.Popen(["/usr/bin/afplay", "/System/Library/Sounds/Purr.aiff"],
+                                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            except Exception:
+                                pass
+                        elif ch == "s":
+                            mode = "sprite" if mode == "ascii" else "ascii"
+                            try:
+                                with open(CAT_MODE_FILE, "w") as f:
+                                    f.write(mode)
+                            except OSError:
+                                pass
+                            sys.stdout.write(_gfx({"a": "d", "d": "A", "q": 2}))
+                            _transmitted.clear()
+                            globals()["_prev_sprite"] = None
+                            geo = None  # force full redraw next tick
+                        elif ch.isdigit():
+                            sel = 10 if ch == "0" else int(ch)
+                            if 0 < sel <= len(cards):
+                                choice = sel
+                        elif ch == "\x1b" and (peek is not None or hover_idx is not None):
+                            hover_idx, peek, geo = None, None, None
+                        else:
+                            quit_ = True
+                    if choice is not None or quit_:
+                        break
             else:
                 time.sleep(0.1 if watch else 0.02)
             frame += 1
     finally:
         sys.stdout.write(_gfx({"a": "d", "d": "A", "q": 2}))  # clear our sprites
-        sys.stdout.write("\033[?25h\033[0m")
+        sys.stdout.write("\033[?1003l\033[?1006l\033[?25h\033[0m")
         if old is not None:
             import termios
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old)

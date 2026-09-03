@@ -1,0 +1,29 @@
+#!/bin/bash
+# resume — fuzzy-pick a recent Claude session (Nekotron ledger) and resume
+# it in THIS window. gum gives the filter UI; ● marks already-running ones.
+led="$HOME/.claude/session-ledger.tsv"
+[ -f "$led" ] || { echo "no session ledger yet"; exit 1; }
+GUM="$(command -v gum || echo /opt/homebrew/bin/gum)"
+
+running=""
+for f in "$HOME"/.claude/sessions/*.json; do
+    [ -f "$f" ] || continue
+    pid=$(basename "$f" .json)
+    kill -0 "$pid" 2>/dev/null && running+=" $(python3 -c "import json;print(json.load(open('$f')).get('sessionId',''))" 2>/dev/null)"
+done
+
+pick=$(tail -r "$led" | awk -F'\t' '!seen[$2]++ {print}' | head -60 \
+    | while IFS=$'\t' read -r dt sid cwd _win _src; do
+        mark="·"; case "$running" in *"$sid"*) mark="●";; esac
+        printf "%s %s  %.8s  %s\n" "$mark" "$dt" "$sid" "${cwd/#$HOME/~}"
+    done | "$GUM" filter --height 20 --placeholder "resume which session?")
+[ -n "$pick" ] || exit 0
+
+short=$(awk '{print $4}' <<< "$pick")
+full=$(awk -F'\t' -v s="$short" '$2 ~ "^"s {print $2; exit}' "$led")
+cwd=$(awk -F'\t' -v s="$short" '$2 ~ "^"s {print $3; exit}' "$led")
+case "$pick" in
+    "●"*) "$GUM" confirm "session is ALREADY RUNNING in another tab — resume anyway?" || exit 0 ;;
+esac
+cd "$cwd" 2>/dev/null || cd "$HOME"
+exec claude --resume "$full"

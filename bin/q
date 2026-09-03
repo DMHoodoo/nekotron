@@ -1,0 +1,7 @@
+#!/bin/bash
+# q — quick LOCAL-model one-shot via crush + ollama (gemma4). Zero Claude
+# quota, zero API spend. First call after a while is slow (model load).
+#   q how do i undo a git commit      ·      cat err.log | q what broke
+[ $# -gt 0 ] || { echo "usage: q <question>   (or pipe stdin + question)"; exit 1; }
+CRUSH="$(command -v crush || echo /opt/homebrew/bin/crush)"
+exec "$CRUSH" run -q "$*"

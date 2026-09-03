@@ -1,0 +1,14 @@
+{
+  "$schema": "https://charm.land/crush.json",
+  "providers": {
+    "ollama": {
+      "name": "Ollama",
+      "type": "ollama",
+      "base_url": "http://localhost:11434/v1/"
+    }
+  },
+  "models": {
+    "large": { "provider": "ollama", "model": "gemma4:latest" },
+    "small": { "provider": "ollama", "model": "gemma4:latest" }
+  }
+}

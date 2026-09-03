@@ -1,0 +1,4 @@
+#!/bin/bash
+# fleet board text layer only — graphics APC escapes stripped (freeze/vhs food)
+env COLUMNS=210 LINES=62 "$HOME/.config/kitty/fleet-board.py" --print \
+    | /usr/bin/perl -pe 's/\x1b_G[^\x1b]*\x1b\\//g'

@@ -15,7 +15,20 @@ Built 2026-07-09/10. Everything is event-driven — no daemons, no timers.
 - **Fleet actions** — `⌘⇧A` jump to the session that needs you, `⌘⇧B`
   broadcast one message to every Claude, `⌘⇧P` peek any tab's live screen
   without switching, `⌘⇧X` open a Claude about whatever is on screen,
-  `⌘⇧K` self-updating keybind cheatsheet.
+  `⌘⇧K` self-updating keybind cheatsheet. The board is
+  mouse-aware: click a card to jump, hover one for a live peek of that tab,
+  click the yard to pet the cat; `/` filters cards fuzzily (enter jumps).
+  `⌘⇧M` previews any on-screen file path in-terminal (glow for markdown).
+
+## Charm lane
+
+- **`q <question>`** — one-shot answer from the LOCAL model (crush → ollama
+  gemma4); zero Claude quota, zero API spend. Config: `crush/crush.json`.
+- **`resume`** — gum-powered fuzzy picker over the session ledger; resumes the
+  chosen Claude session in the current window (● marks already-running).
+- **`board-shot [out.png]`** — freeze the fleet board's text layer to a PNG.
+- **`md`** — alias for `glow -p` (markdown pager).
+- **`docs/demo.tape`** — vhs recording script (`vhs docs/demo.tape`).
 - **Session safety** — crash-proof workspace restore (startup_session +
   auto-snapshots), session ledger (TSV black box), fleet-grep transcript
   search, cost ledger + costs command, context watchdog (purr at 90%),

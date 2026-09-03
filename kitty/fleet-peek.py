@@ -54,16 +54,41 @@ def vtrunc(s, limit):
     return "".join(out) + RST + "…"
 
 
+def _sock_answers(s):
+    """A socket that accepts but never replies (starved/wedged kitty) is useless."""
+    try:
+        r = subprocess.run([KITTEN, "@", "--to", f"unix:{s}", "ls"],
+                           capture_output=True, text=True, timeout=3)
+        return bool(r.stdout.strip())
+    except Exception:
+        return False
+
+
 def live_sock():
+    cands = []
+    kp = os.environ.get("KITTY_PID")
+    if kp and os.path.exists(f"/tmp/kitty-ctl-{kp}"):
+        cands.append(f"/tmp/kitty-ctl-{kp}")  # our own kitty first
     for s in sorted(glob.glob("/tmp/kitty-ctl-*"), key=os.path.getmtime, reverse=True):
+        if s not in cands:
+            cands.append(s)
+    best = None
+    for s in cands:
         try:
             os.kill(int(s.rsplit("-", 1)[-1]), 0)
-            return s
         except (ValueError, ProcessLookupError):
+            try:
+                os.unlink(s)  # crash leftover
+            except OSError:
+                pass
             continue
         except PermissionError:
+            pass
+        if best is None:
+            best = s  # liveliest fallback if none answer
+        if _sock_answers(s):
             return s
-    return None
+    return best
 
 
 def tab_list(sock, kpid):

@@ -1,0 +1,7 @@
+#!/bin/bash
+# board-shot — freeze the fleet board's text layer to a shareable PNG.
+# (Graphics-protocol underlays don't survive the capture; text + ANSI do.)
+out="${1:-$HOME/Desktop/fleet-board-$(date +%Y%m%d-%H%M%S).png}"
+FREEZE="$(command -v freeze || echo /opt/homebrew/bin/freeze)"
+"$FREEZE" --execute "$HOME/bin/board-print-plain" \
+    --output "$out" && echo "🧊 $out" && open -R "$out"
