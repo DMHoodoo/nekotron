@@ -1366,7 +1366,7 @@ def main():
         tty.setraw(fd)
     sys.stdout.write("\033[?25l\033[2J")
     if interactive:
-        sys.stdout.write("\033[?1003h\033[?1006h")  # SGR any-motion mouse tracking
+        sys.stdout.write("\033[?1002h\033[?1006h")  # SGR button-event mouse tracking (hover shelved)
     choice = None
     peek_on = False
     filt = None
@@ -1408,21 +1408,6 @@ def main():
                 sys.stdout.write(sprite_patch(vis, geo, frame))
             sys.stdout.flush()
             last_size = size
-            if (interactive and hover_idx is not None and frame - hover_since >= 3
-                    and (peek is None or peek["idx"] != hover_idx
-                         or time.monotonic() - peek["t"] > 1.0)):
-                pc = next((c for c in cards if c.get("idx") == hover_idx), None)
-                if pc and pc.get("wid"):
-                    try:
-                        gt = subprocess.run([KITTEN, "@", "--to", f"unix:{sock}", "get-text",
-                                             "--match", f"id:{pc['wid']}", "--ansi", "--extent", "screen"],
-                                            capture_output=True, text=True, timeout=3)
-                        if gt.returncode == 0:
-                            peek = {"idx": hover_idx, "title": pc["title"],
-                                    "lines": gt.stdout.splitlines(), "t": time.monotonic()}
-                            geo = None  # full redraw carries the peek column
-                    except Exception:
-                        pass
             if test_frames and frame >= test_frames:
                 break
             if interactive:
@@ -1452,15 +1437,6 @@ def main():
                                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                                 except Exception:
                                     pass
-                    mot = [m for m in mouse if int(m[0]) & 32]
-                    if mot and choice is None:
-                        mx_, my_ = int(mot[-1][1]), int(mot[-1][2])
-                        h2 = next((ix for r0, r1, ix in _hit["cards"]
-                                   if r0 <= my_ <= r1 and mx_ <= _hit["left_w"] + 2), None)
-                        if h2 != hover_idx:
-                            hover_idx, hover_since = h2, frame
-                            if h2 is None and peek is not None:
-                                peek, geo = None, None  # pointer left the cards: restore ops + yard
                     for ch in keys:
                         if filt is not None:  # filter mode: typing edits the query
                             if ch == "\x1b":
@@ -1509,7 +1485,7 @@ def main():
             frame += 1
     finally:
         sys.stdout.write(_gfx({"a": "d", "d": "A", "q": 2}))  # clear our sprites
-        sys.stdout.write("\033[?1003l\033[?1006l\033[?25h\033[0m")
+        sys.stdout.write("\033[?1002l\033[?1003l\033[?1006l\033[?25h\033[0m")
         if old is not None:
             import termios
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old)
