@@ -257,23 +257,6 @@ def _fg(c):
     return f"\033[38;2;{(c >> 16) & 255};{(c >> 8) & 255};{c & 255}m"
 
 
-def vtrunc(s, limit):
-    """Truncate to `limit` visible chars, preserving ANSI, closing with reset."""
-    if vlen(s) <= limit:
-        return s
-    out, n = [], 0
-    for tok in re.split(r"(\033\[[0-9;:]*m)", s):
-        if tok.startswith("\033["):
-            out.append(tok)
-            continue
-        room = limit - 1 - n
-        if room <= 0:
-            break
-        out.append(tok[:room])
-        n += min(len(tok), room)
-    return "".join(out) + RST + "…"
-
-
 def panel_row(content, width, bg=PANEL, caps=True):
     """One row of a card: plain text — the panel itself is a z=-1 underlay."""
     return " " + pad(vtrunc(content, width - 2), width - 2) + " "
@@ -1245,10 +1228,6 @@ def cat_art(mode, t):
         return [f" /\\_/\\   {z}", "( -.- )", " (   )", " ~~~~~"]
     bang = "!" if t % 4 < 2 else " "
     return [f" /\\_/\\  {bang}", "( O.O )", " (   )", "  ! !"]
-
-
-def vlen(s):
-    return len(ANSI.sub("", s))
 
 
 def pad(s, w):
