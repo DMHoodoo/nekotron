@@ -1,15 +1,22 @@
 #!/bin/bash
 # md-preview — hints target (⌘⇧M): render the picked path in-terminal.
 # Markdown gets glow's pager; anything else falls back to less.
-f="${1/#\~/$HOME}"   # hints hands paths over verbatim — expand a leading ~
-# hints also glues trailing punctuation from prose ("(...path.md)"), so
-# peel it off until the path resolves
-while [ ! -e "$f" ]; do
-    case "$f" in
-        *")"|*"]"|*"}"|*","|*"."|*":"|*";"|*"'"|*'"') f="${f%?}" ;;
-        *) break ;;
-    esac
-done
+# hints hands text over verbatim, gluing prose around real paths:
+# "(...path.md)" and tool-call renders like "Update(~/path/file.md)".
+resolve() {
+    local x="${1/#\~/$HOME}"
+    while [ ! -e "$x" ]; do
+        case "$x" in
+            *")"|*"]"|*"}"|*","|*"."|*":"|*";"|*"'"|*'"') x="${x%?}" ;;
+            *) break ;;
+        esac
+    done
+    printf '%s' "$x"
+}
+f=$(resolve "$1")
+if [ ! -e "$f" ]; then
+    case "$1" in *"("*) f=$(resolve "${1##*\(}") ;; esac
+fi
 [ -e "$f" ] || { echo "not a file here: $f"; sleep 1.5; exit 1; }
 GLOW="$(command -v glow || echo /opt/homebrew/bin/glow)"
 case "$f" in
