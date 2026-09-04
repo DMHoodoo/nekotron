@@ -2027,6 +2027,10 @@ def main():
             if interactive and tall and not full:
                 wmp = _wordmark_rows(frame * 0.045)
                 sys.stdout.write("".join(f"\033[{2 + r};3H" + wmp[r] for r in range(5)))
+            # park the (hidden) cursor in the same corner every tick — kitty's
+            # cursor_trail otherwise streaks toward wherever the last write
+            # left it, painting ghost capsules over the rows
+            sys.stdout.write(f"\033[{ts.lines};{ts.columns}H")
             sys.stdout.flush()
             last_size = size
             if test_frames and frame >= test_frames:
