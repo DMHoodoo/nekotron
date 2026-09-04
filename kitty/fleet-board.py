@@ -1214,6 +1214,24 @@ def _wordmark_rows(phase, word="NEKOTRON", stretch_idx=6, extra=4):
     return rows
 
 
+TAIL_W = 26  # fixed right block: [ring 2][ctx% 4][2][pill 13][1][age 4]
+
+
+def _row_tail(c, frame, bg):
+    """Constant-width tail so ring/%/pill/age align in columns on every row."""
+    _c, _g, label = ST[c["state"]]
+    if c.get("ctx") is not None:
+        cc = DIM if c["ctx"] < 70 else (AMBER if c["ctx"] < 88 else ST["attention"][0])
+        ring = f"ring:{5 * round(c['ctx'] / 5)},{'good' if c['ctx'] < 70 else ('warn' if c['ctx'] < 88 else 'bad')}"
+        ctxs = f"  {cc}{c['ctx']:>3}%{RST}"
+    else:
+        ring, ctxs = None, "      "
+    age = fmt_age(time.time() - c["s_epoch"]) if c["s_epoch"] else ""
+    p = pill(f" {label:^9} ", PILL_BG[c["state"]],
+             fg=(_wm_hex(frame * 0.02) if c["state"] == "working" else 0xE8ECFF), panel=bg)
+    return ctxs + "  " + p + f" {DIM}{age:>4}{RST}", ring
+
+
 _hit = {"cards": [], "left_w": 0, "yard": None}  # mouse hit-map, rebuilt per full frame
 
 
@@ -1265,50 +1283,31 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
             glyph = SPIN[frame % len(SPIN)]
             color = _wm_fg(frame * 0.02)
         hue = REPO_HUE.get(c["repo"], FAINT)
-        bg = PANEL_HI if c["focused"] else PANEL
+        bg = PANEL_HI if (c["focused"] or c.get("hover")) else PANEL
         card_start = len(left)
         Pc = lambda content: panel_row(content, left_w, bg)
         c_min = c.get("min") and c["state"] != "attention"  # attention re-expands
         if compact or c_min:  # one row per session
             b = BOLD if c["focused"] else ""
             row_idx = len(left)
-            ctxs, ring_kind = "", None
-            if c.get("ctx") is not None:
-                cc = DIM if c["ctx"] < 70 else (AMBER if c["ctx"] < 88 else ST["attention"][0])
-                ring_kind = f"ring:{5 * round(c['ctx'] / 5)},{'good' if c['ctx'] < 70 else ('warn' if c['ctx'] < 88 else 'bad')}"
-                ctxs = f"{cc}{c['ctx']:>2}%{RST}    "
-            age = fmt_age(now - c["s_epoch"]) if c["s_epoch"] else ""
+            tail, ring_kind = _row_tail(c, frame, bg)
             lead = f"  {DIM}\u25b8{RST} " if c_min and not compact else "    "
-            head = f"{lead}{b}{INK}{c.get('idx', i)}{RST} {hue}\u258e{RST}{color}{glyph}{RST} {b}{INK}{c['title'][:left_w - 52]}{RST}"
-            tail = ctxs + pill(f" {label} ", PILL_BG[c["state"]],
-                           fg=(_wm_hex(frame * 0.02) if c["state"] == "working" else 0xE8ECFF),
-                           panel=bg) + (f" {DIM}{age:<4}{RST}" if age else "")
-            gap = left_w - 2 - vlen(head) - vlen(tail)
+            head = f"{lead}{b}{INK}{c.get('idx', i):>2}{RST} {hue}\u258e{RST}{color}{glyph}{RST} {b}{INK}{c['title'][:left_w - 2 - TAIL_W - 14]}{RST}"
             if ring_kind:
-                card_marks.append((row_idx, left_w - vlen(tail) - 2, ring_kind))
-            left.append(Pc(head + " " * max(1, gap) + tail))
-            card_spans.append((card_start, 0, c["focused"], c.get("idx", i)))
+                card_marks.append((row_idx, left_w - TAIL_W, ring_kind))
+            left.append(Pc(head + " " * max(0, left_w - 2 - vlen(head) - TAIL_W) + tail))
+            card_spans.append((card_start, 0, c["focused"] or bool(c.get("hover")), c.get("idx", i)))
             left.append("")
             continue
-        age = fmt_age(now - c["s_epoch"]) if c["s_epoch"] else ""
-        ctxs, ring_kind = "", None
-        if c.get("ctx") is not None:
-            cc = DIM if c["ctx"] < 70 else (AMBER if c["ctx"] < 88 else ST["attention"][0])
-            ring_color = "good" if c["ctx"] < 70 else ("warn" if c["ctx"] < 88 else "bad")
-            ring_kind = f"ring:{5 * round(c['ctx'] / 5)},{ring_color}"
-            ctxs = f"{cc}{c['ctx']:>2}%{RST}    "
+        tail, ring_kind = _row_tail(c, frame, bg)
         if c.get("sid"):
             card_marks.append((len(left) + 1, 2, f"icon:{c['sid']}|{c['repo'] or ''}"))
         b = BOLD if c["focused"] else ""
-        head = f"    {b}{INK}{c.get('idx', i)}{RST} {hue}▎{RST}{color}{glyph}{RST} {b}{INK}{c['title'][:left_w - 48]}{RST}"
-        tail = ctxs + pill(f" {label} ", PILL_BG[c["state"]],
-                           fg=(_wm_hex(frame * 0.02) if c["state"] == "working" else 0xE8ECFF),
-                           panel=bg) + (f" {DIM}{age:<4}{RST}" if age else "")
-        gap = left_w - 2 - vlen(head) - vlen(tail)
+        head = f"   {b}{INK}{c.get('idx', i):>2}{RST} {hue}▎{RST}{color}{glyph}{RST} {b}{INK}{c['title'][:left_w - 2 - TAIL_W - 14]}{RST}"
         if ring_kind:
-            card_marks.append((len(left) + 1, left_w - vlen(tail) - 2, ring_kind))
+            card_marks.append((len(left) + 1, left_w - TAIL_W, ring_kind))
         left.append(Pc(""))
-        left.append(Pc(head + " " * max(1, gap) + tail))
+        left.append(Pc(head + " " * max(0, left_w - 2 - vlen(head) - TAIL_W) + tail))
         if c["repo"] or c["meta"]:
             rep = f"{hue}{c['repo']}{RST}" if c["repo"] else ""
             joiner = f"{DIM} · {RST}" if c["repo"] and c["meta"] else ""
@@ -1321,7 +1320,8 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
                 txt = txt[: len(txt) - (vlen(txt) - (left_w - 17))] + "…"
             left.append(Pc(f"      {DIM}{fmt_age(now - e) if e else '':>4}{RST} {txt}{RST}"))
         left.append(Pc(""))
-        card_spans.append((card_start, len(left) - card_start, c["focused"], c.get("idx", i)))
+        card_spans.append((card_start, len(left) - card_start,
+                           c["focused"] or bool(c.get("hover")), c.get("idx", i)))
         left.append("")
 
     if pal is not None:  # command palette owns the right column
@@ -1491,7 +1491,7 @@ def main():
         tty.setraw(fd)
     sys.stdout.write("\033[?25l\033[2J")
     if interactive:
-        sys.stdout.write("\033[?1002h\033[?1006h")  # SGR button-event mouse tracking (hover shelved)
+        sys.stdout.write("\033[?1003h\033[?1006h")  # SGR any-motion tracking (hover highlight)
     choice = None
     peek_on = False
     filt = None
@@ -1524,6 +1524,7 @@ def main():
                 fails += 1  # keep showing the previous data; retry later
             for c in cards:
                 c["min"] = _min_key(c) in minset
+                c["hover"] = c.get("idx") == hover_idx
             vis = cards if filt is None else [c for c in cards if _match(filt, c)]
             pal_view = None
             if pal is not None:
@@ -1584,6 +1585,14 @@ def main():
                                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                                 except Exception:
                                     pass
+                    mot = [m for m in mouse if int(m[0]) & 32]
+                    if mot and choice is None:
+                        mx_, my_ = int(mot[-1][1]), int(mot[-1][2])
+                        h2 = next((ix for r0, r1, ix in _hit["cards"]
+                                   if r0 <= my_ <= r1 and mx_ <= _hit["left_w"] + 2), None)
+                        if h2 != hover_idx:
+                            hover_idx = h2
+                            geo = None  # re-render with the hover highlight
                     for ch in keys:
                         was_pend, pend_min = pend_min, False
                         if pal is not None:  # palette mode: typing filters actions
