@@ -69,6 +69,25 @@ TAILS = ["ﾉ~", "ﾉ,", "ﾉ~", "ﾉ`"]
 # ── pixel-art sprite mode (toggle with `s` inside the board) ──────────
 CAT_MODE_FILE = os.path.expanduser("~/.config/kitty/.fleet-cat-mode")
 DENSITY_FILE = "/tmp/claude-kitty-status/board-density"
+MIN_FILE = os.path.expanduser("~/.config/kitty/.fleet-minimized")
+
+
+def _min_key(c):
+    return c.get("sid") or c.get("title") or ""
+
+
+def _load_min():
+    try:
+        return set(open(MIN_FILE).read().split("\n")) - {""}
+    except OSError:
+        return set()
+
+
+def _save_min(s):
+    try:
+        open(MIN_FILE, "w").write("\n".join(sorted(s)))
+    except OSError:
+        pass
 _NK = os.path.expanduser("~/Documents/GlowDevelopment/nekotron")
 PALETTE = [
     ("jump to the session that needs you", "run_quit", _NK + "/kitty/jump-attention.sh"),
@@ -79,6 +98,7 @@ PALETTE = [
     ("board-shot \u2192 Desktop PNG", "run", _NK + "/bin/board-shot"),
     ("theme day/night shift", "run", _NK + "/kitty/nekotron-theme.sh"),
     ("toggle compact density", "density", ""),
+    ("minimize every quiet session", "minsweep", ""),
     ("toggle pixel/ascii cat", "sprite", ""),
     ("pet the cat", "pet", ""),
 ]
@@ -1094,6 +1114,7 @@ def ops_column(cards, v, width, tall, frame):
         L.append("")
 
     L.append(P(f" {DIM}1-9 jump · ⌘⇧A attention · ⌘⇧B broadcast{RST}"))
+    L.append(P(f" {DIM}rt-click / m# min \u00b7 M sweep quiet{RST}"))
     L.append(P(f" {DIM}/ filter · : palette · d density{RST}"))
     L.append(P(f" {DIM}s cat · c pet · ⌘⇧K keys · other exits{RST}"))
     return L, gauges, gauge_rel, chart_rel
@@ -1246,7 +1267,8 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
         bg = PANEL_HI if c["focused"] else PANEL
         card_start = len(left)
         Pc = lambda content: panel_row(content, left_w, bg)
-        if compact:  # one row per session
+        c_min = c.get("min") and c["state"] != "attention"  # attention re-expands
+        if compact or c_min:  # one row per session
             b = BOLD if c["focused"] else ""
             row_idx = len(left)
             if c.get("sid"):
@@ -1257,7 +1279,8 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
                 card_marks.append((row_idx, left_w - 22, f"ring:{5 * round(c['ctx'] / 5)},{'good' if c['ctx'] < 70 else ('warn' if c['ctx'] < 88 else 'bad')}"))
                 ctxs = f"{cc}{c['ctx']:>2}%{RST}    "
             age = fmt_age(now - c["s_epoch"]) if c["s_epoch"] else ""
-            head = f"    {b}{INK}{c.get('idx', i)}{RST} {hue}\u258e{RST}{color}{glyph}{RST} {b}{INK}{c['title'][:left_w - 52]}{RST}"
+            lead = f"  {DIM}\u25b8{RST} " if c_min and not compact else "    "
+            head = f"{lead}{b}{INK}{c.get('idx', i)}{RST} {hue}\u258e{RST}{color}{glyph}{RST} {b}{INK}{c['title'][:left_w - 52]}{RST}"
             tail = ctxs + pill(f" {label} ", PILL_BG[c["state"]],
                            fg=(_wm_hex(frame * 0.02) if c["state"] == "working" else 0xE8ECFF),
                            panel=bg) + (f" {DIM}{age:<4}{RST}" if age else "")
@@ -1472,6 +1495,8 @@ def main():
     filt = None
     pal = None
     compact = os.path.exists(DENSITY_FILE)
+    minset = _load_min()
+    pend_min = False
     hover_idx = None
     hover_since = 0
     peek = None
@@ -1495,6 +1520,8 @@ def main():
                     v = vitals()
             except Exception:
                 fails += 1  # keep showing the previous data; retry later
+            for c in cards:
+                c["min"] = _min_key(c) in minset
             vis = cards if filt is None else [c for c in cards if _match(filt, c)]
             pal_view = None
             if pal is not None:
@@ -1533,6 +1560,15 @@ def main():
                     quit_ = False
                     for mb_, mx_, my_, kind in mouse:
                         mb_, mx_, my_ = int(mb_), int(mx_), int(my_)
+                        if kind == "M" and mb_ == 2:  # right click: (un)minimize card
+                            hitc = next((ix for r0, r1, ix in _hit["cards"]
+                                         if r0 <= my_ <= r1 and mx_ <= _hit["left_w"] + 2), None)
+                            if hitc:
+                                mc_ = next((c for c in cards if c.get("idx") == hitc), None)
+                                if mc_:
+                                    minset ^= {_min_key(mc_)}
+                                    _save_min(minset)
+                                    geo = None
                         if kind == "M" and mb_ == 0:  # left click
                             hitc = next((ix for r0, r1, ix in _hit["cards"]
                                          if r0 <= my_ <= r1 and mx_ <= _hit["left_w"] + 2), None)
@@ -1547,6 +1583,7 @@ def main():
                                 except Exception:
                                     pass
                     for ch in keys:
+                        was_pend, pend_min = pend_min, False
                         if pal is not None:  # palette mode: typing filters actions
                             if ch == "\x1b":
                                 pal, geo = None, None
@@ -1567,6 +1604,11 @@ def main():
                                         sys.stdout.write(_gfx({"a": "d", "d": "A", "q": 2}))
                                         _transmitted.clear()
                                         globals()["_prev_sprite"] = None
+                                    elif kind == "minsweep":
+                                        quiet = {_min_key(c) for c in cards
+                                                 if c["state"] in ("done", "neutral")} - {""}
+                                        minset = minset - quiet if quiet <= minset else minset | quiet
+                                        _save_min(minset)
                                     elif kind == "density":
                                         compact = not compact
                                         try:
@@ -1606,6 +1648,14 @@ def main():
                             filt, geo = "", None
                         elif ch == ":":
                             pal, geo = "", None
+                        elif ch == "m":
+                            pend_min = True
+                        elif ch == "M":  # sweep: minimize every quiet session (or restore)
+                            quiet = {_min_key(c) for c in cards
+                                     if c["state"] in ("done", "neutral")} - {""}
+                            minset = minset - quiet if quiet <= minset else minset | quiet
+                            _save_min(minset)
+                            geo = None
                         elif ch == "d":
                             compact = not compact
                             try:
@@ -1633,7 +1683,13 @@ def main():
                             geo = None  # force full redraw next tick
                         elif ch.isdigit():
                             sel = 10 if ch == "0" else int(ch)
-                            if 0 < sel <= len(cards):
+                            if not 0 < sel <= len(cards):
+                                pass
+                            elif was_pend:  # m+digit: toggle that card
+                                minset ^= {_min_key(cards[sel - 1])}
+                                _save_min(minset)
+                                geo = None
+                            else:
                                 choice = sel
                         elif ch == "\x1b" and (peek is not None or hover_idx is not None):
                             hover_idx, peek, geo = None, None, None
