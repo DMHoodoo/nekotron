@@ -1115,7 +1115,7 @@ def ops_column(cards, v, width, tall, frame):
         L.append("")
 
     L.append(P(f" {DIM}1-9 jump · ⌘⇧A attention · ⌘⇧B broadcast{RST}"))
-    L.append(P(f" {DIM}rt-click / m# min \u00b7 M sweep quiet{RST}"))
+    L.append(P(f" {DIM}click / m# min \u00b7 M sweep quiet{RST}"))
     L.append(P(f" {DIM}/ filter · : palette · d density{RST}"))
     L.append(P(f" {DIM}s cat · c pet · ⌘⇧K keys · other exits{RST}"))
     return L, gauges, gauge_rel, chart_rel
@@ -1563,7 +1563,7 @@ def main():
                     quit_ = False
                     for mb_, mx_, my_, kind in mouse:
                         mb_, mx_, my_ = int(mb_), int(mx_), int(my_)
-                        if kind == "M" and mb_ == 2:  # right click: (un)minimize card
+                        if kind == "M" and mb_ in (0, 2):  # any click on a card: (un)minimize
                             hitc = next((ix for r0, r1, ix in _hit["cards"]
                                          if r0 <= my_ <= r1 and mx_ <= _hit["left_w"] + 2), None)
                             if hitc:
@@ -1572,12 +1572,7 @@ def main():
                                     minset ^= {_min_key(mc_)}
                                     _save_min(minset)
                                     geo = None
-                        if kind == "M" and mb_ == 0:  # left click
-                            hitc = next((ix for r0, r1, ix in _hit["cards"]
-                                         if r0 <= my_ <= r1 and mx_ <= _hit["left_w"] + 2), None)
-                            if hitc:
-                                choice = hitc
-                            elif (_hit["yard"] and peek is None and mx_ >= _hit["yard"][2]
+                            elif (mb_ == 0 and _hit["yard"] and peek is None and mx_ >= _hit["yard"][2]
                                   and _hit["yard"][0] <= my_ <= _hit["yard"][1]):
                                 globals()["_pet_until"] = frame + 30  # click the yard = pet
                                 try:
