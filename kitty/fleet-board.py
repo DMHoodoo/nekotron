@@ -20,6 +20,7 @@ import struct
 import subprocess
 import sys
 import time
+import unicodedata
 import zlib
 
 KITTEN = shutil.which("kitten") or "/Applications/kitty.app/Contents/MacOS/kitten"
@@ -271,6 +272,510 @@ def vtrunc(s, limit):
         out.append(tok[:room])
         n += min(len(tok), room)
     return "".join(out) + RST + "…"
+
+
+def panel_row(content, width, bg=PANEL, caps=True):
+    """One row of a card: plain text — the panel itself is a z=-1 underlay."""
+    return " " + pad(vtrunc(content, width - 2), width - 2) + " "
+
+
+def pill(text, bg, fg=0xE8ECFF, panel=None):
+    """Rounded chip; caps on default bg so underlays show through around it."""
+    return (_fg(bg) + "\ue0b6" + RST + _bg(bg) + _fg(fg)
+            + text + RST + _fg(bg) + "\ue0b4" + RST)
+
+
+def _ring_png_cached(pct, color):
+    key = (int(pct), color)
+    if key in _ring_cache:
+        return _ring_cache[key]
+    import math
+    size, ss = 66, 3
+    S = size * ss
+    cx = cy = (S - 1) / 2
+    r_out, r_in = S * 0.47, S * 0.31
+    cr = RGB[color]
+    tr = RGB["track"]
+    sweep = max(0.001, pct / 100.0) * 2 * math.pi
+    buf = bytearray(S * S * 4)
+    for y in range(S):
+        dy = y - cy
+        for x in range(S):
+            dx = x - cx
+            d = math.hypot(dx, dy)
+            if r_in <= d <= r_out:
+                a = math.atan2(dx, -dy) % (2 * math.pi)
+                c = cr if a <= sweep else tr
+                i = (y * S + x) * 4
+                buf[i:i + 4] = bytes((*c, 255))
+    out = bytearray(size * size * 4)
+    for y in range(size):
+        for x in range(size):
+            rs = gs = bs = As = 0
+            for sy in range(ss):
+                row = ((y * ss + sy) * S + x * ss) * 4
+                for sx in range(ss):
+                    i = row + sx * 4
+                    rs += buf[i]; gs += buf[i + 1]; bs += buf[i + 2]; As += buf[i + 3]
+            n = ss * ss
+            j = (y * size + x) * 4
+            out[j:j + 4] = bytes((rs // n, gs // n, bs // n, As // n))
+    png = _png_rgba(bytes(out), size, size)
+    _ring_cache[key] = png
+    return png
+
+
+def grad_bar(pct, cells=6):
+    """Tiny gradient bar: hue lerps green->amber->orange across the cells."""
+    stops = [(76, 195, 138), (255, 182, 92), (240, 128, 60)]
+    out = []
+    for k in range(cells):
+        t = k / max(1, cells - 1)
+        seg = t * (len(stops) - 1)
+        i0 = min(int(seg), len(stops) - 2)
+        f = seg - i0
+        c = tuple(int(stops[i0][j] + (stops[i0 + 1][j] - stops[i0][j]) * f) for j in range(3))
+        filled = (k + 1) / cells <= pct / 100 + 0.08
+        col = f"\033[38;2;{c[0]};{c[1]};{c[2]}m" if filled else _fg(0x2A3050)
+        out.append(col + ("▰" if filled else "▱") + RST)
+    return "".join(out)
+
+
+_gauge_placed = set()  # ring image ids currently on screen
+
+
+def gauge_escapes(row, col, gauges):
+    """Place antialiased ring PNGs at (row, col): [(pct, color, label), ...]."""
+    out = []
+    for i, (pct, color, _label) in enumerate(gauges):
+        gid = 4300 + i
+        _gauge_placed.add(gid)
+        out.append(_gfx({"a": "d", "d": "i", "i": gid, "q": 2}))
+        out.append(_gfx({"a": "t", "f": 100, "i": gid, "q": 2}, _ring_png_cached(pct, color)))
+        out.append(f"\033[{row};{col + i * 9}H")
+        out.append(_gfx({"a": "p", "i": gid, "c": 6, "r": 3, "q": 2}))
+    return "".join(out)
+
+
+
+# ── underlay engine: images composited UNDER the text (z=-1) ───────────
+CELL_W, CELL_H = 10, 20   # assumed cell pixel size; radius distortion is minor
+VOID = (10, 13, 24)
+_ul_ids = {}              # (kind, cols, rows) -> image id
+_ul_pngs = {}             # id -> png bytes
+_ul_sent = set()
+
+
+def _panel_underlay(w, h, hi=False):
+    """Rounded panel: vertical sheen, soft bottom shadow, alpha-faded edges."""
+    import math
+    top = (27, 37, 66) if hi else (23, 31, 56)
+    bot = (19, 26, 48) if hi else (16, 22, 42)
+    rad = 14
+    pad = 4               # slim inset; shadow hugs the rect
+    buf = bytearray(w * h * 4)
+    for y in range(h):
+        for x in range(w):
+            dx = max(rad + pad - x, 0, x - (w - 1 - rad - pad))
+            dy = max(rad + pad - y, 0, y - (h - 1 - rad - pad))
+            m = rad + 1.0 - math.hypot(dx, dy) + pad
+            i = (y * w + x) * 4
+            if m >= pad:  # inside the rounded rect
+                t = y / h
+                a = 255 if m >= pad + 1.5 else int(255 * (m - pad) / 1.5)
+                buf[i] = int(top[0] + (bot[0] - top[0]) * t)
+                buf[i + 1] = int(top[1] + (bot[1] - top[1]) * t)
+                buf[i + 2] = int(top[2] + (bot[2] - top[2]) * t)
+                buf[i + 3] = a
+            elif m > 0:   # shadow halo, strongest below
+                fall = m / pad
+                bias = 1.3 if y > h // 2 else 0.6
+                a = int(60 * fall * fall * bias)
+                if a > 2:
+                    buf[i:i + 4] = bytes((3, 4, 9, a))
+    return _png_rgba(bytes(buf), w, h)
+
+
+def _aurora_underlay(w, h):
+    """Ambient glow blobs that alpha-fade to nothing — blends with any bg."""
+    import math
+    buf = bytearray(w * h * 4)
+    blobs = [(int(w * 0.16), int(h * 0.55), h * 1.9, (95, 233, 223), 34),
+             (int(w * 0.46), int(h * 0.25), h * 1.5, (79, 142, 247), 22),
+             (int(w * 0.82), int(h * 0.75), h * 1.6, (255, 95, 168), 14)]
+    for y in range(h):
+        for x in range(w):
+            r = g = b = a = 0.0
+            for bx, by, rad, c, amp in blobs:
+                d = math.hypot((x - bx) * 0.55, y - by)  # squash horizontally
+                if d < rad:
+                    t = (1 - d / rad) ** 2 * amp
+                    r += c[0] * t / 255
+                    g += c[1] * t / 255
+                    b += c[2] * t / 255
+                    a += t
+            if a > 1.5:
+                a = min(64, a)
+                i = (y * w + x) * 4
+                buf[i:i + 4] = bytes((int(min(255, r * 4)), int(min(255, g * 4)),
+                                      int(min(255, b * 4)), int(a)))
+    return _png_rgba(bytes(buf), w, h)
+
+
+def _identicon_png(seed, scale=8):
+    """Symmetric 5x5 identicon: a face for every session."""
+    import hashlib
+    h = hashlib.md5(seed.split("|")[0].encode()).digest()
+    hue = {"glow-platform": (95, 233, 223), "glow-core": (255, 95, 168),
+           "glow-aws-sync": (255, 182, 92)}.get(seed.split("|")[-1], (139, 139, 150))
+    size = 5 * scale
+    buf = bytearray(size * size * 4)
+    for gy in range(5):
+        for gx in range(3):
+            if h[gy * 3 + gx] % 2:
+                for mx in {gx, 4 - gx}:
+                    for dy in range(scale):
+                        for dx in range(scale):
+                            i = ((gy * scale + dy) * size + mx * scale + dx) * 4
+                            buf[i:i + 4] = bytes((*hue, 230))
+    return _png_rgba(bytes(buf), size, size)
+
+
+_chart_series = {}
+
+
+def _chart_png(series, w, h):
+    """Filled area chart: cumulative spend today, cyan fading downward."""
+    buf = bytearray(w * h * 4)
+    peak = max(series) if series and max(series) > 0 else 1.0
+    n = len(series) or 1
+    for x in range(w):
+        f = x / max(1, w - 1) * (n - 1)
+        i0 = int(f)
+        val = series[i0] + (series[min(n - 1, i0 + 1)] - series[i0]) * (f - i0)
+        level = int((1 - val / peak * 0.9) * (h - 3)) + 1
+        for y in range(level, h):
+            t = (y - level) / max(1, h - level)
+            a = int(150 * (1 - t * 0.8))
+            i = (y * w + x) * 4
+            buf[i:i + 4] = bytes((95, 233, 223, a))
+        for y in (level - 1, level):  # crisp top line
+            if 0 <= y < h:
+                i = (y * w + x) * 4
+                buf[i:i + 4] = bytes((95, 233, 223, 255))
+    return _png_rgba(bytes(buf), w, h)
+
+
+def _diorama_png(phase_bucket, h_px, w_px=440, chip_cells=0):
+    """The cat's yard as a proper rounded panel with the (muted) time-of-day
+    scene inside — same corner mask + shadow language as every other card."""
+    import math
+    ac = _animated_cat()
+    if not ac:
+        return _png_rgba(bytes(4), 1, 1)
+    pal = ac.palette_at(phase_bucket / 144.0)
+    total = max(20, h_px)
+    horizon = int(total * 0.72)
+    strip = bytearray(ac.draw_bg_color_strip(total, int(total * 0.44),
+                                             int(total * 0.62), horizon, pal))
+    k = 0.42
+    for y in range(total):
+        i = y * 4
+        strip[i] = int(VOID[0] + (strip[i] - VOID[0]) * k)
+        strip[i + 1] = int(VOID[1] + (strip[i + 1] - VOID[1]) * k)
+        strip[i + 2] = int(VOID[2] + (strip[i + 2] - VOID[2]) * k)
+    rad, pad_ = 14, 4
+    buf = bytearray(w_px * h_px * 4)
+    for y in range(h_px):
+        srow = strip[min(total - 1, y * total // h_px) * 4:][:4]
+        for x in range(w_px):
+            dx = max(rad + pad_ - x, 0, x - (w_px - 1 - rad - pad_))
+            dy = max(rad + pad_ - y, 0, y - (h_px - 1 - rad - pad_))
+            m = rad + 1.0 - math.hypot(dx, dy) + pad_
+            i = (y * w_px + x) * 4
+            if m >= pad_:
+                a = 255 if m >= pad_ + 1.5 else int(255 * (m - pad_) / 1.5)
+                r, g, b = srow[0], srow[1], srow[2]
+                scrim_top = h_px * 0.60
+                if y > scrim_top:  # caption scrim: text sits on this, not on raw scene
+                    s = min(1.0, (y - scrim_top) / (h_px * 0.28)) ** 1.4 * 0.72
+                    r = int(r + (6 - r) * s)
+                    g = int(g + (8 - g) * s)
+                    b = int(b + (15 - b) * s)
+                buf[i:i + 3] = bytes((r, g, b))
+                buf[i + 3] = a
+            elif m > 0:
+                fall = m / pad_
+                a = int(50 * fall * fall)
+                if a > 2:
+                    buf[i:i + 4] = bytes((3, 4, 9, a))
+    if chip_cells:  # caption plate: rounded slate chip baked at the mood row
+        cy0 = h_px - 2 * CELL_H + 2
+        cy1 = h_px - CELL_H - 2
+        cx0 = 3 * CELL_W - 6
+        cx1 = cx0 + chip_cells * CELL_W + 12
+        crad = (cy1 - cy0) / 2
+        for y in range(max(0, cy0 - 2), min(h_px, cy1 + 3)):
+            for x in range(max(0, cx0 - 2), min(w_px, cx1 + 3)):
+                dx = max(cx0 + crad - x, 0, x - (cx1 - crad))
+                dy = max(cy0 + crad - y, 0, y - (cy1 - crad))
+                m = crad + 1.0 - math.hypot(dx, dy)
+                if m > 0:
+                    a2 = 255 if m >= 1.5 else int(255 * m / 1.5)
+                    i = (y * w_px + x) * 4
+                    er = buf[i:i + 4]
+                    s = a2 / 255
+                    buf[i] = int(er[0] * (1 - s) + 28 * s)
+                    buf[i + 1] = int(er[1] * (1 - s) + 36 * s)
+                    buf[i + 2] = int(er[2] * (1 - s) + 64 * s)
+                    buf[i + 3] = max(er[3], a2)
+    return _png_rgba(bytes(buf), w_px, h_px)
+
+
+def underlay_escapes(placements):
+    """placements: [(row, col, cols, rows, kind)] -> transmit/place at z=-1."""
+    out = []
+    for gid in _ul_ids.values():
+        out.append(_gfx({"a": "d", "d": "i", "i": gid, "q": 2}))
+    for row, col, cw, rh, kind in placements:
+        key = (kind, cw, rh)
+        if key not in _ul_ids:
+            _ul_ids[key] = 4400 + len(_ul_ids)
+            w_px, h_px = cw * CELL_W, rh * CELL_H
+            if kind == "aurora":
+                _ul_pngs[_ul_ids[key]] = _aurora_underlay(w_px, h_px)
+            elif kind.startswith("icon:"):
+                _ul_pngs[_ul_ids[key]] = _identicon_png(kind[5:])
+            elif kind.startswith("ring:"):
+                pct, color = kind[5:].split(",")
+                _ul_pngs[_ul_ids[key]] = _ring_png_cached(int(pct), color)
+            elif kind.startswith("chart:"):
+                _ul_pngs[_ul_ids[key]] = _chart_png(_chart_series.get(kind[6:], []), w_px, h_px)
+            elif kind.startswith("dio:"):
+                pb, chip_cells = kind[4:].split(":")
+                _ul_pngs[_ul_ids[key]] = _diorama_png(int(pb), h_px, w_px, int(chip_cells))
+            else:
+                _ul_pngs[_ul_ids[key]] = _panel_underlay(w_px, h_px, hi=(kind == "card_hi"))
+        gid = _ul_ids[key]
+        if gid not in _ul_sent:
+            out.append(_gfx({"a": "t", "f": 100, "i": gid, "q": 2}, _ul_pngs[gid]))
+            _ul_sent.add(gid)
+        out.append(f"\033[{row};{col}H")
+        zed = -1 if kind.startswith(("ring:", "icon:")) else -2
+        out.append(_gfx({"a": "p", "i": gid, "c": cw, "r": rh, "z": zed,
+                         "p": len(out), "q": 2}))
+    return "".join(out)
+
+
+def _animated_cat():
+    """Load ~/animated-cat.py (the reference tabby) if present."""
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "animated_cat", os.path.expanduser("~/animated-cat.py"))
+        m = importlib.util.module_from_spec(spec)
+        sys.modules["animated_cat"] = m
+        spec.loader.exec_module(m)
+        return m
+    except Exception:
+        return None
+
+
+def _png_rgba(raw, w, h):
+    rows = b"".join(b"\x00" + raw[y * w * 4:(y + 1) * w * 4] for y in range(h))
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d))
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+def _flip_rgba(raw, w, h):
+    out = bytearray(len(raw))
+    for y in range(h):
+        base = y * w * 4
+        for x in range(w):
+            out[base + x * 4: base + x * 4 + 4] = \
+                raw[base + (w - 1 - x) * 4: base + (w - 1 - x) * 4 + 4]
+    return bytes(out)
+
+
+def sprite_frames():
+    """Canonical frames walk0-3 / sit0-1 / sleep0 / alert0-1, facing RIGHT,
+    plus 'L' mirrors. Prefers the reference tabby from ~/animated-cat.py;
+    falls back to the built-in pixel maps."""
+    global _frames
+    if _frames is not None:
+        return _frames
+    reg = {}
+    ac = _animated_cat()
+    if ac:
+        try:
+            poses = {"walk0": ac.draw_cat(0), "walk1": ac.draw_cat(1),
+                     "walk2": ac.draw_cat(2), "walk3": ac.draw_cat(3),
+                     "sit0": ac.draw_cat_sit(), "sit1": ac.draw_cat_sit(blink=True),
+                     "sleep0": ac.draw_cat_sleep(),
+                     "alert0": ac.draw_cat_crouch(), "alert1": ac.draw_cat_lookup()}
+            w, h = ac.BASE_W, ac.BASE_H
+            for n, raw in poses.items():
+                reg[n] = _png_rgba(ac.upscale(raw, w, h, 3), w * 3, h * 3)
+                reg[n + "L"] = _png_rgba(
+                    ac.upscale(_flip_rgba(raw, w, h), w, h, 3), w * 3, h * 3)
+        except Exception:
+            reg = {}
+    if not reg:  # fallback: built-in chibi maps (they face LEFT, so R = base)
+        alias = {"walk0": "walk1R", "walk1": "walk2R", "walk2": "walk1R", "walk3": "walk2R",
+                 "walk0L": "walk1", "walk1L": "walk2", "walk2L": "walk1", "walk3L": "walk2",
+                 "sit0": "sit1", "sit1": "sit2", "sleep0": "sleep1",
+                 "alert0": "alert1", "alert1": "alert2"}
+        for n, src in alias.items():
+            if src in SPRITE_MAPS:
+                reg[n] = _png(SPRITE_MAPS[src])
+        for n in ("sit0", "sit1", "sleep0", "alert0", "alert1"):
+            if n in reg:
+                reg[n + "L"] = reg[n]
+    _frames = reg
+    return reg
+
+
+def _png(pixmap, scale=6):
+    h, w = len(pixmap), max(len(r) for r in pixmap)
+    rows = []
+    for y in range(h * scale):
+        src = pixmap[y // scale].ljust(w, ".")
+        row = bytearray([0])
+        for x in range(w * scale):
+            row += bytes(PAL.get(src[x // scale], (0, 0, 0, 0)))
+        rows.append(bytes(row))
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d))
+    ihdr = struct.pack(">IIBBBBB", w * scale, h * scale, 8, 6, 0, 0, 0)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+            + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
+
+
+def _gfx(keys, data=b""):
+    b = base64.standard_b64encode(data).decode() if data else ""
+    chunks = [b[i:i + 4000] for i in range(0, len(b), 4000)] or [""]
+    out = []
+    for idx, ch in enumerate(chunks):
+        k = dict(keys) if idx == 0 else {}
+        k["m"] = 1 if idx < len(chunks) - 1 else 0
+        ks = ",".join(f"{a}={v}" for a, v in k.items())
+        out.append(f"\033_G{ks};{ch}\033\\")
+    return "".join(out)
+
+
+def cat_mode():
+    try:
+        return open(CAT_MODE_FILE).read().strip() or "ascii"
+    except OSError:
+        return "ascii"
+
+
+def sprite_patch(cards, geo, frame):
+    """Position the pixel cat in the yard via kitty graphics protocol."""
+    global _prev_sprite
+    top, col, width, height = geo
+    if height < 8:
+        return ""
+    mode, mood, mc = fleet_mode(cards)
+    reg = sprite_frames()
+    t = frame
+    x = max(2, (width - 20) // 2)
+    if mode == "walk":
+        phase = t % 140
+        if phase >= 100:
+            name = "sit1" if t % 30 < 3 else "sit0"
+        else:
+            name = f"walk{(t // 2) % 4}"
+            span = max(4, width - 22)
+            p = (t // 2) % (2 * span)
+            x = p if p < span else 2 * span - p
+            if p >= span:  # heading left: mirrored frames
+                name += "L"
+    elif mode == "sit":
+        name = "sit1" if t % 30 < 3 else "sit0"
+    elif mode == "sleep":
+        name = "sleep0"
+    else:
+        name = f"alert{t // 5 % 2}"
+    if frame < _pet_until:
+        name, mood, mc = "sit1", "purring ♥", MAG
+    if name not in reg:
+        return ""
+    out = []
+    hrow = ""
+    if frame < _pet_until:
+        hrow = " " * (x + 5) + MAG + ["♥  ♥", " ♥ ♥", "  ♥  "][t // 2 % 3] + RST
+    out.append(f"\033[{top + max(0, height - 10)};{col}H" + pad(hrow, width) + "\033[K")
+    sid = 4200 + sorted(reg).index(name)
+    if name not in _transmitted:
+        out.append(_gfx({"a": "t", "f": 100, "i": sid, "q": 2}, reg[name]))
+        _transmitted.add(name)
+    out.append(f"\033[{top + max(1, height - 9)};{col + x}H")
+    out.append(_gfx({"a": "p", "i": sid, "c": 18, "r": 6, "q": 2}))
+    if _prev_sprite is not None and _prev_sprite != sid:
+        out.append(_gfx({"a": "d", "d": "i", "i": _prev_sprite, "q": 2}))
+    _prev_sprite = sid
+    out.append(f"\033[{top + 7};{col}H" + pad("", width) + "\033[K")
+    out.append(f"\033[{top + max(8, height - 2)};{col}H"
+               + pad("    " + mc + mood + RST, width) + "\033[K")
+    return "".join(out)
+
+
+def cat_art(mode, t):
+    """4 rows of cat — pure ASCII, no combining characters, no demons."""
+    blink = t % 37 == 0
+    if mode == "walk":
+        eyes = "-.-" if blink else "o.o"
+        feet = ["  w w  ", " w   w ", "  w w  ", " w w   "][t % 4]
+        tail = "~" if t % 4 < 2 else ","
+        return [" /\\_/\\", f"( {eyes} )", f" (   ){tail}", feet]
+    if mode == "sit":
+        eyes = "-.-" if blink else "^.^"
+        tail = ["~", ",", "~", "`"][t // 3 % 4]
+        return [" /\\_/\\", f"( {eyes} )", f" )   ({tail}", "  \" \""]
+    if mode == "sleep":
+        z = ["z", "zZ", "zZz"][t // 5 % 3]
+        return [f" /\\_/\\   {z}", "( -.- )", " (   )", " ~~~~~"]
+    bang = "!" if t % 4 < 2 else " "
+    return [f" /\\_/\\  {bang}", "( O.O )", " (   )", "  ! !"]
+
+
+def _chw(ch):
+    """Terminal cell width of one character (the overflow bug was emoji/
+    symbols rendering 2 cells while being counted as 1)."""
+    o = ord(ch)
+    if unicodedata.combining(ch):
+        return 0
+    if o == 0xFE0F:
+        return 1  # VS16 promotes the previous char to emoji-wide
+    if unicodedata.east_asian_width(ch) in ("W", "F") or 0x1F000 <= o <= 0x1FAFF:
+        return 2
+    return 1
+
+
+def vlen(s):
+    return sum(_chw(ch) for ch in ANSI.sub("", s))
+
+
+def vtrunc(s, limit):
+    """ANSI- and cell-width-aware truncation, closing with reset + ellipsis."""
+    if vlen(s) <= limit:
+        return s
+    out, w = [], 0
+    for tok in re.split(r"(\033\[[0-9;:]*m)", s):
+        if tok.startswith("\033["):
+            out.append(tok)
+            continue
+        for ch in tok:
+            cw = _chw(ch)
+            if w + cw > limit - 1:
+                return "".join(out) + RST + "\u2026"
+            out.append(ch)
+            w += cw
+    return "".join(out) + RST + "\u2026"
 
 
 def panel_row(content, width, bg=PANEL, caps=True):
@@ -1315,9 +1820,7 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
         if c.get("note"):
             left.append(Pc(f"      {AMBER}✎ {c['note']}{RST}"))
         for e, t in c["events"]:
-            txt = t
-            if vlen(txt) > left_w - 16:
-                txt = txt[: len(txt) - (vlen(txt) - (left_w - 17))] + "…"
+            txt = vtrunc(t, left_w - 20)
             left.append(Pc(f"      {DIM}{fmt_age(now - e) if e else '':>4}{RST} {txt}{RST}"))
         left.append(Pc(""))
         card_spans.append((card_start, len(left) - card_start,
