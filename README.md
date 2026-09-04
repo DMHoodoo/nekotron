@@ -12,6 +12,9 @@ Built 2026-07-09/10. Everything is event-driven — no daemons, no timers.
   transcript activity feeds, notes, cost, context gradient bars; fleet
   timeline; ring gauges (memory / 5h / weekly usage); vitals incl. kitty
   socket health; animated cat (ASCII or pixel sprite, toggle `s`, pet `c`).
+- **Meow on attention** — any session flipping to NEEDS YOU plays
+  `sounds/meow.wav` (synthesized from raw sine math, symlinked to
+  `~/.claude/sounds/`), board open or not. Delete the symlink to silence.
 - **Fleet actions** — `⌘⇧A` jump to the session that needs you, `⌘⇧B`
   broadcast one message to every Claude, `⌘⇧P` peek any tab's live screen
   without switching, `⌘⇧X` open a Claude about whatever is on screen,
