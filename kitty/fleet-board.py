@@ -1771,7 +1771,7 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
         card_start = len(left)
         Pc = lambda content: panel_row(content, left_w, bg)
         c_min = c.get("min") and c["state"] != "attention"  # attention re-expands
-        if compact or c_min:  # one row per session
+        if (compact or c_min) and c.get("anim") is None:  # one row per session
             b = BOLD if c["focused"] else ""
             row_idx = len(left)
             tail, ring_kind = _row_tail(c, frame, bg)
@@ -1784,25 +1784,33 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
             left.append("")
             continue
         tail, ring_kind = _row_tail(c, frame, bg)
-        if c.get("sid"):
-            card_marks.append((len(left) + 1, 2, f"icon:{c['sid']}|{c['repo'] or ''}"))
         b = BOLD if c["focused"] else ""
         head = f"   {b}{INK}{c.get('idx', i):>2}{RST} {hue}▎{RST}{color}{glyph}{RST} {b}{INK}{c['title'][:left_w - 2 - TAIL_W - 14]}{RST}"
+        body, bmarks = [], []
+        if c.get("sid"):
+            bmarks.append((1, 2, f"icon:{c['sid']}|{c['repo'] or ''}"))
         if ring_kind:
-            card_marks.append((len(left) + 1, left_w - TAIL_W, ring_kind))
-        left.append(Pc(""))
-        left.append(Pc(head + " " * max(0, left_w - 2 - vlen(head) - TAIL_W) + tail))
+            bmarks.append((1, left_w - TAIL_W, ring_kind))
+        body.append(Pc(""))
+        body.append(Pc(head + " " * max(0, left_w - 2 - vlen(head) - TAIL_W) + tail))
         if c["repo"] or c["meta"]:
             rep = f"{hue}{c['repo']}{RST}" if c["repo"] else ""
             joiner = f"{DIM} · {RST}" if c["repo"] and c["meta"] else ""
-            left.append(Pc(f"      {rep}{joiner}{DIM}{c['meta']}{RST}"))
+            body.append(Pc(f"      {rep}{joiner}{DIM}{c['meta']}{RST}"))
         if c.get("note"):
-            left.append(Pc(f"      {AMBER}✎ {c['note']}{RST}"))
+            body.append(Pc(f"      {AMBER}✎ {c['note']}{RST}"))
         for e, t in c["events"]:
             txt = vtrunc(t, left_w - 20)
-            left.append(Pc(f"      {DIM}{fmt_age(now - e) if e else '':>4}{RST} {txt}{RST}"))
-        left.append(Pc(""))
-        card_spans.append((card_start, len(left) - card_start,
+            body.append(Pc(f"      {DIM}{fmt_age(now - e) if e else '':>4}{RST} {txt}{RST}"))
+        body.append(Pc(""))
+        ap = c.get("anim")
+        if ap is not None:  # fold/unfold: show the top slice of the body
+            body = body[: max(2, round(len(body) * ap))]
+        left.extend(body)
+        for rr, cc2, kk in bmarks:
+            if rr < len(body):
+                card_marks.append((card_start + rr, cc2, kk))
+        card_spans.append((card_start, len(body),
                            c["focused"] or bool(c.get("hover")), c.get("idx", i)))
         left.append("")
 
@@ -1981,6 +1989,7 @@ def main():
     compact = os.path.exists(DENSITY_FILE)
     minset = _load_min()
     pend_min = False
+    anims = {}  # _min_key -> (start_monotonic, collapsing)
     hover_idx = None
     hover_since = 0
     peek = None
@@ -2004,9 +2013,21 @@ def main():
                     v = vitals()
             except Exception:
                 fails += 1  # keep showing the previous data; retry later
+            nowm = time.monotonic()
             for c in cards:
-                c["min"] = _min_key(c) in minset
+                k_ = _min_key(c)
+                c["min"] = k_ in minset
                 c["hover"] = c.get("idx") == hover_idx
+                c["anim"] = None
+                if k_ in anims:
+                    t0_, collapsing = anims[k_]
+                    pr = (nowm - t0_) / 0.22
+                    if pr >= 1.0:
+                        del anims[k_]
+                    else:
+                        c["anim"] = max(0.0, min(1.0, (1.0 - pr) if collapsing else pr))
+            if anims:
+                geo = None  # animate: full frame every tick
             vis = cards if filt is None else [c for c in cards if _match(filt, c)]
             pal_view = None
             if pal is not None:
@@ -2036,7 +2057,7 @@ def main():
             if test_frames and frame >= test_frames:
                 break
             if interactive:
-                r, _, _ = select.select([sys.stdin], [], [], 0.1)
+                r, _, _ = select.select([sys.stdin], [], [], 0.03 if anims else 0.1)
                 if r:
                     data = os.read(fd, 64).decode("utf-8", "replace")
                     while select.select([sys.stdin], [], [], 0.004)[0]:
@@ -2055,7 +2076,9 @@ def main():
                             if hitc:
                                 mc_ = next((c for c in cards if c.get("idx") == hitc), None)
                                 if mc_:
-                                    minset ^= {_min_key(mc_)}
+                                    k_ = _min_key(mc_)
+                                    minset ^= {k_}
+                                    anims[k_] = (time.monotonic(), k_ in minset)
                                     _save_min(minset)
                                     geo = None
                             elif (mb_ == 0 and _hit["yard"] and peek is None and mx_ >= _hit["yard"][2]
@@ -2146,6 +2169,9 @@ def main():
                             quiet = {_min_key(c) for c in cards
                                      if c["state"] in ("done", "neutral")} - {""}
                             minset = minset - quiet if quiet <= minset else minset | quiet
+                            t0_ = time.monotonic()
+                            for j_, c_ in enumerate(c2 for c2 in cards if _min_key(c2) in quiet):
+                                anims[_min_key(c_)] = (t0_ + j_ * 0.05, _min_key(c_) in minset)
                             _save_min(minset)
                             geo = None
                         elif ch == "d":
@@ -2178,7 +2204,9 @@ def main():
                             if not 0 < sel <= len(cards):
                                 pass
                             elif was_pend:  # m+digit: toggle that card
-                                minset ^= {_min_key(cards[sel - 1])}
+                                k_ = _min_key(cards[sel - 1])
+                                minset ^= {k_}
+                                anims[k_] = (time.monotonic(), k_ in minset)
                                 _save_min(minset)
                                 geo = None
                             else:
