@@ -560,7 +560,8 @@ def underlay_escapes(placements):
             out.append(_gfx({"a": "t", "f": 100, "i": gid, "q": 2}, _ul_pngs[gid]))
             _ul_sent.add(gid)
         out.append(f"\033[{row};{col}H")
-        out.append(_gfx({"a": "p", "i": gid, "c": cw, "r": rh, "z": -1,
+        zed = -1 if kind.startswith(("ring:", "icon:")) else -2
+        out.append(_gfx({"a": "p", "i": gid, "c": cw, "r": rh, "z": zed,
                          "p": len(out), "q": 2}))
     return "".join(out)
 
@@ -1286,7 +1287,7 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
                            panel=bg) + (f" {DIM}{age:<4}{RST}" if age else "")
             gap = left_w - 2 - vlen(head) - vlen(tail)
             left.append(Pc(head + " " * max(1, gap) + tail))
-            card_spans.append((card_start, 1, c["focused"], c.get("idx", i)))
+            card_spans.append((card_start, 0, c["focused"], c.get("idx", i)))
             left.append("")
             continue
         age = fmt_age(now - c["s_epoch"]) if c["s_epoch"] else ""
