@@ -1272,12 +1272,10 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
         if compact or c_min:  # one row per session
             b = BOLD if c["focused"] else ""
             row_idx = len(left)
-            if c.get("sid"):
-                card_marks.append((row_idx, 2, f"icon:{c['sid']}|{c['repo'] or ''}"))
-            ctxs = ""
+            ctxs, ring_kind = "", None
             if c.get("ctx") is not None:
                 cc = DIM if c["ctx"] < 70 else (AMBER if c["ctx"] < 88 else ST["attention"][0])
-                card_marks.append((row_idx, left_w - 22, f"ring:{5 * round(c['ctx'] / 5)},{'good' if c['ctx'] < 70 else ('warn' if c['ctx'] < 88 else 'bad')}"))
+                ring_kind = f"ring:{5 * round(c['ctx'] / 5)},{'good' if c['ctx'] < 70 else ('warn' if c['ctx'] < 88 else 'bad')}"
                 ctxs = f"{cc}{c['ctx']:>2}%{RST}    "
             age = fmt_age(now - c["s_epoch"]) if c["s_epoch"] else ""
             lead = f"  {DIM}\u25b8{RST} " if c_min and not compact else "    "
@@ -1286,17 +1284,18 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
                            fg=(_wm_hex(frame * 0.02) if c["state"] == "working" else 0xE8ECFF),
                            panel=bg) + (f" {DIM}{age:<4}{RST}" if age else "")
             gap = left_w - 2 - vlen(head) - vlen(tail)
+            if ring_kind:
+                card_marks.append((row_idx, left_w - vlen(tail) - 2, ring_kind))
             left.append(Pc(head + " " * max(1, gap) + tail))
             card_spans.append((card_start, 0, c["focused"], c.get("idx", i)))
             left.append("")
             continue
         age = fmt_age(now - c["s_epoch"]) if c["s_epoch"] else ""
-        ctxs = ""
+        ctxs, ring_kind = "", None
         if c.get("ctx") is not None:
             cc = DIM if c["ctx"] < 70 else (AMBER if c["ctx"] < 88 else ST["attention"][0])
             ring_color = "good" if c["ctx"] < 70 else ("warn" if c["ctx"] < 88 else "bad")
-            card_marks.append((len(left) + 1, left_w - 22,
-                               f"ring:{5 * round(c['ctx'] / 5)},{ring_color}"))
+            ring_kind = f"ring:{5 * round(c['ctx'] / 5)},{ring_color}"
             ctxs = f"{cc}{c['ctx']:>2}%{RST}    "
         if c.get("sid"):
             card_marks.append((len(left) + 1, 2, f"icon:{c['sid']}|{c['repo'] or ''}"))
@@ -1306,6 +1305,8 @@ def build_frame(cards, v, cols, rows, tall, frame, mode="ascii", filt=None, peek
                            fg=(_wm_hex(frame * 0.02) if c["state"] == "working" else 0xE8ECFF),
                            panel=bg) + (f" {DIM}{age:<4}{RST}" if age else "")
         gap = left_w - 2 - vlen(head) - vlen(tail)
+        if ring_kind:
+            card_marks.append((len(left) + 1, left_w - vlen(tail) - 2, ring_kind))
         left.append(Pc(""))
         left.append(Pc(head + " " * max(1, gap) + tail))
         if c["repo"] or c["meta"]:
