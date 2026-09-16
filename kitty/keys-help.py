@@ -19,6 +19,7 @@ DESC = {
     "fleet-say.py": "broadcast one message to every Claude",
     "fleet-peek.py": "peek any tab's live screen without switching",
     "md-preview": "pick a path on screen \u2192 preview in-terminal (glow)",
+    "code-copy.py": "copy a code block from this tab's Claude (exact text)",
     "keys-help.py": "this cheatsheet",
     "goto_tab": "go to tab",
     "send_key page_up": "page up (Claude Code scrollback)",

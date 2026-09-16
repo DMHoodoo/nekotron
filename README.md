@@ -25,6 +25,9 @@ Built 2026-07-09/10. Everything is event-driven — no daemons, no timers.
   one-line cards. Closing a Claude session prints a two-line exit receipt
   (duration · cost · resume command).
   `⌘⇧M` previews any on-screen file path in-terminal (glow for markdown).
+  `⌘⇧C` lists the recent code blocks from this tab's Claude session
+  (pulled from the transcript, so you copy the exact original text, not
+  the screen-wrapped render) — a digit copies to clipboard.
 
 ## Charm lane
 
