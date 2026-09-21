@@ -83,3 +83,22 @@ exported as `GLAMOUR_STYLE`): real headings, palette-matched, no `##`.
 
 State lives in /tmp/claude-kitty-status/ (ephemeral) and
 ~/.claude/{session,cost}-ledger.tsv (persistent, not in repo).
+
+## Optional integrations
+
+Everything below is opt-in; each tool degrades cleanly when absent.
+
+| Tool | Powers | Install | Without it |
+|---|---|---|---|
+| `gum` | `resume` fuzzy picker | `brew install gum` | no picker UI |
+| `glow` | `md`, `mdv`, `docs`, `⌘⇧M`, styled `q` | `brew install glow` | plain text |
+| `freeze` | `board-shot`, `md-shot` | `brew trust charmbracelet/tap && brew install charmbracelet/tap/freeze` (the core `freeze` formula is an unrelated cask) | no PNG export |
+| `vhs` | `docs/demo.tape` recordings | `brew install vhs` | none |
+| `slides` | markdown → terminal decks | `brew install slides` | none |
+| `crush` | `qa` agentic local one-shots | `brew install charmbracelet/tap/crush` + `crush/crush.json` (symlinked by install.sh) | no qa |
+| `ollama` + a local model | `q` sub-second answers (config assumes `gemma4:latest`; edit `bin/q` + `crush/crush.json` for another) | [ollama.com](https://ollama.com) then `ollama pull <model>` | no q/qa |
+| `mermaid-cli` | mdv renders ```mermaid fences as diagrams | `brew install mermaid-cli` (needs node) | styled code block |
+| [SMD](https://github.com/DMHoodoo/SMD) | `o` from `⌘⇧M` opens the doc natively (GFM/mermaid/KaTeX, live reload) | clone + `make install` (Swift 6 CLT) | terminal-only prompt |
+
+The meow is self-contained (`sounds/meow.wav`, symlinked by install.sh);
+delete `~/.claude/sounds/meow.wav` for a silent fleet.

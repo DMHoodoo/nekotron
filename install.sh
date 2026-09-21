@@ -10,6 +10,9 @@ for f in "$R"/kitty/*; do
 done
 for f in "$R"/bin/*;   do ln -sf "$f" ~/bin/"$(basename "$f")"; done
 for f in "$R"/hooks/*; do ln -sf "$f" ~/.claude/hooks/"$(basename "$f")"; done
+mkdir -p ~/.claude/sounds ~/.config/crush
+ln -sf "$R"/sounds/meow.wav ~/.claude/sounds/meow.wav          # attention meow
+[ -e ~/.config/crush/crush.json ] || ln -sf "$R"/crush/crush.json ~/.config/crush/crush.json
 echo "symlinks done. Manual steps (once):"
 echo "  1. kitty.conf:  include $R/kitty/nekotron.conf"
 echo "  2. ~/.zshrc:    source $R/zsh/nekotron.zsh"
