@@ -22,8 +22,14 @@ GLOW="$(command -v glow || echo /opt/homebrew/bin/glow)"
 case "$f" in
     *.md|*.markdown|*.mdx)
         "$HOME/Documents/GlowDevelopment/nekotron/bin/mdv" "$f"
-        printf '\n\033[38;2;107;115;148m— any key to close (wheel scrolls) —\033[0m'
-        IFS= read -rsn1
+        if [ -d "/Applications/SMD.app" ]; then
+            printf '\n\033[38;2;107;115;148m— o opens in SMD · any other key closes (wheel scrolls) —\033[0m'
+            IFS= read -rsn1 k
+            [ "$k" = "o" ] && /usr/bin/open -a SMD "$f"
+        else
+            printf '\n\033[38;2;107;115;148m— any key to close (wheel scrolls) —\033[0m'
+            IFS= read -rsn1
+        fi
         exit 0 ;;
     *) exec /usr/bin/less -R "$f" ;;
 esac

@@ -54,6 +54,9 @@ exported as `GLAMOUR_STYLE`): real headings, palette-matched, no `##`.
 - **`slides <file.md>`** — terminal presentation; `---` = slide breaks.
 - **`md-shot <file.md> [out.png]`** — styled PNG of a doc (for Slack).
 - **`q`** answers are typeset through glow on a tty.
+- **`smd <file.md>`** — sibling project [DMHoodoo/SMD](https://github.com/DMHoodoo/SMD):
+  native macOS viewer (GFM, mermaid, KaTeX, tabs, live reload). `⌘⇧M`'s
+  in-terminal view offers `o` to pop the same file open in SMD.
 - **`docs/showcase.md`** — one document that exercises all of the above.
 - **Session safety** — crash-proof workspace restore (startup_session +
   auto-snapshots), session ledger (TSV black box), fleet-grep transcript
