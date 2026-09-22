@@ -32,16 +32,32 @@ Built 2026-07-09/10. Everything is event-driven — no daemons, no timers.
 ## Second machine (control plane)
 
 `fleet-remote [user@host]` (or `⌘⇧O` with a default host in
-`~/.config/nekotron/remote-host`) opens the other laptop's fleet board over
-`kitten ssh`. Use its Tailscale hostname/IP across networks; macOS Remote
-Login provides the SSH server. Install Nekotron and tmux on both machines:
+`~/.config/nekotron/remote-host`) recreates the other laptop's kitty workspace
+as **native local kitty tabs**. Each shared terminal attaches over SSH to the
+same remote tmux session; switch tabs normally to inspect prompts and type.
+Remote OS-window grouping, tab order/titles, pane grouping, and layout names
+are copied when opened. Split ratios, changing titles, tab status LEDs, and
+subsequent layout changes are not continuously synchronized; close and reopen
+the mirror to refresh its structure. Remote terminals remain live throughout.
+
+Use its Tailscale hostname/IP across networks; macOS Remote Login provides
+the SSH server. Update/install Nekotron on **both** machines for this launcher:
 
 ```sh
+git pull
 brew install tmux
 ./install.sh
 source zsh/nekotron.zsh  # existing shells; new shells load it via ~/.zshrc
 ```
 
+Tabs started outside tmux appear as **[local only]** placeholders, with
+migration instructions. They are not silently restarted or copied into new
+agent conversations. Already-mirrored windows are excluded to prevent
+recursive mirrors. Detached tmux sessions appear in a separate remote window.
+Closing a mirror tab disconnects its client without stopping the remote agent.
+After a connection drops or you detach, press Enter in that tab to reconnect.
+
+`fleet-remote --board [user@host]` retains the dashboard and its status LEDs.
 Interactive `claude` and `codex` commands in kitty now start in persistent
 **tmux sessions on the machine running the agent**. `new` and `resume` use
 this path too. Piped/noninteractive commands (including `claude -p` and

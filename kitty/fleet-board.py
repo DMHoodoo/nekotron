@@ -2095,6 +2095,7 @@ def main():
                         c["anim"] = max(0.0, min(1.0, (1.0 - pr) if collapsing else pr))
             if anims:
                 geo = None  # animate: full frame every tick
+                full = True
             vis = cards if filt is None else [c for c in cards if _match(filt, c)]
             pal_view = None
             if pal is not None:

@@ -11,7 +11,10 @@ import fleet_tmux
 
 def main():
     args = sys.argv[1:]
-    if args == ['list']:
+    if args == ['layout', '--json']:
+        import fleet_remote
+        print(json.dumps(fleet_remote.layout()))
+    elif args == ['list']:
         for s in fleet_tmux.sessions().values():
             print(f"{s['name']}\t{s['command']}\t{s['cwd']}")
     elif args == ['list', '--json']:
@@ -30,7 +33,7 @@ def main():
         print(f'Shared session: {name} — Ctrl-B then D detaches without stopping it.', flush=True)
         fleet_tmux.attach(name)
     else:
-        raise ValueError('usage: fleet-session run COMMAND [ARGS...] | attach NAME | list [--json]')
+        raise ValueError('usage: fleet-session run COMMAND [ARGS...] | attach NAME | list [--json] | layout --json')
 
 
 if __name__ == '__main__':

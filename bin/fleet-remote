@@ -1,28 +1,18 @@
-#!/bin/bash
-# fleet-remote — open the OTHER machine's fleet board in a new kitty OS
-# window, over ssh (Tailscale hostname works great). The board runs on the
-# remote machine (its sockets, state, transcripts) and renders + takes
-# mouse/keys HERE — a second mission-control window for the other laptop.
-#
-#   fleet-remote [user@host]     # or set the default once:
-#   echo "user@laptop2-tailnet" > ~/.config/nekotron/remote-host
-cfg="$HOME/.config/nekotron/remote-host"
-host="${1:-$(cat "$cfg" 2>/dev/null)}"
-if [ -z "$host" ]; then
-    echo "no remote host configured. Either:"
-    echo "  fleet-remote user@host"
-    echo "  mkdir -p ~/.config/nekotron && echo 'user@host' > $cfg"
-    echo "(a Tailscale hostname is ideal: no ports, encrypted, works anywhere)"
-    exit 1
-fi
-KITTEN="$(command -v kitten || echo /Applications/kitty.app/Contents/MacOS/kitten)"
-sock=""
-for s in $(ls -t /tmp/kitty-ctl-* 2>/dev/null); do
-    kill -0 "${s##*-}" 2>/dev/null && sock="$s" && break
-done
-[ -n "$sock" ] || { echo "no live kitty socket"; exit 1; }
-"$KITTEN" @ --to "unix:$sock" launch --type=os-window \
-    --os-window-title "NEKOTRON @ ${host#*@}" --title "fleet @ ${host#*@}" \
-    "$KITTEN" ssh -t "$host" \
-    'exec ~/.config/kitty/fleet-board.py --remote' >/dev/null
-echo "⌁ remote fleet window opened: ${host#*@}"
+#!/usr/bin/env python3
+"""Open the other laptop's terminals as native kitty tabs."""
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'kitty'))
+import fleet_remote
+
+if __name__ == '__main__':
+    try:
+        fleet_remote.main()
+    except (KeyboardInterrupt, EOFError):
+        pass
+    except Exception as e:
+        print(f'fleet-remote: {e}', file=sys.stderr)
+        if not any(a in sys.argv for a in ('--session-tab', '--unshared-tab', '--error-tab')):
+            fleet_remote.show_error(str(e))
+        sys.exit(1)
