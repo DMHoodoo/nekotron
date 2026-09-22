@@ -1,6 +1,6 @@
 # ᓚᘏᗢ Nekotron
 
-Mission control for a fleet of Claude Code sessions running in kitty.
+Mission control for a fleet of Claude Code and Codex CLI sessions running in kitty.
 Built 2026-07-09/10. Everything is event-driven — no daemons, no timers.
 
 ## What it does
@@ -41,6 +41,39 @@ Built 2026-07-09/10. Everything is event-driven — no daemons, no timers.
 - **`md`** — alias for `glow -p` (markdown pager).
 - **`docs/demo.tape`** — vhs recording script (`vhs docs/demo.tape`).
 
+## Codex lane
+
+- **`qo <question>`** — non-interactive `codex exec`; pipe stdin for context
+  (`cat err.log | qo what broke`). Uses your Codex login/model and quota.
+  Progress stays on stderr; the final answer goes to stdout (glow on a tty).
+- **Interactive `codex`** — working → attention on approval → done drives the
+  same tab LED, fleet card, attention jump, and meow as Claude. No separate
+  status files or daemon. All writes go through `kitty-tab-status.sh`.
+
+Run `./install.sh`, then add this at the **top level** of `~/.codex/config.toml`
+(before any `[table]`; substitute your actual absolute checkout path):
+
+```toml
+notify = ["/Users/YOU/Documents/GlowDevelopment/nekotron/hooks/codex-notify.sh"]
+```
+
+The installer links `~/.codex/hooks/codex-notify.sh` and `~/.codex/hooks.json`
+into this repo. If you already have a hooks file, it preserves it and prints
+merge instructions. In a new Codex session, open **`/hooks`** and review/trust
+Nekotron's hooks; a changed hook definition needs review again.
+
+Tested with Codex CLI **0.155.1**: `notify` only emits completion, so lifecycle
+hooks supply working, approval attention, tool resumption, and interrupt state.
+A live Plan-mode `request_user_input` question also produced attention and
+returned to working after answering; plain final questions are completed turns (green). Approval hooks may fire
+before automatic approval review, briefly showing attention even if review
+approves without asking you. Background title-generation completions are ignored.
+See [observed payloads and reproduction](docs/codex-events.md).
+
+Codex gets the shared status UI; transcript feeds, cost/context accounting,
+Claude broadcast, and automatic Claude session resume remain Claude-specific.
+Use `codex resume` to reopen a saved Codex conversation.
+
 ## Markdown lane
 
 All rendering uses the Nekotron glamour style (`glow/nekotron.json`,
@@ -71,11 +104,15 @@ exported as `GLAMOUR_STYLE`): real headings, palette-matched, no `##`.
 | kitty/nekotron.conf | all kitty config additions         | include-d by kitty.conf  |
 | bin/      | fleet-grep, costs, note, new, snapshot, wall | ~/bin/                   |
 | hooks/    | Claude Code hooks (status, statusline, ledger, guardrail) | ~/.claude/hooks/ |
+| codex/    | Codex lifecycle hook wiring                | ~/.codex/hooks.json      |
+| hooks/codex-notify.sh | Codex event adapter                 | ~/.codex/hooks/           |
 | zsh/      | splash guard + aliases                       | sourced by ~/.zshrc      |
 | claude/   | settings.json wiring reference               | (manual merge)           |
 | mocks/    | sprite/header design previews                | —                        |
 
 ## Install (new machine)
+
+Requires kitty ≥ 0.48 (`brew install --cask kitty`).
 
 ```sh
 ./install.sh          # symlinks everything, prints the 3 manual lines
@@ -90,6 +127,7 @@ Everything below is opt-in; each tool degrades cleanly when absent.
 
 | Tool | Powers | Install | Without it |
 |---|---|---|---|
+| Codex CLI | `qo`, Codex tab/board states | Install/login to Codex; top-level `config.toml`: `notify = ["/ABS/PATH/nekotron/hooks/codex-notify.sh"]`, then `/hooks` review (see Codex lane) | no Codex lane |
 | `gum` | `resume` fuzzy picker | `brew install gum` | no picker UI |
 | `glow` | `md`, `mdv`, `docs`, `⌘⇧M`, styled `q` | `brew install glow` | plain text |
 | `freeze` | `board-shot`, `md-shot` | `brew trust charmbracelet/tap && brew install charmbracelet/tap/freeze` (the core `freeze` formula is an unrelated cask) | no PNG export |
