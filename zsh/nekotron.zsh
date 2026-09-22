@@ -1,3 +1,5 @@
+export PATH="$HOME/bin:/Applications/kitty.app/Contents/MacOS:$PATH"
+
 # Nekotron splash — kitty interactive shells only (remove block to disable)
 if [[ -o interactive && -n "$KITTY_WINDOW_ID" && -z "$NEKOTRON_SPLASHED" ]]; then
     export NEKOTRON_SPLASHED=1

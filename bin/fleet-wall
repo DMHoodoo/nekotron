@@ -9,4 +9,4 @@ done
 [ -n "$sock" ] || { echo "no live kitty socket"; exit 1; }
 KITTEN="$(command -v kitten || echo /Applications/kitty.app/Contents/MacOS/kitten)"
 "$KITTEN" @ --to "unix:$sock" launch --type=os-window --title "ᓚᘏᗢ fleet wall" \
-    /Users/hassankhan/.config/kitty/fleet-board.py --watch >/dev/null && echo "fleet wall up — drag it to a spare monitor"
+    "$HOME/.config/kitty/fleet-board.py" --watch >/dev/null && echo "fleet wall up — drag it to a spare monitor"
