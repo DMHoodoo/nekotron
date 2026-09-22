@@ -23,7 +23,11 @@ import time
 import unicodedata
 import zlib
 
-KITTEN = shutil.which("kitten") or "/Applications/kitty.app/Contents/MacOS/kitten"
+# kitten ssh prepends its bundled client to PATH. Control local kitty with
+# its matching app binary, rather than that potentially different client.
+_LOCAL_KITTEN = "/Applications/kitty.app/Contents/MacOS/kitten"
+KITTEN = (_LOCAL_KITTEN if os.access(_LOCAL_KITTEN, os.X_OK)
+          else shutil.which("kitten") or _LOCAL_KITTEN)
 TMUX = shutil.which("tmux") or "/opt/homebrew/bin/tmux"
 MEMP = shutil.which("memory_pressure") or "/usr/sbin/memory_pressure"
 STATE_DIR = "/tmp/claude-kitty-status"
