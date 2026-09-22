@@ -14,6 +14,12 @@ for f in "$R"/hooks/*; do
     ln -sf "$f" ~/.claude/hooks/"$(basename "$f")"
 done
 mkdir -p ~/.codex/hooks
+# Share Hassan's Markdown skills with Codex without replacing user instructions.
+if [ ! -e ~/.codex/AGENTS.md ] && [ ! -L ~/.codex/AGENTS.md ]; then
+    ln -s "$R/codex/AGENTS.md" ~/.codex/AGENTS.md
+elif [ "$(readlink ~/.codex/AGENTS.md)" != "$R/codex/AGENTS.md" ]; then
+    echo "Codex: merge $R/codex/AGENTS.md into your existing ~/.codex/AGENTS.md"
+fi
 ln -sf "$R"/hooks/codex-notify.sh ~/.codex/hooks/codex-notify.sh
 # Preserve existing user hooks; merge manually if this is not our symlink.
 if [ ! -e ~/.codex/hooks.json ] && [ ! -L ~/.codex/hooks.json ]; then

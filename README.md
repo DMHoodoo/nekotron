@@ -68,6 +68,11 @@ Run `./install.sh`, then add this at the **top level** of `~/.codex/config.toml`
 notify = ["/Users/YOU/Documents/GlowDevelopment/nekotron/hooks/codex-notify.sh"]
 ```
 
+The installer also links `~/.codex/AGENTS.md` to `codex/AGENTS.md`, which points
+Codex at Hassan's shared Markdown skills in `~/.claude/skills` (install
+[dotclaude](https://github.com/DMHoodoo/dotclaude) first). Existing user
+instructions are preserved with a manual merge hint.
+
 The installer links `~/.codex/hooks/codex-notify.sh` and `~/.codex/hooks.json`
 into this repo. If you already have a hooks file, it preserves it and prints
 merge instructions. In a new Codex session, open **`/hooks`** and review/trust
