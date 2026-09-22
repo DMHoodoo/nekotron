@@ -29,6 +29,17 @@ Built 2026-07-09/10. Everything is event-driven — no daemons, no timers.
   (pulled from the transcript, so you copy the exact original text, not
   the screen-wrapped render) — a digit copies to clipboard.
 
+## Second machine (control plane)
+
+`fleet-remote [user@host]` (or `⌘⇧O` once the default host is set in
+`~/.config/nekotron/remote-host`) opens the OTHER laptop's fleet board in
+its own kitty OS window over `kitten ssh` — Tailscale hostnames are ideal.
+The board runs remotely against that machine's sockets/state/transcripts
+and renders + takes mouse/keys here: peek its sessions, filter, minimize,
+watch its LEDs, all from one chair. Digit-jumps focus tabs on the REMOTE
+machine's screen (useful when it's also screen-shared). Requires nekotron
+installed on both machines (it is — that's the point of the repo).
+
 ## Charm lane
 
 - **`q <question>`** — sub-second answer from the LOCAL model (ollama gemma4,
