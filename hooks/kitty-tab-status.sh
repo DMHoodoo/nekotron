@@ -17,7 +17,20 @@ case "$state" in done|attention|working|reset) ;; *) exit 0 ;; esac
 dir=/tmp/claude-kitty-status
 mkdir -p "$dir" 2>/dev/null
 
-KITTEN="$(command -v kitten || echo /Applications/kitty.app/Contents/MacOS/kitten)"
+KITTEN=/Applications/kitty.app/Contents/MacOS/kitten
+[ -x "$KITTEN" ] || KITTEN="$(command -v kitten)"
+
+# A shared session keeps publishing even after every kitty/SSH client detaches.
+# Keep the stable state separate from the window mirror used by the tab bar.
+if [[ "$NEKOTRON_TMUX_SESSION" =~ ^neko-[a-zA-Z0-9_-]+$ ]]; then
+    stable="$dir/tmux-$NEKOTRON_TMUX_SESSION"
+    previous=$(cat "$stable" 2>/dev/null)
+    if [ "$state" = reset ]; then
+        rm -f "$stable"
+    elif ! { [ "$state" = attention ] && [ "$previous" = done ]; }; then
+        printf '%s' "$state" > "$stable"
+    fi
+fi
 
 kpid="$KITTY_PID"
 wid="$KITTY_WINDOW_ID"
@@ -30,15 +43,15 @@ if [ -n "$TMUX" ]; then
         key="$(cat "$map" 2>/dev/null)"
     else
         sess=$(tmux display-message -pt "$TMUX_PANE" '#{session_name}' 2>/dev/null)
-        cpid=$(tmux list-clients -t "$sess" -F '#{client_pid}' 2>/dev/null | head -1)
+        cpids=$(tmux list-clients -t "$sess" -F '#{client_pid}' 2>/dev/null)
         sock=$(ls -t /tmp/kitty-ctl-* 2>/dev/null | head -1)
-        if [ -n "$cpid" ] && [ -n "$sock" ]; then
-            rwid=$("$KITTEN" @ --to "unix:$sock" ls 2>/dev/null | jq -r --argjson p "$cpid" \
-                'first(.[] | .tabs[] | .windows[] | select(.foreground_processes[]?.pid == $p) | .id) // empty')
+        if [ -n "$cpids" ] && [ -n "$sock" ]; then
+            rwid=$("$KITTEN" @ --to "unix:$sock" ls 2>/dev/null | jq -r --arg p "$cpids" \
+                '($p | split("\n") | map(tonumber)) as $clients | first(.[] | .tabs[] | .windows[] | select(any(.foreground_processes[]?; .pid as $pid | $clients | index($pid))) | .id) // empty')
             [ -n "$rwid" ] && key="${sock##*-}-$rwid" && printf '%s' "$key" > "$map"
         fi
     fi
-    if [ -z "$key" ]; then
+    if [ -z "$key" ] && [ -z "$NEKOTRON_TMUX_SESSION" ]; then
         # Detached tmux = agent teammates. Their env is inherited from the
         # session that spawned them — if that kitty instance is still alive,
         # map the agent's activity onto the spawning session's tab.

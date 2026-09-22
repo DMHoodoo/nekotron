@@ -23,6 +23,8 @@ import time
 import unicodedata
 import zlib
 
+import fleet_tmux
+
 # kitten ssh prepends its bundled client to PATH. Control local kitty with
 # its matching app binary, rather than that potentially different client.
 _LOCAL_KITTEN = "/Applications/kitty.app/Contents/MacOS/kitten"
@@ -78,7 +80,7 @@ MIN_FILE = os.path.expanduser("~/.config/kitty/.fleet-minimized")
 
 
 def _min_key(c):
-    return c.get("sid") or c.get("title") or ""
+    return c.get("tmux") or c.get("sid") or c.get("title") or ""
 
 
 def _load_min():
@@ -1309,6 +1311,8 @@ def _tmux_claude(client_pid):
         r = subprocess.run([TMUX, "list-panes", "-t", sess, "-F", "#{pane_pid}"],
                            capture_output=True, text=True, timeout=3)
         for pane_pid in r.stdout.split():
+            if os.path.exists(f"{SESSIONS}/{pane_pid}.json"):
+                return int(pane_pid)
             r2 = subprocess.run(["/usr/bin/pgrep", "-P", pane_pid],
                                 capture_output=True, text=True, timeout=3)
             for child in r2.stdout.split():
@@ -1348,7 +1352,12 @@ def kitty_ls(sock):
 
 
 def gather(sock, kpid, feed_n):
-    ls = kitty_ls(sock)
+    try:
+        ls = kitty_ls(sock) if sock else []
+    except (OSError, ValueError, subprocess.SubprocessError, SystemExit):
+        if not fleet_tmux.sessions():
+            raise
+        ls = []  # A stalled/closed kitty must not hide attachable terminals.
     cards = []
     for osw in ls:
         for tab in osw.get("tabs", []):
@@ -1424,13 +1433,66 @@ def gather(sock, kpid, feed_n):
                     s_epoch = os.path.getmtime(sfile)
                 except OSError:
                     pass
-            cards.append({"sid": sid, "wid": wins[0].get("id"), "title": title[:80], "state": state, "s_epoch": s_epoch, "size": tsize,
+            cards.append({"sid": sid, "wid": wins[0].get("id"), "tab_id": tab.get("id"),
+                          "pids": [fp.get("pid") for w in wins for fp in w.get("foreground_processes", [])], "title": title[:80], "state": state, "s_epoch": s_epoch, "size": tsize,
                           "repo": next((r for r in REPO_HUE if r in cwd), None),
                           "meta": (meta + f" · ${scost:.2f}" if scost is not None and meta
                                    else (f"${scost:.2f}" if scost is not None else meta)),
                           "events": events, "ctx": ctx, "note": note,
                           "focused": bool(tab.get("is_focused") and osw.get("is_focused"))})
+    return _with_tmux(cards, feed_n)
+
+
+def remote_mode():
+    return "--remote" in sys.argv or bool(os.environ.get("SSH_CONNECTION"))
+
+
+def _with_tmux(cards, feed_n):
+    for session in fleet_tmux.sessions().values():
+        linked = next((c for c in cards if set(c.get("pids", [])) & set(session["clients"])), None)
+        if linked is None:
+            # Detached sessions outlive their original kitty window/app.
+            pid = next((p for p in session["panes"] if os.path.exists(f"{SESSIONS}/{p}.json")), None)
+            sid, cwd, transcript = claude_meta(pid) if pid else (None, None, None)
+            cwd = cwd or session["cwd"]
+            linked = {"sid": sid, "wid": session["name"], "tab_id": None,
+                      "title": f"{session['command'] or 'terminal'} · {os.path.basename(cwd)}",
+                      "state": "neutral", "s_epoch": None, "size": 0,
+                      "repo": next((r for r in REPO_HUE if r in cwd), None),
+                      "meta": "", "events": last_events(transcript, feed_n) if transcript else [],
+                      "ctx": None, "note": "", "focused": False}
+            cards.append(linked)
+        linked["tmux"] = session["name"]
+        linked["meta"] = (linked["meta"] + " · " if linked["meta"] else "") + "attachable"
+        try:
+            path = f"{STATE_DIR}/tmux-{session['name']}"
+            with open(path) as f:
+                state = f.read().strip()
+            linked["state"] = state if state in ST else "neutral"
+            linked["s_epoch"] = os.path.getmtime(path)
+        except OSError:
+            pass
+    if remote_mode():
+        for card in cards:
+            if not card.get("tmux"):
+                card["meta"] = (card["meta"] + " · " if card["meta"] else "") + "local only"
     return cards
+
+
+def select_card(card, sock):
+    """Attach here over SSH; never steal the other laptop's tmux client."""
+    if card.get("tmux") and (remote_mode() or not card.get("tab_id")):
+        subprocess.run([os.path.expanduser("~/bin/fleet-session"), "attach", card["tmux"]])
+        return True  # repaint the board after Ctrl-B D or the agent exits
+    if remote_mode():
+        print("This session started outside tmux and cannot be attached here.\r")
+        print("Finish/exit it locally, reload Nekotron, then resume it in tmux.\r")
+        input("Press Enter to return to the fleet board.")
+        return True
+    if card.get("tab_id") is not None and sock:
+        subprocess.run([KITTEN, "@", "--to", f"unix:{sock}", "focus-tab",
+                        "--match", f"id:{card['tab_id']}"], capture_output=True)
+    return False
 
 
 def vitals():
@@ -1602,7 +1664,8 @@ def ops_column(cards, v, width, tall, frame):
         L.append(P(""))
         L.append("")
 
-    L.append(P(f" {DIM}1-9 jump · ⌘⇧A attention · ⌘⇧B broadcast{RST}"))
+    action_hint = "1-9 attach · Ctrl-B D returns here" if remote_mode() else "1-9 jump · ⌘⇧A attention · ⌘⇧B broadcast"
+    L.append(P(f" {DIM}{action_hint}{RST}"))
     L.append(P(f" {DIM}click / m# min \u00b7 M sweep quiet{RST}"))
     L.append(P(f" {DIM}/ filter · : palette · d density{RST}"))
     L.append(P(f" {DIM}s cat · c pet · ⌘⇧K keys · other exits{RST}"))
@@ -1947,9 +2010,9 @@ def _live_sock():
 
 def main():
     sock = _live_sock()
-    if not sock:
-        print("no live kitty remote-control socket"); return
-    kpid = sock.rsplit("-", 1)[-1]
+    if not sock and not fleet_tmux.sessions():
+        print("no live kitty or shared tmux sessions"); return
+    kpid = sock.rsplit("-", 1)[-1] if sock else ""
 
     once = "--print" in sys.argv
     watch = "--watch" in sys.argv
@@ -2231,13 +2294,15 @@ def main():
             import termios
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, old)
     if choice:
-        subprocess.run([KITTEN, "@", "--to", f"unix:{sock}", "focus-tab",
-                        "--match", f"index:{choice-1}"], capture_output=True)
+        card = next((c for c in cards if c.get("idx") == choice), None)
+        if card:
+            return select_card(card, sock)
 
 
 if __name__ == "__main__":
     try:
-        main()
+        while main():
+            pass
     except SystemExit as e:  # deliberate diagnosis (e.g. wedged control socket)
         if e.code and not isinstance(e.code, int):
             print(f"\033[38;2;240;128;60m{e.code}\033[0m")

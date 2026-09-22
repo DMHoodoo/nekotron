@@ -26,4 +26,4 @@ case "$pick" in
     "●"*) "$GUM" confirm "session is ALREADY RUNNING in another tab — resume anyway?" || exit 0 ;;
 esac
 cd "$cwd" 2>/dev/null || cd "$HOME"
-exec claude --resume "$full"
+exec "$HOME/bin/fleet-session" run claude --resume "$full"

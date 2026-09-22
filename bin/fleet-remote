@@ -24,5 +24,5 @@ done
 "$KITTEN" @ --to "unix:$sock" launch --type=os-window \
     --os-window-title "NEKOTRON @ ${host#*@}" --title "fleet @ ${host#*@}" \
     "$KITTEN" ssh -t "$host" \
-    'exec ~/.config/kitty/fleet-board.py' >/dev/null
+    'exec ~/.config/kitty/fleet-board.py --remote' >/dev/null
 echo "⌁ remote fleet window opened: ${host#*@}"

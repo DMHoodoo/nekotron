@@ -31,14 +31,53 @@ Built 2026-07-09/10. Everything is event-driven — no daemons, no timers.
 
 ## Second machine (control plane)
 
-`fleet-remote [user@host]` (or `⌘⇧O` once the default host is set in
-`~/.config/nekotron/remote-host`) opens the OTHER laptop's fleet board in
-its own kitty OS window over `kitten ssh` — Tailscale hostnames are ideal.
-The board runs remotely against that machine's sockets/state/transcripts
-and renders + takes mouse/keys here: peek its sessions, filter, minimize,
-watch its LEDs, all from one chair. Digit-jumps focus tabs on the REMOTE
-machine's screen (useful when it's also screen-shared). Requires nekotron
-installed on both machines (it is — that's the point of the repo).
+`fleet-remote [user@host]` (or `⌘⇧O` with a default host in
+`~/.config/nekotron/remote-host`) opens the other laptop's fleet board over
+`kitten ssh`. Use its Tailscale hostname/IP across networks; macOS Remote
+Login provides the SSH server. Install Nekotron and tmux on both machines:
+
+```sh
+brew install tmux
+./install.sh
+source zsh/nekotron.zsh  # existing shells; new shells load it via ~/.zshrc
+```
+
+Interactive `claude` and `codex` commands in kitty now start in persistent
+**tmux sessions on the machine running the agent**. `new` and `resume` use
+this path too. Piped/noninteractive commands (including `claude -p` and
+`codex exec`) retain their normal behavior; launching inside tmux does not
+nest another session. Machines without tmux retain direct launches.
+
+On the remote board, press a card's **number**, or `/` to filter then Enter,
+to attach to its live terminal. Cards marked **attachable** support this.
+You can read prompts and type replies while the original kitty window
+remains connected. **Ctrl-B, then D** detaches and returns to the board;
+it does not stop the agent. A dropped SSH connection also leaves it running.
+Detached sessions remain on the board even after kitty closes. Machine
+reboots still require resuming the conversation.
+
+For an explicitly shared shell or command:
+
+```sh
+fleet-session run zsh -l
+fleet-session run claude --resume SESSION_ID
+fleet-session run codex resume SESSION_ID
+fleet-session list
+fleet-session attach neko-SESSION_NAME
+```
+
+Existing agents launched directly in kitty are marked **local only**. They
+cannot be attached retroactively. Finish the current turn and exit the old
+agent, reload `zsh/nekotron.zsh` in that shell, then resume its conversation.
+Do not resume the same conversation while its original process is running.
+Keep active approval prompts local until that transition is complete.
+The installer never terminates or migrates a running agent.
+
+The local board continues to focus existing kitty tabs; selecting a detached
+shared session attaches in the board's terminal. Agent state is stored per
+tmux session as well as mirrored to the local tab, so remote/detached
+sessions retain working/attention/done indicators. Claude transcript feeds
+remain available. Terminal clients share input and use the smaller viewport.
 
 ## Charm lane
 
