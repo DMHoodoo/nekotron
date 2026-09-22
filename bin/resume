@@ -14,7 +14,7 @@ done
 
 pick=$(tail -r "$led" | awk -F'\t' '!seen[$2]++ {print}' | head -60 \
     | while IFS=$'\t' read -r dt sid cwd _win _src; do
-        mark="·"; case "$running" in *"$sid"*) mark="●";; esac
+        mark="·"; [[ "$running" == *"$sid"* ]] && mark="●"
         printf "%s %s  %.8s  %s\n" "$mark" "$dt" "$sid" "${cwd/#$HOME/~}"
     done | "$GUM" filter --height 20 --placeholder "resume which session?")
 [ -n "$pick" ] || exit 0
