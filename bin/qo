@@ -1,0 +1,29 @@
+#!/bin/bash
+# qo — Codex non-interactive one-shot. Pipe stdin for context: cat err.log | qo what broke
+# codex exec sends progress to stderr and the final answer to stdout.
+set -o pipefail
+[ $# -gt 0 ] || { echo "usage: qo <question>   (stdin becomes context)" >&2; exit 1; }
+CODEX="$(command -v codex || echo "$HOME/.local/bin/codex")"
+[ -x "$CODEX" ] || { echo "qo: Codex CLI is not installed (expected codex on PATH or ~/.local/bin/codex)" >&2; exit 127; }
+HOOK="$HOME/.claude/hooks/kitty-tab-status.sh"
+status() { [ ! -x "$HOOK" ] || "$HOOK" "$1"; }
+finish() {
+    rc=$?
+    if [ "$rc" -eq 0 ]; then status done; else status attention; fi
+    exit "$rc"
+}
+trap finish EXIT
+prompt="$*"
+[ -t 0 ] || prompt="$(cat)
+
+$prompt"
+status working
+GLOW="$(command -v glow || echo /opt/homebrew/bin/glow)"
+STYLE="$HOME/Documents/GlowDevelopment/nekotron/glow/nekotron.json"
+# '-' explicitly reads the whole prompt from stdin, including piped context.
+if [ -t 1 ] && [ -x "$GLOW" ] && [ -f "$STYLE" ]; then
+    printf '%s\n' "$prompt" | "$CODEX" exec - \
+        | CLICOLOR_FORCE=1 "$GLOW" -s "$STYLE" -w $(( $(tput cols 2>/dev/null || echo 100) - 4 )) -
+else
+    printf '%s\n' "$prompt" | "$CODEX" exec -
+fi
