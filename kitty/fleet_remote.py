@@ -18,7 +18,7 @@ LAUNCHER = str(Path(__file__).resolve().parents[1] / 'bin/fleet-remote')
 
 def kitty(sock, *args):
     p = subprocess.run([KITTEN, '@', '--to', sock, *args], capture_output=True,
-                       text=True, timeout=8)
+                       text=True, encoding="utf-8", errors="replace", timeout=8)
     if p.returncode:
         raise RuntimeError(p.stderr.strip() or 'kitty remote control failed')
     return p.stdout.strip()
@@ -107,12 +107,23 @@ def check_host(host):
     return host
 
 
+def read_host(path):
+    try:
+        return path.read_text(encoding='utf-8').strip()
+    except UnicodeDecodeError as e:
+        raise ValueError(f'{path} is not valid UTF-8; recreate it with only user@hostname') from e
+
+
 def fetch_layout(host):
     p = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', host,
-                        '~/bin/fleet-session layout --json'], capture_output=True, text=True, timeout=20)
+                        '~/bin/fleet-session layout --json'], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20)
     if p.returncode:
         raise RuntimeError(p.stderr.strip() or 'Remote layout query failed; update Nekotron on that machine')
-    data = json.loads(p.stdout)
+    try:
+        data = json.loads(p.stdout)
+    except json.JSONDecodeError as e:
+        raise ValueError('Remote layout is not valid JSON; check remote shell startup output '
+                         'and update Nekotron on the remote laptop') from e
     if not isinstance(data, dict) or data.get('version') != 1 or not isinstance(data.get('windows'), list):
         raise ValueError('Unsupported remote layout; update Nekotron on both machines')
     return data
@@ -207,7 +218,7 @@ def main(args=None):
         args.remove('--board')
     if len(args) > 1:
         raise ValueError('usage: fleet-remote [--board] [user@host]')
-    host = args[0] if args else (Path.home()/'.config/nekotron/remote-host').read_text().strip()
+    host = args[0] if args else read_host(Path.home()/'.config/nekotron/remote-host')
     check_host(host)
     sock = local_socket()
     if board:

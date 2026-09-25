@@ -12,7 +12,7 @@ TMUX = (shutil.which('tmux') or
 
 
 def call(*args, check=False):
-    return subprocess.run([TMUX, *args], capture_output=True, text=True,
+    return subprocess.run([TMUX, *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
                           timeout=5, check=check)
 
 
