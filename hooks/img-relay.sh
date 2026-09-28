@@ -67,6 +67,7 @@ sock="/tmp/kitty-ctl-$KP"
 [ -n "$sock" ] || exit 0
 KITTEN="$(command -v kitten || echo /Applications/kitty.app/Contents/MacOS/kitten)"
 
+echo "$(date +%H:%M:%S) RELAY resolved=$KP-$WID paths=$(echo "$paths" | head -1)" >> /tmp/img-rail.log
 # persistent rail: append to the tab's spool; create the split if absent
 spool="/tmp/claude-kitty-status/imgs-$KP-$WID"
 printf '%s\n' "$paths" >> "$spool"

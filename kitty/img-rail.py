@@ -44,7 +44,36 @@ def render(spool):
     return paths, shown
 
 
+def _self_dedupe():
+    """Only one rail per tab: newest yields to the incumbent."""
+    me = os.environ.get("KITTY_WINDOW_ID")
+    kp = os.environ.get("KITTY_PID")
+    if not me or not kp:
+        return
+    try:
+        out = subprocess.run([KITTEN, "@", "--to", f"unix:/tmp/kitty-ctl-{kp}", "ls"],
+                             capture_output=True, text=True, timeout=3).stdout
+        import json
+        for osw in json.loads(out):
+            for tab in osw.get("tabs", []):
+                ids = [w["id"] for w in tab.get("windows", [])]
+                if int(me) not in ids:
+                    continue
+                rails = [w["id"] for w in tab.get("windows", [])
+                         if (w.get("title") or "").startswith("imgrail-")
+                         or "img-rail" in " ".join(
+                             " ".join(p.get("cmdline") or []) for p in w.get("foreground_processes") or [])]
+                others = [i for i in rails if i != int(me)]
+                if others and min(others) < int(me):
+                    open("/tmp/img-rail.log", "a").write(
+                        f"dedupe: win {me} yields to {min(others)}\n")
+                    sys.exit(0)
+    except Exception:
+        pass
+
+
 def main():
+    _self_dedupe()
     spool = sys.argv[1] if len(sys.argv) > 1 else ""
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)

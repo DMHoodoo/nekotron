@@ -25,6 +25,7 @@ for osw in json.load(sys.stdin):
 ')
 [ -n "$NEKO_WID" ] && WID="$NEKO_WID"   # explicit override (scripts/hooks)
 [ -n "$WID" ] || { echo "no focused window (focus the tab, or set NEKO_WID)"; exit 1; }
+echo "$(date +%H:%M:%S) args=$* resolved=$KP-$WID neko=${NEKO_WID:-} caller=$PPID" >> /tmp/img-rail.log
 spool="/tmp/claude-kitty-status/imgs-$KP-$WID"
 for p in "$@"; do
     p="${p#file://}"                      # open-actions may hand over the URL form
