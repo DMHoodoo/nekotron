@@ -28,50 +28,33 @@ def read_spool(spool):
 
 
 def render(spool):
-    # 2J clears TEXT only — kitty graphics placements survive it and stack
-    # as ghosts across re-renders; delete all images first, every time.
-    # our writes are BUFFERED; icat children write straight to the tty.
-    # Flush before every icat or the clear lands AFTER the images.
+    """Absolute layout: every image gets a bounded box (icat --place never
+    scrolls). Full-width icat overflowed the pane and each re-render
+    scrolled it further — the 'rail keeps growing' bug."""
+    ts = shutil.get_terminal_size((80, 24))
     sys.stdout.write("\033_Ga=d,d=A\033\\" + "\033[2J\033[H")
     sys.stdout.flush()
     paths = read_spool(spool)
     shown = paths[-3:]
-    print(f" {AMBER}\u14da\u160f\u15e2{RST} {BOLD}{CYAN}IMAGE RAIL{RST}  "
-          f"{DIM}1-{len(shown) or 1} remove \u00b7 C clear \u00b7 q close{RST}\n", flush=True)
+    sys.stdout.write(f"\033[1;1H {AMBER}\u14da\u160f\u15e2{RST} {BOLD}{CYAN}IMAGE RAIL{RST}  "
+                     f"{DIM}1-{len(shown) or 1} remove \u00b7 C clear \u00b7 q close{RST}")
     if not shown:
-        print(f" {DIM}(waiting for images in this chat){RST}", flush=True)
-    for i, p in enumerate(shown, 1):
-        subprocess.run([KITTEN, "icat", "--align", "left", p])
-        print(f" {CYAN}{i}{RST} {DIM}\u00b7 {os.path.basename(p)}{RST}\n", flush=True)
+        sys.stdout.write(f"\033[3;2H{DIM}(waiting for images in this chat){RST}")
+    sys.stdout.flush()
+    if shown:
+        avail = ts.lines - 2                       # rows below the header
+        box_h = max(3, avail // len(shown) - 2)
+        box_w = max(10, ts.columns - 4)
+        y = 2
+        for i, p in enumerate(shown, 1):
+            subprocess.run([KITTEN, "icat", "--place", f"{box_w}x{box_h}@2x{y}",
+                            "--align", "left", "--z-index", "1", p],
+                           stderr=subprocess.DEVNULL)
+            sys.stdout.write(f"\033[{min(ts.lines, y + box_h + 1)};2H"
+                             f"{CYAN}{i}{RST} {DIM}\u00b7 {os.path.basename(p)}{RST}")
+            sys.stdout.flush()
+            y += box_h + 2
     return paths, shown
-
-
-def _self_dedupe():
-    """Only one rail per tab: newest yields to the incumbent."""
-    me = os.environ.get("KITTY_WINDOW_ID")
-    kp = os.environ.get("KITTY_PID")
-    if not me or not kp:
-        return
-    try:
-        out = subprocess.run([KITTEN, "@", "--to", f"unix:/tmp/kitty-ctl-{kp}", "ls"],
-                             capture_output=True, text=True, timeout=3).stdout
-        import json
-        for osw in json.loads(out):
-            for tab in osw.get("tabs", []):
-                ids = [w["id"] for w in tab.get("windows", [])]
-                if int(me) not in ids:
-                    continue
-                rails = [w["id"] for w in tab.get("windows", [])
-                         if (w.get("title") or "").startswith("imgrail-")
-                         or "img-rail" in " ".join(
-                             " ".join(p.get("cmdline") or []) for p in w.get("foreground_processes") or [])]
-                others = [i for i in rails if i != int(me)]
-                if others and min(others) < int(me):
-                    open("/tmp/img-rail.log", "a").write(
-                        f"dedupe: win {me} yields to {min(others)}\n")
-                    sys.exit(0)
-    except Exception:
-        pass
 
 
 def main():
