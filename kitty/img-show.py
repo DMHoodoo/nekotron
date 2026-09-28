@@ -59,7 +59,8 @@ def scan_transcript():
             for tab in osw.get("tabs", []):
                 wins = tab.get("windows", [])
                 if any(w.get("is_self") for w in wins):
-                    others = [w for w in wins if not w.get("is_self")]
+                    others = [w for w in wins if not w.get("is_self")
+                              and not (w.get("title") or "").startswith("imgrail-")]
                     wid = others[0].get("id") if others else None
         key = f"{kp}-{wid}"
         for row in open(LEDGER):
