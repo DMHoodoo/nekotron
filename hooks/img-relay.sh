@@ -72,7 +72,7 @@ spool="/tmp/claude-kitty-status/imgs-$KP-$WID"
 printf '%s\n' "$paths" >> "$spool"
 if ! "$KITTEN" @ --to "unix:$sock" ls 2>/dev/null | /usr/bin/grep -q "\"imgrail-$WID\""; then
     "$KITTEN" @ --to "unix:$sock" launch --match "id:$WID" --type=window \
-        --location=vsplit --bias 28 --keep-focus --title "imgrail-$WID" \
+        --bias 25 --keep-focus --title "imgrail-$WID" \
         "$HOME/.config/kitty/img-rail.py" "$spool" >/dev/null 2>&1 \
     || printf '%s\n' "$paths" | /usr/bin/xargs "$KITTEN" @ --to "unix:$sock" launch \
         --type=overlay --match "id:$WID" \

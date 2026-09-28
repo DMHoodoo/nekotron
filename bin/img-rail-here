@@ -27,12 +27,15 @@ for osw in json.load(sys.stdin):
 [ -n "$WID" ] || { echo "no focused window (focus the tab, or set NEKO_WID)"; exit 1; }
 spool="/tmp/claude-kitty-status/imgs-$KP-$WID"
 for p in "$@"; do
+    p="${p#file://}"                      # open-actions may hand over the URL form
+    p=$(printf '%s' "$p" | /usr/bin/python3 -c 'import sys,urllib.parse;print(urllib.parse.unquote(sys.stdin.read()))')
+    p="${p/#\~/$HOME}"
     [ -f "$p" ] && echo "$(cd "$(dirname "$p")" && pwd)/$(basename "$p")" >> "$spool"
 done
 touch "$spool"
 if ! "$KITTEN" @ --to "unix:$sock" ls | /usr/bin/grep -q "\"imgrail-$WID\""; then
     "$KITTEN" @ --to "unix:$sock" launch --match "id:$WID" --type=window \
-        --location=vsplit --bias 28 --keep-focus --title "imgrail-$WID" \
+        --bias 25 --keep-focus --title "imgrail-$WID" \
         "$HOME/.config/kitty/img-rail.py" "$spool" >/dev/null
 fi
 echo "rail up beside window $WID"
