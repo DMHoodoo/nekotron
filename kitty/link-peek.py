@@ -122,12 +122,15 @@ def main():
 
     hover = None
     clicked = None
+    t0 = time.monotonic()
     try:
         while True:
             r_, _, _ = select.select([sys.stdin], [], [], 0.2)
             if not r_:
                 continue
             data = os.read(fd, 64).decode("utf-8", "replace")
+            if time.monotonic() - t0 < 0.4:
+                continue  # swallow the launch chord's key-repeat spill
             while select.select([sys.stdin], [], [], 0.004)[0]:
                 more = os.read(fd, 256)
                 if not more:
