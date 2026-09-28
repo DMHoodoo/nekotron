@@ -12,7 +12,20 @@ if [ -n "$TMUX" ]; then
         cached=$(cat "$map" 2>/dev/null)
         KP="${cached%%-*}"; WID="${cached##*-}"
     else
-        exit 0   # can't resolve the window safely; skip rather than mis-pop
+        # same resolution the tab-status hook uses: tmux client -> kitty window
+        sess=$(tmux display-message -pt "$TMUX_PANE" '#{session_name}' 2>/dev/null)
+        cpids=$(tmux list-clients -t "$sess" -F '#{client_pid}' 2>/dev/null)
+        sock0=$(ls -t /tmp/kitty-ctl-* 2>/dev/null | head -1)
+        if [ -n "$cpids" ] && [ -n "$sock0" ]; then
+            KITTEN0="$(command -v kitten || echo /Applications/kitty.app/Contents/MacOS/kitten)"
+            rwid=$("$KITTEN0" @ --to "unix:$sock0" ls 2>/dev/null | /usr/bin/env jq -r --arg p "$cpids" \
+                '($p | split("\n") | map(select(length>0) | tonumber)) as $clients | first(.[] | .tabs[] | .windows[] | select(any(.foreground_processes[]?; .pid as $pid | $clients | index($pid))) | .id) // empty' 2>/dev/null \
+                || /opt/homebrew/bin/jq --version >/dev/null 2>&1 && "$KITTEN0" @ --to "unix:$sock0" ls 2>/dev/null | /opt/homebrew/bin/jq -r --arg p "$cpids" \
+                '($p | split("\n") | map(select(length>0) | tonumber)) as $clients | first(.[] | .tabs[] | .windows[] | select(any(.foreground_processes[]?; .pid as $pid | $clients | index($pid))) | .id) // empty')
+            [ -n "$rwid" ] && { KP="${sock0##*-}"; WID="$rwid"; } || exit 0
+        else
+            exit 0   # truly unresolvable; skip rather than mis-pop
+        fi
     fi
 fi
 [ -n "$KP" ] && [ -n "$WID" ] || exit 0
@@ -53,8 +66,16 @@ sock="/tmp/kitty-ctl-$KP"
 [ -S "$sock" ] || sock=$(ls -t /tmp/kitty-ctl-* 2>/dev/null | head -1)
 [ -n "$sock" ] || exit 0
 KITTEN="$(command -v kitten || echo /Applications/kitty.app/Contents/MacOS/kitten)"
-# shellcheck disable=SC2086
-printf '%s\n' "$paths" | /usr/bin/xargs "$KITTEN" @ --to "unix:$sock" launch \
-    --type=overlay --match "id:$WID" \
-    "$HOME/.config/kitty/img-show.py" >/dev/null 2>&1 &
+
+# persistent rail: append to the tab's spool; create the split if absent
+spool="/tmp/claude-kitty-status/imgs-$KP-$WID"
+printf '%s\n' "$paths" >> "$spool"
+if ! "$KITTEN" @ --to "unix:$sock" ls 2>/dev/null | /usr/bin/grep -q "\"imgrail-$WID\""; then
+    "$KITTEN" @ --to "unix:$sock" launch --match "id:$WID" --type=window \
+        --location=vsplit --bias 28 --keep-focus --title "imgrail-$WID" \
+        "$HOME/.config/kitty/img-rail.py" "$spool" >/dev/null 2>&1 \
+    || printf '%s\n' "$paths" | /usr/bin/xargs "$KITTEN" @ --to "unix:$sock" launch \
+        --type=overlay --match "id:$WID" \
+        "$HOME/.config/kitty/img-show.py" >/dev/null 2>&1 &
+fi
 exit 0

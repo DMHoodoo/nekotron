@@ -1,0 +1,33 @@
+#!/bin/bash
+# img-rail-here — open (or refresh) the persistent image rail beside the
+# CURRENTLY FOCUSED tab, seeding it with any paths given as args.
+KITTEN="$(command -v kitten || echo /Applications/kitty.app/Contents/MacOS/kitten)"
+sock=$(ls -t /tmp/kitty-ctl-* 2>/dev/null | head -1)
+[ -n "$sock" ] || { echo "no kitty socket"; exit 1; }
+KP="${sock##*-}"
+WID=$("$KITTEN" @ --to "unix:$sock" ls 2>/dev/null | /usr/bin/python3 -c '
+import json, sys
+for osw in json.load(sys.stdin):
+    if not osw.get("is_focused"):
+        continue
+    for tab in osw.get("tabs", []):
+        if not tab.get("is_focused"):
+            continue
+        for w in tab.get("windows", []):
+            if w.get("is_focused"):
+                print(w.get("id"))
+                raise SystemExit
+')
+[ -n "$NEKO_WID" ] && WID="$NEKO_WID"   # explicit override (scripts/hooks)
+[ -n "$WID" ] || { echo "no focused window (focus the tab, or set NEKO_WID)"; exit 1; }
+spool="/tmp/claude-kitty-status/imgs-$KP-$WID"
+for p in "$@"; do
+    [ -f "$p" ] && echo "$(cd "$(dirname "$p")" && pwd)/$(basename "$p")" >> "$spool"
+done
+touch "$spool"
+if ! "$KITTEN" @ --to "unix:$sock" ls | /usr/bin/grep -q "\"imgrail-$WID\""; then
+    "$KITTEN" @ --to "unix:$sock" launch --match "id:$WID" --type=window \
+        --location=vsplit --bias 28 --keep-focus --title "imgrail-$WID" \
+        "$HOME/.config/kitty/img-rail.py" "$spool" >/dev/null
+fi
+echo "rail up beside window $WID"
