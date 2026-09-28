@@ -28,7 +28,9 @@ def read_spool(spool):
 
 
 def render(spool):
-    sys.stdout.write("\033[2J\033[H")
+    # 2J clears TEXT only — kitty graphics placements survive it and stack
+    # as ghosts across re-renders; delete all images first, every time.
+    sys.stdout.write("\033_Ga=d,d=A\033\\" + "\033[2J\033[H")
     paths = read_spool(spool)
     shown = paths[-3:]
     print(f" {AMBER}\u14da\u160f\u15e2{RST} {BOLD}{CYAN}IMAGE RAIL{RST}  "
