@@ -23,7 +23,11 @@ DIM = "\033[38;2;107;115;148m"
 ULC = "\033[4;38;2;95;233;223m"
 RST = "\033[0m"
 ANSI = re.compile(r"\033\[[0-9;:]*m")
-IMG = re.compile(r"file://(/[^\s)\"]+?\.(?:png|jpe?g|gif|webp))|\[\[img:([^\]\n]+?)\]\]", re.I)
+IMG = re.compile(
+    r"file://(/[^\s)\"]+?\.(?:png|jpe?g|gif|webp))"      # file:// URL
+    r"|\[\[img:([^\]\n]+?)\]\]"                          # [[img:...]]
+    r"|((?:~|/)[\w@.+/-]+?\.(?:png|jpe?g|gif|webp))\b",   # bare abs/~ path
+    re.I)
 
 
 def _chw(ch):
@@ -146,7 +150,7 @@ def link_map(lines):
     for i, raw in enumerate(lines, 1):
         plain = ANSI.sub("", raw)
         for m in IMG.finditer(plain):
-            p = os.path.expanduser((m.group(1) or m.group(2)).strip())
+            p = os.path.expanduser(next(g for g in m.groups() if g).strip())
             c0 = vw(plain[: m.start()]) + 1
             c1 = c0 + vw(plain[m.start(): m.end()]) - 1
             if os.path.isfile(p):
