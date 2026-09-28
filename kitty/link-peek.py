@@ -237,8 +237,9 @@ def main():
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
     if clicked:
         env = dict(os.environ, NEKO_WID=str(wid))
-        subprocess.Popen([os.path.expanduser("~/bin/img-rail-here"), clicked],
-                         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run([os.path.expanduser("~/bin/img-rail-here"), clicked],
+                       env=env, start_new_session=True, timeout=15,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 if __name__ == "__main__":
