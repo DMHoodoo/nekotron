@@ -22,6 +22,11 @@
             "type": "command",
             "command": "/Users/hassankhan/.claude/hooks/kitty-tab-status.sh done",
             "async": true
+          },
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/img-relay.sh",
+            "async": true
           }
         ]
       }

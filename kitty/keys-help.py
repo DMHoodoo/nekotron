@@ -21,6 +21,7 @@ DESC = {
     "md-preview": "pick a path on screen \u2192 preview in-terminal (glow)",
     "code-copy.py": "copy a code block from this tab's Claude (exact text)",
     "fleet-remote": "the OTHER laptop's terminals, mirrored as tabs",
+    "img-show.py": "images referenced in this chat, rendered (icat)",
     "keys-help.py": "this cheatsheet",
     "goto_tab": "go to tab",
     "send_key page_up": "page up (Claude Code scrollback)",
