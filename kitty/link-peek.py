@@ -111,12 +111,16 @@ def main():
     old = termios.tcgetattr(fd)
     tty.setraw(fd)
     sys.stdout.write("\033[?25l\033[2J\033[?1003h\033[?1006h")
+    # spotlight mode: the mirror renders DIMMED (color stripped, faint gray)
+    # so entering peek is unmistakable; image links glow cyan.
+    FAINTG = "\033[38;2;80;88;115m"
     buf = []
     for i, line in enumerate(lines[: ts.lines], 1):
-        buf.append(f"\033[{i};1H{line}\033[0m")
+        buf.append(f"\033[{i};1H{FAINTG}{ANSI.sub('', line)}\033[0m")
     for r, c0, c1, _p, txt in links:  # highlight the hoverable links
         buf.append(f"\033[{r};{c0}H{ULC}{txt}{RST}")
-    hint = f" {CYAN}link peek{RST} {DIM}· hover an image link · click = rail · any key closes{RST}"
+    hint = (f" {CYAN}◉ LINK PEEK{RST}  {DIM}hover a glowing link to preview · "
+            f"click = send to rail · esc closes{RST}")
     buf.append(f"\033[{ts.lines};1H{hint}\033[K")
     sys.stdout.write("".join(buf))
     sys.stdout.flush()
