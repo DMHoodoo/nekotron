@@ -30,17 +30,19 @@ def read_spool(spool):
 def render(spool):
     # 2J clears TEXT only — kitty graphics placements survive it and stack
     # as ghosts across re-renders; delete all images first, every time.
+    # our writes are BUFFERED; icat children write straight to the tty.
+    # Flush before every icat or the clear lands AFTER the images.
     sys.stdout.write("\033_Ga=d,d=A\033\\" + "\033[2J\033[H")
+    sys.stdout.flush()
     paths = read_spool(spool)
     shown = paths[-3:]
     print(f" {AMBER}\u14da\u160f\u15e2{RST} {BOLD}{CYAN}IMAGE RAIL{RST}  "
-          f"{DIM}1-{len(shown) or 1} remove \u00b7 C clear \u00b7 q close{RST}\n")
+          f"{DIM}1-{len(shown) or 1} remove \u00b7 C clear \u00b7 q close{RST}\n", flush=True)
     if not shown:
-        print(f" {DIM}(waiting for images in this chat){RST}")
+        print(f" {DIM}(waiting for images in this chat){RST}", flush=True)
     for i, p in enumerate(shown, 1):
         subprocess.run([KITTEN, "icat", "--align", "left", p])
-        print(f" {CYAN}{i}{RST} {DIM}\u00b7 {os.path.basename(p)}{RST}\n")
-    sys.stdout.flush()
+        print(f" {CYAN}{i}{RST} {DIM}\u00b7 {os.path.basename(p)}{RST}\n", flush=True)
     return paths, shown
 
 
