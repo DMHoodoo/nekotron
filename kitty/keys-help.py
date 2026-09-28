@@ -22,6 +22,7 @@ DESC = {
     "code-copy.py": "copy a code block from this tab's Claude (exact text)",
     "fleet-remote": "the OTHER laptop's terminals, mirrored as tabs",
     "img-show.py": "images referenced in this chat, rendered (icat)",
+    "link-peek.py": "freeze the screen; HOVER image links to preview them",
     "keys-help.py": "this cheatsheet",
     "goto_tab": "go to tab",
     "send_key page_up": "page up (Claude Code scrollback)",
