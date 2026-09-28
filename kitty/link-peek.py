@@ -151,19 +151,21 @@ def main():
                     break
                 if (mb & 32) and tgt is not None and (hover is None or tgt[3] != hover[3]):
                     hover = tgt
-                    subprocess.run([KITTEN, "icat", "--clear"], stdout=subprocess.DEVNULL)
+                    sys.stdout.flush()
+                    subprocess.run([KITTEN, "icat", "--clear"], stderr=subprocess.DEVNULL)
                     pw, ph = 46, 22
                     px = mx + 3 if mx + 3 + pw < ts.columns else max(1, mx - pw - 3)
                     py = 2 if my > ts.lines // 2 else max(2, ts.lines - ph - 2)
                     subprocess.run([KITTEN, "icat", "--place", f"{pw}x{ph}@{px}x{py}",
                                     "--scale-up", "--z-index", "5", hover[3]],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                   stderr=subprocess.DEVNULL)
                     sys.stdout.write(f"\033[{ts.lines};1H {CYAN}{os.path.basename(hover[3])}{RST}"
                                      f" {DIM}· click sends to rail{RST}\033[K")
                     sys.stdout.flush()
                 elif (mb & 32) and tgt is None and hover is not None:
                     hover = None
-                    subprocess.run([KITTEN, "icat", "--clear"], stdout=subprocess.DEVNULL)
+                    sys.stdout.flush()
+                    subprocess.run([KITTEN, "icat", "--clear"], stderr=subprocess.DEVNULL)
                     sys.stdout.write(f"\033[{ts.lines};1H{hint}\033[K")
                     sys.stdout.flush()
             if clicked or any(k in "\r\nq\x1b\x03" for k in keys):
@@ -171,7 +173,7 @@ def main():
                     f"exit: clicked={clicked!r} keys={keys!r} raw={data!r}\n")
                 break  # deliberate close keys only — held-chord repeats can't dismiss
     finally:
-        subprocess.run([KITTEN, "icat", "--clear"], stdout=subprocess.DEVNULL)
+        subprocess.run([KITTEN, "icat", "--clear"], stderr=subprocess.DEVNULL)
         sys.stdout.write("\033[?1003l\033[?1006l\033[?25h\033[0m")
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
     if clicked:
