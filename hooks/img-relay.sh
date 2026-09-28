@@ -35,7 +35,7 @@ tp=$(printf '%s' "$input" | /usr/bin/jq -r '.transcript_path // empty' 2>/dev/nu
 
 paths=$(/usr/bin/tail -c 300000 "$tp" | /usr/bin/python3 -c '
 import sys, json, os, re
-IMG = re.compile(r"\[\[img:([^\]\n]+?)\]\]|!\[[^\]\n]*\]\(([^)\n]+?\.(?:png|jpe?g|gif|webp))\)", re.I)
+IMG = re.compile(r"\[\[img:([^\]\n]+?)\]\]|file://(/[^\s)\"']+?\.(?:png|jpe?g|gif|webp))|!\[[^\]\n]*\]\(([^)\n]+?\.(?:png|jpe?g|gif|webp))\)", re.I)
 last = None
 for line in sys.stdin:
     if "[[img:" not in line and "![" not in line:
@@ -53,7 +53,7 @@ if last:
         if part.get("type") != "text":
             continue
         for m in IMG.finditer(part.get("text", "")):
-            p = os.path.expanduser((m.group(1) or m.group(2)).strip())
+            p = os.path.expanduser((m.group(1) or m.group(2) or m.group(3)).strip())
             if not os.path.isabs(p) and cwd:
                 p = os.path.join(cwd, p)
             if os.path.isfile(p) and p not in seen:

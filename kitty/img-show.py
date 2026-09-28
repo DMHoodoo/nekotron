@@ -29,7 +29,7 @@ DIM = "\033[38;2;107;115;148m"
 BOLD, RST = "\033[1m", "\033[0m"
 
 IMG_RE = re.compile(
-    r"\[\[img:([^\]\n]+?)\]\]"                       # [[img:/path]]
+    r"\[\[img:([^\]\n]+?)\]\]|file://(/[^\s)\"']+?\.(?:png|jpe?g|gif|webp))"                       # [[img:/path]]
     r"|!\[[^\]\n]*\]\(([^)\n]+?\.(?:png|jpe?g|gif|webp))\)",  # ![alt](/path.png)
     re.I)
 
@@ -37,7 +37,7 @@ IMG_RE = re.compile(
 def found_images(text, cwd=""):
     out = []
     for m in IMG_RE.finditer(text):
-        p = (m.group(1) or m.group(2)).strip()
+        p = (m.group(1) or m.group(2) or m.group(3)).strip()
         p = os.path.expanduser(p)
         if not os.path.isabs(p) and cwd:
             p = os.path.join(cwd, p)
