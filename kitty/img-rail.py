@@ -20,19 +20,26 @@ DIM = "\033[38;2;107;115;148m"
 BOLD, RST = "\033[1m", "\033[0m"
 
 
+def read_spool(spool):
+    try:
+        return [p for p in open(spool).read().splitlines() if os.path.isfile(p)]
+    except OSError:
+        return []
+
+
 def render(spool):
     sys.stdout.write("\033[2J\033[H")
-    print(f" {AMBER}ᓚᘏᗢ{RST} {BOLD}{CYAN}IMAGE RAIL{RST}  {DIM}q closes{RST}\n")
-    try:
-        paths = [p for p in open(spool).read().splitlines() if os.path.isfile(p)]
-    except OSError:
-        paths = []
-    if not paths:
-        print(f" {DIM}(waiting for [[img:...]] in this chat){RST}")
-    for p in paths[-3:]:
+    paths = read_spool(spool)
+    shown = paths[-3:]
+    print(f" {AMBER}\u14da\u160f\u15e2{RST} {BOLD}{CYAN}IMAGE RAIL{RST}  "
+          f"{DIM}1-{len(shown) or 1} remove \u00b7 C clear \u00b7 q close{RST}\n")
+    if not shown:
+        print(f" {DIM}(waiting for images in this chat){RST}")
+    for i, p in enumerate(shown, 1):
         subprocess.run([KITTEN, "icat", "--align", "left", p])
-        print(f" {DIM}{os.path.basename(p)}{RST}\n")
+        print(f" {CYAN}{i}{RST} {DIM}\u00b7 {os.path.basename(p)}{RST}\n")
     sys.stdout.flush()
+    return paths, shown
 
 
 def main():
@@ -42,6 +49,7 @@ def main():
     tty.setraw(fd)
     sys.stdout.write("\033[?25l")
     last = -1.0
+    paths, shown = [], []
     try:
         while True:
             try:
@@ -51,11 +59,20 @@ def main():
             if mt != last:
                 last = mt
                 termios.tcsetattr(fd, termios.TCSADRAIN, old)
-                render(spool)
+                paths, shown = render(spool)
                 tty.setraw(fd)
             r, _, _ = select.select([sys.stdin], [], [], 0.5)
-            if r and sys.stdin.read(1) in ("q", "\x1b"):
+            if not r:
+                continue
+            ch = sys.stdin.read(1)
+            if ch in ("q", "\x1b"):
                 break
+            if ch == "C":
+                open(spool, "w").close()   # mtime change re-renders empty
+            elif ch.isdigit() and 0 < int(ch) <= len(shown):
+                idx = len(paths) - len(shown) + int(ch) - 1
+                del paths[idx]
+                open(spool, "w").write("\n".join(paths) + ("\n" if paths else ""))
     finally:
         sys.stdout.write("\033[?25h\033[0m")
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
