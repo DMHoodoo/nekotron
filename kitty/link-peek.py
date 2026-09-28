@@ -153,9 +153,10 @@ def main():
                     hover = tgt
                     sys.stdout.flush()
                     subprocess.run([KITTEN, "icat", "--clear"], stderr=subprocess.DEVNULL)
-                    pw, ph = 46, 22
-                    px = mx + 3 if mx + 3 + pw < ts.columns else max(1, mx - pw - 3)
-                    py = 2 if my > ts.lines // 2 else max(2, ts.lines - ph - 2)
+                    pw, ph = 42, 20
+                    px = mx + 2 if mx + 2 + pw <= ts.columns else max(1, mx - pw - 2)
+                    py = my - ph - 1 if my - ph - 1 >= 1 else my + 2
+                    py = max(1, min(py, ts.lines - ph - 1))
                     subprocess.run([KITTEN, "icat", "--place", f"{pw}x{ph}@{px}x{py}",
                                     "--scale-up", "--z-index", "5", hover[3]],
                                    stderr=subprocess.DEVNULL)
