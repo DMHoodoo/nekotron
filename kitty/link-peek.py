@@ -41,6 +41,70 @@ def vw(s):
     return sum(_chw(c) for c in s)
 
 
+
+import base64
+import struct
+import tempfile
+
+_sent = {}  # path -> (img_id, px_w, px_h) — transmit once, re-place per motion
+
+
+def _gfx(keys, data=b""):
+    payload = base64.standard_b64encode(data).decode() if data else ""
+    out = []
+    first = True
+    while True:
+        chunk, payload = payload[:4000], payload[4000:]
+        k = dict(keys) if first else {}
+        if data:
+            k["m"] = 1 if payload else 0
+        ser = ",".join(f"{a}={v}" for a, v in k.items())
+        out.append(f"\033_G{ser};{chunk}\033\\")
+        first = False
+        if not payload:
+            break
+    return "".join(out)
+
+
+def _ensure_sent(path):
+    if path in _sent:
+        return _sent[path]
+    p = path
+    if not p.lower().endswith(".png"):  # graphics f=100 wants PNG
+        tmp = os.path.join(tempfile.gettempdir(), f"lp-{abs(hash(p))}.png")
+        if not os.path.exists(tmp):
+            subprocess.run(["/usr/bin/sips", "-s", "format", "png", p, "--out", tmp],
+                           capture_output=True)
+        p = tmp
+    try:
+        data = open(p, "rb").read()
+        w, h = struct.unpack(">II", data[16:24])
+    except Exception:
+        _sent[path] = None
+        return None
+    iid = 4600 + len(_sent)
+    sys.stdout.write(_gfx({"a": "t", "f": 100, "i": iid, "q": 2}, data))
+    _sent[path] = (iid, w, h)
+    return _sent[path]
+
+
+def _float_at(path, mx, my, ts):
+    got = _ensure_sent(path)
+    if not got:
+        return None
+    iid, iw, ih = got
+    pw = 42
+    ph = max(5, min(22, round(pw * (ih / max(1, iw)) * 0.5)))
+    px = mx + 2 if mx + 2 + pw <= ts.columns else max(1, mx - pw - 2)
+    py = my - ph - 1 if my - ph - 1 >= 1 else my + 2
+    py = max(1, min(py, ts.lines - ph))
+    sys.stdout.write(_gfx({"a": "d", "d": "i", "i": iid, "q": 2})
+                     + f"\033[{py};{px}H"
+                     + _gfx({"a": "p", "i": iid, "c": pw, "r": ph, "z": 5, "q": 2}))
+    sys.stdout.flush()
+    return iid
+
+
 def peer_window():
     sock = None
     kp = os.environ.get("KITTY_PID")
@@ -149,24 +213,18 @@ def main():
                 if kind == "M" and mb == 0 and tgt:
                     clicked = tgt[3]
                     break
-                if (mb & 32) and tgt is not None and (hover is None or tgt[3] != hover[3]):
-                    hover = tgt
-                    sys.stdout.flush()
-                    subprocess.run([KITTEN, "icat", "--clear"], stderr=subprocess.DEVNULL)
-                    pw, ph = 42, 20
-                    px = mx + 2 if mx + 2 + pw <= ts.columns else max(1, mx - pw - 2)
-                    py = my - ph - 1 if my - ph - 1 >= 1 else my + 2
-                    py = max(1, min(py, ts.lines - ph - 1))
-                    subprocess.run([KITTEN, "icat", "--place", f"{pw}x{ph}@{px}x{py}",
-                                    "--scale-up", "--z-index", "5", hover[3]],
-                                   stderr=subprocess.DEVNULL)
-                    sys.stdout.write(f"\033[{ts.lines};1H {CYAN}{os.path.basename(hover[3])}{RST}"
-                                     f" {DIM}· click sends to rail{RST}\033[K")
-                    sys.stdout.flush()
+                if (mb & 32) and tgt is not None:
+                    shown = _float_at(tgt[3], mx, my, ts)  # glued to the pointer
+                    if hover is None or hover[3] != tgt[3]:
+                        hover = tgt
+                        sys.stdout.write(f"\033[{ts.lines};1H {CYAN}{os.path.basename(tgt[3])}{RST}"
+                                         f" {DIM}\u00b7 click sends to rail{RST}\033[K")
+                        sys.stdout.flush()
                 elif (mb & 32) and tgt is None and hover is not None:
+                    got = _sent.get(hover[3])
+                    if got:
+                        sys.stdout.write(_gfx({"a": "d", "d": "i", "i": got[0], "q": 2}))
                     hover = None
-                    sys.stdout.flush()
-                    subprocess.run([KITTEN, "icat", "--clear"], stderr=subprocess.DEVNULL)
                     sys.stdout.write(f"\033[{ts.lines};1H{hint}\033[K")
                     sys.stdout.flush()
             if clicked or any(k in "\r\nq\x1b\x03" for k in keys):
@@ -174,7 +232,7 @@ def main():
                     f"exit: clicked={clicked!r} keys={keys!r} raw={data!r}\n")
                 break  # deliberate close keys only — held-chord repeats can't dismiss
     finally:
-        subprocess.run([KITTEN, "icat", "--clear"], stderr=subprocess.DEVNULL)
+        sys.stdout.write(_gfx({"a": "d", "d": "A", "q": 2}))
         sys.stdout.write("\033[?1003l\033[?1006l\033[?25h\033[0m")
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
     if clicked:
