@@ -161,8 +161,8 @@ def main():
                     subprocess.run([KITTEN, "icat", "--clear"], stdout=subprocess.DEVNULL)
                     sys.stdout.write(f"\033[{ts.lines};1H{hint}\033[K")
                     sys.stdout.flush()
-            if clicked or (keys and any(k.isprintable() or k in "\r\n\x1b\x03" for k in keys)):
-                break
+            if clicked or any(k in "\r\nq\x1b\x03" for k in keys):
+                break  # deliberate close keys only — held-chord repeats can't dismiss
     finally:
         subprocess.run([KITTEN, "icat", "--clear"], stdout=subprocess.DEVNULL)
         sys.stdout.write("\033[?1003l\033[?1006l\033[?25h\033[0m")
