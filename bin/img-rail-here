@@ -13,10 +13,15 @@ for osw in json.load(sys.stdin):
     for tab in osw.get("tabs", []):
         if not tab.get("is_focused"):
             continue
-        for w in tab.get("windows", []):
+        wins = [w for w in tab.get("windows", [])
+                if not (w.get("title") or "").startswith("imgrail-")]
+        for w in wins:
             if w.get("is_focused"):
                 print(w.get("id"))
                 raise SystemExit
+        if wins:
+            print(wins[0].get("id"))
+            raise SystemExit
 ')
 [ -n "$NEKO_WID" ] && WID="$NEKO_WID"   # explicit override (scripts/hooks)
 [ -n "$WID" ] || { echo "no focused window (focus the tab, or set NEKO_WID)"; exit 1; }

@@ -63,7 +63,8 @@ def peer_window(ls):
         for tab in osw.get("tabs", []):
             wins = tab.get("windows", [])
             if any(w.get("is_self") for w in wins):
-                others = [w for w in wins if not w.get("is_self")]
+                others = [w for w in wins if not w.get("is_self")
+                          and not (w.get("title") or "").startswith("imgrail-")]
                 return others[0] if others else None
     return None
 
