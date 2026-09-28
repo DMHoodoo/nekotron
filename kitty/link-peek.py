@@ -94,6 +94,7 @@ def main():
     sock, wid = peer_window()
     if not wid:
         print("no window under the overlay"); time.sleep(1.5); return
+    open("/tmp/link-peek.log", "a").write(f"start sock={sock} wid={wid}\n")
     lines = grab_screen(sock, wid)
     links = link_map(lines)
 
@@ -162,6 +163,8 @@ def main():
                     sys.stdout.write(f"\033[{ts.lines};1H{hint}\033[K")
                     sys.stdout.flush()
             if clicked or any(k in "\r\nq\x1b\x03" for k in keys):
+                open("/tmp/link-peek.log", "a").write(
+                    f"exit: clicked={clicked!r} keys={keys!r} raw={data!r}\n")
                 break  # deliberate close keys only — held-chord repeats can't dismiss
     finally:
         subprocess.run([KITTEN, "icat", "--clear"], stdout=subprocess.DEVNULL)
@@ -176,6 +179,8 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception as e:
-        print(f"link peek error: {e}")
-        time.sleep(2)
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        open("/tmp/link-peek.log", "a").write(traceback.format_exc() + "\n")
+        time.sleep(3)
