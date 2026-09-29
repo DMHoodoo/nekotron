@@ -69,6 +69,15 @@ def sessions():
 
 def main():
     sock, ses = sessions()
+    if "--json" in __import__("sys").argv:
+        print(json.dumps({
+            "kitty": sock is not None,
+            "sessions": ses,
+            "attention": sum(1 for s in ses if s["state"] == "attention"),
+            "working": sum(1 for s in ses if s["state"] == "working"),
+            "done": sum(1 for s in ses if s["state"] == "done"),
+        }))
+        return
     att = [s for s in ses if s["state"] == "attention"]
     work = [s for s in ses if s["state"] == "working"]
     done = [s for s in ses if s["state"] == "done"]

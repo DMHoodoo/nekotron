@@ -1,0 +1,8 @@
+#!/bin/bash
+# nekobar — launch (or restart) the floating fleet pill.
+B="$HOME/Documents/GlowDevelopment/nekotron/nekobar/nekobar"
+[ -x "$B" ] || "$HOME/Documents/GlowDevelopment/nekotron/nekobar/build.sh"
+pkill -f "nekobar/nekobar$" 2>/dev/null
+sleep 0.3
+nohup "$B" >/dev/null 2>&1 &
+echo "ᓚᘏᗢ pill launched"
