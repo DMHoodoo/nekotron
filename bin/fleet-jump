@@ -1,0 +1,16 @@
+#!/bin/bash
+# fleet-jump — menu-bar click handler: focus a session's kitty window,
+# open the fleet board, or spawn a new claude tab.
+#   fleet-jump <window-id> | board | new
+KITTEN="$(command -v kitten || echo /Applications/kitty.app/Contents/MacOS/kitten)"
+sock=""
+for s in $(ls -t /tmp/kitty-ctl-* 2>/dev/null); do
+    kill -0 "${s##*-}" 2>/dev/null && sock="$s" && break
+done
+[ -n "$sock" ] || exit 0
+/usr/bin/open -a kitty        # bring kitty frontmost first
+case "$1" in
+    board) "$KITTEN" @ --to "unix:$sock" launch --type=overlay "$HOME/.config/kitty/fleet-board.py" ;;
+    new)   "$KITTEN" @ --to "unix:$sock" launch --type=tab --cwd "$HOME" zsh -l -i -c 'claude; exec zsh' ;;
+    *)     "$KITTEN" @ --to "unix:$sock" focus-window --match "id:$1" ;;
+esac >/dev/null 2>&1

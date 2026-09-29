@@ -29,6 +29,15 @@ Built 2026-07-09/10. Everything is event-driven — no daemons, no timers.
   (pulled from the transcript, so you copy the exact original text, not
   the screen-wrapped render) — a digit copies to clipboard.
 
+## Menu bar extra (SwiftBar)
+
+`swiftbar/nekotron.5s.py` puts the fleet in the macOS menu bar from any
+app: `ᓚᘏᗢ ●N` (orange = sessions needing you, blue = working, green ✓ =
+quiet). Click for the session list — each row jumps straight to that
+kitty tab — plus Open Fleet Board / New Claude Tab actions.
+Setup: `brew install swiftbar`, then point SwiftBar's plugin folder at
+`~/.config/nekotron/swiftbar` (symlinked by install.sh).
+
 ## Second machine (control plane)
 
 `fleet-remote [user@host]` (or `⌘⇧O` with a default host in

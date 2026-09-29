@@ -27,7 +27,8 @@ if [ ! -e ~/.codex/hooks.json ] && [ ! -L ~/.codex/hooks.json ]; then
 elif [ "$(readlink ~/.codex/hooks.json)" != "$R/codex/hooks.json" ]; then
     echo "Codex: merge $R/codex/hooks.json into your existing ~/.codex/hooks.json"
 fi
-mkdir -p ~/.claude/sounds ~/.config/crush
+mkdir -p ~/.claude/sounds ~/.config/crush ~/.config/nekotron/swiftbar
+ln -sf "$R"/swiftbar/nekotron.5s.py ~/.config/nekotron/swiftbar/nekotron.5s.py
 ln -sf "$R"/sounds/meow.wav ~/.claude/sounds/meow.wav          # attention meow
 [ -e ~/.config/crush/crush.json ] || ln -sf "$R"/crush/crush.json ~/.config/crush/crush.json
 # The first launch has no snapshot yet; never overwrite an existing workspace.
