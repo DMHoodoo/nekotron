@@ -1,8 +1,8 @@
-// nekobar — Nekotron's floating fleet pill.
-// A borderless always-on-top panel under the menu bar: collapsed it shows
-// ᓚᘏᗢ + the count that matters; hover expands the session list; click a
-// row to jump to that kitty tab. Data comes from the SwiftBar plugin's
-// --json mode (single source of truth). Build: nekobar/build.sh
+// nekobar — Nekotron's floating fleet pill, one per screen.
+// Borderless always-on-top panels under each display's menu bar: collapsed
+// they show ᓚᘏᗢ + the count that matters; hover expands the session list;
+// click a row to jump to that kitty tab. Data comes from the SwiftBar
+// plugin's --json mode (single source of truth). Build: nekobar/build.sh
 import AppKit
 
 let INK = NSColor(red: 0.91, green: 0.93, blue: 1.0, alpha: 1)
@@ -43,17 +43,19 @@ final class HoverView: NSView {
     override func mouseExited(with event: NSEvent) { onExit?() }
 }
 
-final class App: NSObject, NSApplicationDelegate {
-    var panel: NSPanel!
-    var root: HoverView!
-    var sessions: [Sess] = []
-    var kittyUp = false
+final class Pill: NSObject {
+    let screen: NSScreen
+    unowned let app: App
+    let panel: NSPanel
+    let root: HoverView
     var expanded = false
     var collapseTimer: Timer?
     let pillH: CGFloat = 26
     let expW: CGFloat = 380
 
-    func applicationDidFinishLaunching(_ n: Notification) {
+    init(screen: NSScreen, app: App) {
+        self.screen = screen
+        self.app = app
         panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 120, height: pillH),
                         styleMask: [.borderless, .nonactivatingPanel],
                         backing: .buffered, defer: false)
@@ -63,75 +65,25 @@ final class App: NSObject, NSApplicationDelegate {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
-        panel.isMovableByWindowBackground = false
         root = HoverView()
         root.wantsLayer = true
         root.layer?.backgroundColor = NSColor(white: 0.05, alpha: 0.94).cgColor
         root.layer?.cornerRadius = pillH / 2
+        panel.contentView = root
+        super.init()
         root.onEnter = { [weak self] in self?.expand() }
         root.onExit = { [weak self] in self?.scheduleCollapse() }
-        panel.contentView = root
         panel.orderFrontRegardless()
-        rebuild()
-        refresh()
-        Timer.scheduledTimer(withTimeInterval: 4.0, repeats: true) { [weak self] _ in
-            self?.refresh()
-        }
     }
 
-    func plistPath() -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return home + "/Documents/GlowDevelopment/nekotron/swiftbar/nekotron.5s.py"
-    }
-
-    func refresh() {
-        DispatchQueue.global().async { [weak self] in
-            guard let self = self else { return }
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            p.arguments = ["python3", self.plistPath(), "--json"]
-            let pipe = Pipe()
-            p.standardOutput = pipe
-            p.standardError = FileHandle.nullDevice
-            var ses: [Sess] = []
-            var up = false
-            do {
-                try p.run()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                p.waitUntilExit()
-                if let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    up = (obj["kitty"] as? Bool) ?? false
-                    for d in (obj["sessions"] as? [[String: Any]]) ?? [] {
-                        ses.append(Sess(
-                            wid: (d["wid"] as? Int) ?? 0,
-                            title: (d["title"] as? String) ?? "?",
-                            state: (d["state"] as? String) ?? "neutral",
-                            ctx: (d["ctx"] as? String) ?? "",
-                            cost: (d["cost"] as? String) ?? ""))
-                    }
-                }
-            } catch {}
-            DispatchQueue.main.async {
-                self.sessions = ses
-                self.kittyUp = up
-                self.rebuild()
-            }
-        }
-    }
-
-    func pillText() -> (String, NSColor) {
-        let att = sessions.filter { $0.state == "attention" }.count
-        let wrk = sessions.filter { $0.state == "working" }.count
-        if !kittyUp { return ("ᓚᘏᗢ 𝘻", DIMC) }
-        if att > 0 { return ("ᓚᘏᗢ ●\(att)", ORANGE) }
-        if wrk > 0 { return ("ᓚᘏᗢ ●\(wrk)", BLUE) }
-        return ("ᓚᘏᗢ ✓", GREEN)
+    func close() {
+        collapseTimer?.invalidate()
+        panel.orderOut(nil)
     }
 
     func label(_ text: String, _ color: NSColor, size: CGFloat, bold: Bool = false) -> NSTextField {
         let l = NSTextField(labelWithString: text)
-        l.font = bold ? NSFont.monospacedSystemFont(ofSize: size, weight: .bold)
-                      : NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        l.font = NSFont.monospacedSystemFont(ofSize: size, weight: bold ? .bold : .regular)
         l.textColor = color
         l.backgroundColor = .clear
         l.isBezeled = false
@@ -139,23 +91,11 @@ final class App: NSObject, NSApplicationDelegate {
         return l
     }
 
-    @objc func rowClicked(_ sender: NSButton) {
-        run(["\(sender.tag)"])
-        collapse()
-    }
-    @objc func boardClicked(_ s: NSButton) { run(["board"]); collapse() }
-    @objc func newClicked(_ s: NSButton) { run(["new"]); collapse() }
-
-    func run(_ args: [String]) {
-        let p = Process()
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        p.executableURL = URL(fileURLWithPath: home + "/bin/fleet-jump")
-        p.arguments = args
-        try? p.run()
-    }
+    @objc func rowClicked(_ sender: NSButton) { app.run(["\(sender.tag)"]); collapse() }
+    @objc func boardClicked(_ s: NSButton) { app.run(["board"]); collapse() }
+    @objc func newClicked(_ s: NSButton) { app.run(["new"]); collapse() }
 
     func place(width: CGFloat, height: CGFloat) {
-        guard let screen = NSScreen.main else { return }
         let vf = screen.visibleFrame
         let x = vf.midX - width / 2
         let y = vf.maxY - height
@@ -170,7 +110,13 @@ final class App: NSObject, NSApplicationDelegate {
     }
 
     func buildPill() {
-        let (text, color) = pillText()
+        let att = app.sessions.filter { $0.state == "attention" }.count
+        let wrk = app.sessions.filter { $0.state == "working" }.count
+        var text = "ᓚᘏᗢ ✓"
+        var color = GREEN
+        if !app.kittyUp { text = "ᓚᘏᗢ 𝘻"; color = DIMC }
+        else if att > 0 { text = "ᓚᘏᗢ ●\(att)"; color = ORANGE }
+        else if wrk > 0 { text = "ᓚᘏᗢ ●\(wrk)"; color = BLUE }
         let l = label(text, color, size: 13, bold: true)
         let w = l.frame.width + 28
         place(width: max(90, w), height: pillH)
@@ -179,7 +125,7 @@ final class App: NSObject, NSApplicationDelegate {
     }
 
     func buildExpanded() {
-        let rows = sessions
+        let rows = app.sessions
         let rowH: CGFloat = 22
         let headH: CGFloat = 30
         let footH: CGFloat = 32
@@ -254,6 +200,77 @@ final class App: NSObject, NSApplicationDelegate {
         if !expanded { return }
         expanded = false
         rebuild()
+    }
+}
+
+final class App: NSObject, NSApplicationDelegate {
+    var pills: [Pill] = []
+    var sessions: [Sess] = []
+    var kittyUp = false
+
+    func applicationDidFinishLaunching(_ n: Notification) {
+        makePills()
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main) { [weak self] _ in self?.makePills() }
+        refresh()
+        Timer.scheduledTimer(withTimeInterval: 4.0, repeats: true) { [weak self] _ in
+            self?.refresh()
+        }
+    }
+
+    func makePills() {
+        pills.forEach { $0.close() }
+        pills = NSScreen.screens.map { Pill(screen: $0, app: self) }
+        pills.forEach { $0.rebuild() }
+    }
+
+    func pluginPath() -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return home + "/Documents/GlowDevelopment/nekotron/swiftbar/nekotron.5s.py"
+    }
+
+    func run(_ args: [String]) {
+        let p = Process()
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        p.executableURL = URL(fileURLWithPath: home + "/bin/fleet-jump")
+        p.arguments = args
+        try? p.run()
+    }
+
+    func refresh() {
+        DispatchQueue.global().async { [weak self] in
+            guard let self = self else { return }
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            p.arguments = ["python3", self.pluginPath(), "--json"]
+            let pipe = Pipe()
+            p.standardOutput = pipe
+            p.standardError = FileHandle.nullDevice
+            var ses: [Sess] = []
+            var up = false
+            do {
+                try p.run()
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                p.waitUntilExit()
+                if let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    up = (obj["kitty"] as? Bool) ?? false
+                    for d in (obj["sessions"] as? [[String: Any]]) ?? [] {
+                        ses.append(Sess(
+                            wid: (d["wid"] as? Int) ?? 0,
+                            title: (d["title"] as? String) ?? "?",
+                            state: (d["state"] as? String) ?? "neutral",
+                            ctx: (d["ctx"] as? String) ?? "",
+                            cost: (d["cost"] as? String) ?? ""))
+                    }
+                }
+            } catch {}
+            DispatchQueue.main.async {
+                self.sessions = ses
+                self.kittyUp = up
+                self.pills.forEach { $0.rebuild() }
+            }
+        }
     }
 }
 
