@@ -76,7 +76,12 @@ prev="$(cat "$f" 2>/dev/null)"
 # input" Notification ~60s after every completed turn; real attention events
 # (permission prompts, questions) arrive MID-turn while state is "working".
 [ "$state" = attention ] && [ "$prev" = "done" ] && exit 0
-if [ "$state" = reset ]; then rm -f "$f"; else printf '%s' "$state" > "$f"; fi
+if [ "$state" = reset ]; then
+    rm -f "$f" "$dir/provider-$kpid-$wid"
+else
+    printf '%s' "$state" > "$f"
+    printf '%s' "${NEKOTRON_PROVIDER:-claude}" > "$dir/provider-$kpid-$wid"
+fi
 [ "$state" != attention ] && rm -f "$dir/.esc-$kpid-$wid" 2>/dev/null  # answered: clear escalation
 
 # Attention side-effects (fire only on transition thanks to dedupe above):

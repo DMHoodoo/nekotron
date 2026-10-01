@@ -24,4 +24,4 @@ state=$(printf '%s' "$payload" | "$JQ" -er '
 ' 2>/dev/null) || exit 0
 HOOK="$HOME/.claude/hooks/kitty-tab-status.sh"
 [ -x "$HOOK" ] || exit 0
-exec "$HOOK" "$state"
+NEKOTRON_PROVIDER=codex exec "$HOOK" "$state"

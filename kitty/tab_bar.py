@@ -95,7 +95,7 @@ def _win_hue(w):
 
 def _tab_info(tab: TabBarData):
     """One boss pass -> (state, repo hue, context %)."""
-    state, hue, ctx = "neutral", None, None
+    state, hue, ctx, prov = "neutral", None, None, None
     try:
         tab_obj = get_boss().tab_for_id(tab.tab_id)
         pid = os.getpid()
@@ -107,6 +107,12 @@ def _tab_info(tab: TabBarData):
                     with open(f"{STATE_DIR}/ctx-{pid}-{w.id}") as f:
                         ctx = int(f.read().strip() or 0)
                 except (OSError, ValueError):
+                    pass
+            if prov is None:
+                try:
+                    with open(f"{STATE_DIR}/provider-{pid}-{w.id}") as f:
+                        prov = f.read().strip() or None
+                except OSError:
                     pass
             try:
                 with open(f"{STATE_DIR}/{pid}-{w.id}") as f:
@@ -121,7 +127,7 @@ def _tab_info(tab: TabBarData):
             state = "attention"
     except Exception:
         pass
-    return state, hue, ctx
+    return state, hue, ctx, prov
 
 
 def _led(state: str, frame: int) -> tuple:
@@ -132,8 +138,12 @@ def _led(state: str, frame: int) -> tuple:
     return "●", LED[state]
 
 
+PROV_GLYPH = {"claude": ("\u2733", 0xD97757), "codex": ("\u2b21", 0x10A37F),
+              "crush": ("\u2726", 0xFF5FA8)}
+
+
 def _signal_tab(draw_data: DrawData, screen, tab: TabBarData, index: int,
-                max_title_length: int, state: str, hue=None, ctx=None) -> int:
+                max_title_length: int, state: str, hue=None, ctx=None, prov=None) -> int:
     frame = int(time.monotonic() * 2)
     bar_bg = as_rgb(color_as_int(draw_data.default_bg))
     glyph, glyph_color = _led(state, frame)
@@ -159,6 +169,10 @@ def _signal_tab(draw_data: DrawData, screen, tab: TabBarData, index: int,
         screen.draw(" ")
     screen.cursor.fg = as_rgb(glyph_color)
     screen.draw(f"{glyph} ")
+    if prov in PROV_GLYPH:
+        pg, pc = PROV_GLYPH[prov]
+        screen.cursor.fg = as_rgb(pc)
+        screen.draw(f"{pg} ")
     pct = ""
     try:
         if state == "working" and tab.num_of_windows_with_progress > 0 and 0 < tab.total_progress < 100:
@@ -231,9 +245,9 @@ def draw_tab(draw_data: DrawData, screen, tab: TabBarData, before: int,
             _timer = -1
 
     try:
-        state, hue, ctx = _tab_info(tab)
+        state, hue, ctx, prov = _tab_info(tab)
         _statuses[index] = state
-        end = _signal_tab(draw_data, screen, tab, index, max_title_length, state, hue, ctx)
+        end = _signal_tab(draw_data, screen, tab, index, max_title_length, state, hue, ctx, prov)
     except Exception:
         end = draw_tab_with_powerline(
             draw_data, screen, tab, before, max_title_length, index, is_last, extra_data
