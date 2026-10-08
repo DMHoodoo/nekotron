@@ -36,7 +36,8 @@ def descendants(pid):
         stack += kids.get(c, [])
     return out
 
-print(f"# Nekotron fleet -> Orca migration manifest  ({sh('date \"+%Y-%m-%d %H:%M\"').strip()})")
+import time
+print("# Nekotron fleet -> Orca migration manifest  (" + time.strftime("%Y-%m-%d %H:%M") + ")")
 print("# PREFERRED: open an Orca pane, run the tmux attach line — the agent")
 print("# moves with its process intact. Then close its kitty tab. The resume")
 print("# line is the fallback (only if the tmux session is dead).")
