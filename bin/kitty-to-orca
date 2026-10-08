@@ -1,28 +1,73 @@
 #!/bin/bash
-# kitty-to-orca — migration manifest: every live Claude/Codex session as a
-# ready-to-run resume command for Orca panes (or any other host).
-# Sessions are portable (transcript + cwd); the PROCESS must be re-launched
-# by the new host. Close the kitty tab BEFORE resuming the same session id
-# elsewhere — one session, one live process.
-echo "# Nekotron fleet → Orca migration manifest  ($(date '+%Y-%m-%d %H:%M'))"
-echo "# For each session: in Orca, new pane in the listed directory, run the command."
-echo "# Close its kitty tab first (q or ⌘W) to avoid double-resume."
-echo
-for f in "$HOME"/.claude/sessions/*.json; do
-    [ -f "$f" ] || continue
-    pid=$(basename "$f" .json)
-    kill -0 "$pid" 2>/dev/null || continue
-    ps -p "$pid" -o command= | /usr/bin/grep -q "bg-spare" && continue
-    /usr/bin/python3 - "$f" <<'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-sid, cwd = d.get("sessionId", ""), d.get("cwd", "")
-if sid and cwd and "/T" not in cwd:
-    print(f"## {cwd}")
-    print(f"cd {cwd} && claude --resume {sid}")
+# kitty-to-orca — migration manifest. Every agent lives in a neko-* tmux
+# session, so the preferred move is ATTACH (process intact, no resume):
+# open an Orca pane, run the tmux line, then close the kitty tab.
+# The resume line is the fallback if the tmux session is ever gone.
+/usr/bin/python3 <<'PY'
+import glob, json, os, subprocess
+
+def sh(cmd):
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True).stdout
+
+# pid -> (sid, cwd) for live claudes
+sids = {}
+for f in glob.glob(os.path.expanduser("~/.claude/sessions/*.json")):
+    try:
+        pid = int(os.path.basename(f)[:-5])
+        os.kill(pid, 0)
+        d = json.load(open(f))
+        if "/T/" not in d.get("cwd", "") and "bg-spare" not in sh(f"ps -p {pid} -o command="):
+            sids[pid] = (d.get("sessionId", ""), d.get("cwd", ""))
+    except (ValueError, ProcessLookupError, PermissionError, OSError):
+        pass
+
+# process tree for descendant walks
+kids = {}
+for line in sh("ps -axo pid=,ppid=").splitlines():
+    p = line.split()
+    if len(p) == 2:
+        kids.setdefault(int(p[1]), []).append(int(p[0]))
+
+def descendants(pid):
+    out, stack = [], [pid]
+    while stack:
+        c = stack.pop()
+        out.append(c)
+        stack += kids.get(c, [])
+    return out
+
+print(f"# Nekotron fleet -> Orca migration manifest  ({sh('date \"+%Y-%m-%d %H:%M\"').strip()})")
+print("# PREFERRED: open an Orca pane, run the tmux attach line — the agent")
+print("# moves with its process intact. Then close its kitty tab. The resume")
+print("# line is the fallback (only if the tmux session is dead).")
+claimed = set()
+for line in sh("tmux ls -F '#{session_name}' 2>/dev/null").splitlines():
+    s = line.strip()
+    if not s:
+        continue
+    pane_pids = [int(x) for x in sh(f"tmux list-panes -t {s} -F '#{{pane_pid}}'").split()]
+    found = None
+    for pp in pane_pids:
+        for d in descendants(pp):
+            if d in sids:
+                found = (d, *sids[d])
+                break
+        if found:
+            break
     print()
+    if found:
+        pid, sid, cwd = found
+        claimed.add(pid)
+        print(f"## {cwd.replace(os.path.expanduser('~'), '~')}  (session {sid[:8]})")
+        print(f"tmux attach -t {s}")
+        print(f"# fallback: cd {cwd} && claude --resume {sid}")
+    else:
+        print(f"## {s}: no claude found inside (plain shell or codex)")
+        print(f"tmux attach -t {s}")
+orphans = {p: v for p, v in sids.items() if p not in claimed}
+if orphans:
+    print("\n# Sessions NOT in any tmux (close kitty tab first, then resume):")
+    for pid, (sid, cwd) in orphans.items():
+        print(f"cd {cwd} && claude --resume {sid}")
+print("\n# Codex sessions: Orca backfills ~/.codex/sessions natively.")
 PY
-done
-echo "# Codex sessions: Orca already backfills ~/.codex/sessions natively."
-echo "# tmux-hosted sessions survive anywhere: 'tmux attach -t <name>' in any pane."
-tmux ls 2>/dev/null | sed 's/^/# tmux: /'
