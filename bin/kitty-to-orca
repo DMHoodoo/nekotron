@@ -60,8 +60,10 @@ for line in sh("tmux ls -F '#{session_name}' 2>/dev/null").splitlines():
         pid, sid, cwd = found
         claimed.add(pid)
         print(f"## {cwd.replace(os.path.expanduser('~'), '~')}  (session {sid[:8]})")
+        print(f"# ORCA-NATIVE (full tracking; close the kitty/tmux copy FIRST):")
+        print(f"#   in an Orca terminal:  cd {cwd} && orca claude-teams --resume {sid}")
+        print(f"# VIEW-ONLY (process intact, no Orca tracking):")
         print(f"tmux attach -t {s}")
-        print(f"# fallback: cd {cwd} && claude --resume {sid}")
     else:
         print(f"## {s}: no claude found inside (plain shell or codex)")
         print(f"tmux attach -t {s}")
