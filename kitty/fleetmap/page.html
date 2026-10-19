@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<link rel="icon" href="data:,">
+<title>Fleet map</title>
+<style>
+:root { color-scheme: dark; font: 14px/1.5 system-ui, sans-serif; background: #10121a; color: #e4e7f0; }
+* { box-sizing: border-box; }
+body { margin: 0; height: 100vh; display: grid; grid-template-rows: 58px minmax(0, 1fr) auto; }
+header { display: flex; align-items: center; gap: 20px; padding: 0 22px; border-bottom: 1px solid #303548; }
+h1 { font-size: 18px; margin: 0; font-weight: 650; }
+#status { color: #a0a8be; font-size: 12px; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; min-height: 0; }
+#map-scroll { overflow: auto; position: relative; }
+#map { display: block; min-width: 100%; min-height: 100%; }
+#rail { overflow: auto; padding: 20px; border-left: 1px solid #303548; background: #161924; }
+h2 { font-size: 17px; line-height: 1.4; margin: 0 0 10px; overflow-wrap: anywhere; }
+p { margin: 8px 0; }
+.muted, dt { color: #a0a8be; }
+#node-kind { font-size: 12px; color: #a0a8be; }
+dl { margin: 20px 0; }
+dt { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; margin-top: 15px; }
+dd { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+#partners, #moves { padding-left: 18px; margin: 6px 0; }
+#partners li, #moves li { margin-bottom: 6px; }
+button, input, select { font: inherit; border: 1px solid #464e68; border-radius: 6px; padding: 7px 10px; background: #22283a; color: inherit; }
+button { cursor: pointer; }
+button:hover { background: #303a53; }
+button:disabled { cursor: wait; opacity: .55; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #9dbdff; outline-offset: 2px; }
+.link { padding: 0; border: 0; background: none; color: #acc8ff; text-align: left; }
+.danger { color: #ffc1b8; border-color: #a15e58; }
+#actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 20px; }
+.error { background: #59252b; color: #ffd5d9; border: 1px solid #b75a67; border-radius: 5px; padding: 8px; margin-top: 10px; overflow-wrap: anywhere; }
+[hidden] { display: none !important; }
+form { margin-top: 18px; }
+label { display: block; margin: 8px 0 5px; color: #bfc6d9; font-size: 12px; }
+input, select { width: 100%; min-width: 0; }
+form button { margin-top: 8px; }
+footer { padding: 10px 22px; border-top: 1px solid #303548; background: #161924; max-height: 27vh; overflow: auto; font-size: 11px; color: #b3bcd0; }
+footer strong { color: #e4e7f0; }
+#legend-lines { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 3px 22px; margin-top: 5px; }
+#legend-lines p { margin: 0; }
+.swatch { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 3px 0 6px; }
+.swatch:first-child { margin-left: 0; }
+dialog { width: min(820px, 90vw); max-height: 85vh; border: 1px solid #555f7a; border-radius: 12px; padding: 22px; background: #191e2b; color: #e4e7f0; }
+dialog::backdrop { background: #05070bd9; }
+.dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; background: #0e1119; padding: 16px; max-height: 60vh; overflow: auto; }
+.region-label { fill: #e4e7f0; font-size: 15px; font-weight: 650; }
+.cluster-label { fill: #bfc9e0; font-size: 12px; }
+.node-label { fill: #bfc6d9; font-size: 10px; pointer-events: none; }
+.node { cursor: pointer; outline: none; }
+.node .selection { stroke: transparent; }
+.node[aria-pressed="true"] .selection, .node:focus-visible .selection { stroke: #fff; }
+.cluster-scroll { height: 100%; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #46516e transparent; }
+.cluster-scroll svg { display: block; }
+.attention { filter: drop-shadow(0 0 6px #f0803c); }
+</style>
+</head>
+<body>
+<header><h1>Fleet map</h1><span id="status" role="status">Connecting…</span></header>
+<main>
+  <div id="map-scroll"><svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="Agent sessions grouped by host and cluster"><g id="regions"></g><g id="edges" pointer-events="none"></g><g id="clusters"></g></svg></div>
+  <aside id="rail" aria-label="Session details">
+    <div id="empty"><h2>Your fleet, at a glance</h2><p class="muted">Select a session to see its purpose, recent work, and terminal actions.</p></div>
+    <section id="details" hidden>
+      <h2 id="node-title"></h2><p id="node-kind"></p>
+      <dl>
+        <dt>Purpose</dt><dd id="purpose"></dd>
+        <dt>Doing now</dt><dd id="doing"></dd>
+        <dt>You · last addressed</dt><dd id="you-age"></dd>
+        <dt>It · last activity</dt><dd id="it-age"></dd>
+        <dt>Repo</dt><dd id="repo"></dd>
+        <dt>Worktree</dt><dd id="worktree"></dd>
+        <dt>Branch</dt><dd id="branch"></dd>
+        <dt>Host</dt><dd id="host"></dd>
+        <dt>Model</dt><dd id="model"></dd>
+        <dt>Context</dt><dd id="context"></dd>
+        <dt>Cost</dt><dd id="cost"></dd>
+        <dt>Partners</dt><dd><ul id="partners"></ul></dd>
+        <dt>Last five moves</dt><dd><ol id="moves"></ol></dd>
+      </dl>
+      <div id="parent-row" hidden><button id="parent-link" class="link" type="button">Open parent session</button></div>
+      <div id="actions" hidden>
+        <button type="button" data-action="peek">Peek</button><button type="button" data-action="jump">Jump</button><button type="button" data-action="send">Send</button><button type="button" data-action="close" class="danger">Close</button>
+      </div>
+      <div id="action-error" class="error" role="alert" hidden></div>
+      <p id="action-status" class="muted" role="status"></p>
+      <form id="assign-form">
+        <label for="cluster-choice">Move to…</label><select id="cluster-choice"></select>
+        <div id="new-cluster-row" hidden><label for="new-cluster">New cluster name</label><input id="new-cluster" maxlength="200" autocomplete="off"></div>
+        <button type="submit">Move session</button>
+      </form>
+    </section>
+  </aside>
+</main>
+<footer aria-label="Legend">
+  <strong>Legend</strong>
+  <div id="legend-lines">
+    <p><strong>States:</strong> <span class="swatch" style="background:#4f8ef7"></span>Working <span class="swatch" style="background:#4cc38a"></span>Done <span class="swatch" style="background:#f0803c"></span>Needs you (glow) <span class="swatch" style="background:#6b7394"></span>Idle.</p>
+    <p><strong>Pulse:</strong> Working nodes pulse from radius 11 to 16 every 1.6 seconds.</p>
+    <p><strong>Hollowing · it:</strong> Solid under 1h; center opacity falls linearly to 15% at 48h. Unknown activity stays solid.</p>
+    <p><strong>Ring fill · you:</strong> White fills clockwise over 24h since your last message; radius 17, width 3, muted background.</p>
+    <p><strong>Gray ring:</strong> Solid gray after 24h.</p>
+    <p><strong>Dashed ring:</strong> After 7d, gray dashes of 3px with 3px gaps.</p>
+    <p><strong>Dotted ring:</strong> Never addressed; 2px marks with 3px gaps.</p>
+    <p><strong>Subagents:</strong> Radius 6, joined to a parent by a 20px line; select for ages and a parent link.</p>
+    <p><strong>Edge kinds:</strong> Solid = message, dashed = dispatch, thin gray = subagent.</p>
+    <p><strong>Edge age:</strong> Full opacity under 10m; fades linearly to 25% at 60m, then stays at 25%.</p>
+  </div>
+</footer>
+<dialog id="overlay" aria-labelledby="overlay-title">
+  <h2 id="overlay-title"></h2><p id="overlay-text"></p><pre id="screen" tabindex="0" hidden></pre>
+  <form id="send-form" hidden><label for="send-text">Line to send</label><input id="send-text" autocomplete="off" required><button id="send-submit" type="submit">Send line</button></form>
+  <div id="overlay-error" class="error" role="alert" hidden></div>
+  <div class="dialog-buttons"><button id="cancel-overlay" type="button">Cancel</button><button id="confirm-close" type="button" class="danger" hidden>Close it</button></div>
+</dialog>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+const colors = {working: '#4f8ef7', done: '#4cc38a', attention: '#f0803c', idle: '#6b7394'};
+const key = new URLSearchParams(location.search).get('key') || '';
+const positions = new Map(); // Retained for this page's life, including temporarily absent nodes.
+const regions = new Map();
+const clusters = new Map();
+const nodeViews = new Map();
+const childSlots = new Map();
+const COLUMN = 380, GRID_COLUMNS = 3, CELL_X = 110, CELL_Y = 94;
+let snapshot = {hosts: [], nodes: [], edges: []};
+let nodes = new Map(), selectedId = null, dialogNodeId = null;
+let timer = null, pollSeconds = 3, loading = false, actionBusy = false;
+let gradientId = 0, assignmentChoices = '';
+
+function svg(tag, attributes = {}, text) {
+  const element = document.createElementNS(NS, tag);
+  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
+  if (text !== undefined) element.textContent = text;
+  return element;
+}
+function setText(id, value) { $(id).textContent = value === null || value === undefined || value === '' ? 'Unknown' : value; }
+function secondsSince(epoch) { return epoch == null ? null : Math.max(0, Date.now() / 1000 - epoch); }
+function age(epoch) {
+  const seconds = secondsSince(epoch);
+  if (seconds === null) return 'Unknown';
+  if (seconds < 60) return `${Math.floor(seconds)}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+  return `${Math.floor(seconds / 86400)}d`;
+}
+async function request(path, body) {
+  const options = {headers: {'X-Fleet-Key': key}, cache: 'no-store'};
+  if (body !== undefined) {
+    options.method = 'POST';
+    options.headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(path, options);
+  const value = await response.json();
+  if (!response.ok || value.ok === false) throw new Error(value.error || `Request failed (${response.status})`);
+  return value;
+}
+function showError(error, inDialog = false) {
+  const message = error.message || String(error);
+  $('action-error').textContent = message;
+  $('action-error').hidden = false;
+  if (inDialog) {
+    $('overlay-error').textContent = message;
+    $('overlay-error').hidden = false;
+  }
+}
+function clusterKey(node) { return JSON.stringify([node.host, node.cluster || 'Unsorted']); }
+
+function ensureRegion(host) {
+  if (regions.has(host.name)) return regions.get(host.name);
+  const x = regions.size * COLUMN;
+  const group = svg('g');
+  const background = svg('rect', {x: x + 8, y: 10, width: COLUMN - 16, height: 280, rx: 12, fill: '#141824'});
+  const label = svg('text', {x: x + 24, y: 38, class: 'region-label'}, host.label || host.name);
+  const badge = svg('g');
+  badge.append(svg('rect', {x: x + COLUMN - 124, y: 22, width: 99, height: 22, rx: 5, fill: '#702e38'}), svg('text', {x: x + COLUMN - 114, y: 37, fill: '#ffd2d7', 'font-size': 11}, 'unreachable'));
+  group.append(background, label, badge);
+  $('regions').append(group);
+  const region = {x, nextY: 62, group, background, label, badge};
+  regions.set(host.name, region);
+  return region;
+}
+function ensureCluster(node) {
+  const id = clusterKey(node);
+  if (clusters.has(id)) return clusters.get(id);
+  const region = regions.get(node.host) || ensureRegion({name: node.host});
+  const count = snapshot.nodes.filter(item => clusterKey(item) === id && item.kind !== 'subagent').length;
+  const height = Math.max(2, Math.min(4, Math.ceil(count / GRID_COLUMNS))) * CELL_Y + 40;
+  const x = region.x + 18, y = region.nextY;
+  region.nextY += height + 18;
+  const group = svg('g');
+  group.append(svg('rect', {x, y, width: COLUMN - 36, height, rx: 10, fill: 'none', stroke: '#4b546d', 'stroke-dasharray': '5 5'}));
+  const name = node.cluster || 'Unsorted';
+  const label = svg('text', {x: x + 14, y: y + 24, class: 'cluster-label'}, name.length > 40 ? `${name.slice(0, 39)}…` : name);
+  label.append(svg('title', {}, name));
+  group.append(label);
+  const viewport = svg('foreignObject', {x: x + 5, y: y + 34, width: COLUMN - 46, height: height - 40});
+  const scroller = document.createElement('div');
+  scroller.className = 'cluster-scroll';
+  scroller.setAttribute('aria-label', `${name} sessions`);
+  const grid = svg('svg', {width: COLUMN - 60, height: height - 40});
+  scroller.append(grid);
+  viewport.append(scroller);
+  group.append(viewport);
+  $('clusters').append(group);
+  const cluster = {id, x: x + 5, y: y + 34, height: height - 40, group, grid, scroller, slots: new Map()};
+  clusters.set(id, cluster);
+  scroller.addEventListener('scroll', drawEdges);
+  return cluster;
+}
+function placeNode(node) {
+  const cluster = ensureCluster(node);
+  const previous = positions.get(node.id);
+  if (previous && previous.cluster === cluster.id) return previous;
+  // An explicit cluster change rehomes a node; ordinary polls never repack it.
+  if (node.kind === 'subagent' && nodes.has(node.parent)) {
+    const parent = placeNode(nodes.get(node.parent));
+    if (!childSlots.has(node.id)) {
+      const siblings = [...childSlots.values()].filter(item => item.parent === node.parent).length;
+      childSlots.set(node.id, {parent: node.parent, index: siblings});
+    }
+    const angle = childSlots.get(node.id).index * Math.PI / 4;
+    const position = {cluster: parent.cluster, x: parent.x + 20 * Math.cos(angle), y: parent.y + 20 * Math.sin(angle)};
+    positions.set(node.id, position);
+    return position;
+  }
+  let slot = 0;
+  while (cluster.slots.has(slot) && cluster.slots.get(slot) !== node.id) slot++;
+  cluster.slots.set(slot, node.id);
+  const position = {cluster: cluster.id, x: 54 + (slot % GRID_COLUMNS) * CELL_X, y: 36 + Math.floor(slot / GRID_COLUMNS) * CELL_Y};
+  positions.set(node.id, position);
+  cluster.grid.setAttribute('height', Math.max(Number(cluster.grid.getAttribute('height')), position.y + 58));
+  return position;
+}
+function makeNode(node) {
+  const small = node.kind === 'subagent';
+  const group = svg('g', {class: 'node', role: 'button', tabindex: 0});
+  const title = svg('title');
+  const hit = svg('circle', {r: small ? 8 : 24, fill: 'transparent'});
+  const selection = svg('circle', {r: small ? 9 : 22, fill: 'none', 'stroke-width': 1, class: 'selection'});
+  const gradient = svg('radialGradient', {id: `age-${++gradientId}`});
+  const center = svg('stop', {offset: '0%'}), rim = svg('stop', {offset: '100%'});
+  gradient.append(center, rim);
+  const defs = svg('defs');
+  defs.append(gradient);
+  const pulse = svg('circle', {r: 11, fill: 'none', 'stroke-width': 1.5, opacity: .6});
+  pulse.append(svg('animate', {attributeName: 'r', values: '11;16', dur: '1.6s', repeatCount: 'indefinite'}), svg('animate', {attributeName: 'opacity', values: '.6;0', dur: '1.6s', repeatCount: 'indefinite'}));
+  const body = svg('circle', {r: small ? 6 : 11, fill: `url(#${gradient.id})`});
+  const ringBackground = svg('circle', {r: 17, fill: 'none', stroke: 'rgba(127,127,127,.25)', 'stroke-width': 3});
+  const ring = svg('circle', {r: 17, fill: 'none', 'stroke-width': 3, transform: 'rotate(-90)'});
+  const label = svg('text', {y: 52, 'text-anchor': 'middle', class: 'node-label'});
+  group.append(defs, title, hit, selection, ringBackground, ring, pulse, body, label);
+  if (small) { ringBackground.style.display = 'none'; ring.style.display = 'none'; label.style.display = 'none'; }
+  group.addEventListener('click', () => selectNode(node.id));
+  group.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectNode(node.id); }
+  });
+  const view = {group, title, center, rim, pulse, body, ring, label};
+  nodeViews.set(node.id, view);
+  return view;
+}
+function updateNode(node) {
+  const position = placeNode(node), cluster = clusters.get(position.cluster);
+  const view = nodeViews.get(node.id) || makeNode(node);
+  if (view.group.parentNode !== cluster.grid) cluster.grid.append(view.group);
+  view.group.style.display = '';
+  view.group.setAttribute('transform', `translate(${position.x} ${position.y})`);
+  view.group.setAttribute('aria-pressed', String(selectedId === node.id));
+  const title = node.title || node.id;
+  view.group.setAttribute('aria-label', `${title}, ${node.state}, ${node.kind}`);
+  view.title.textContent = `${title}\n${node.purpose || node.doing || ''}`;
+  view.label.textContent = title.length > 16 ? `${title.slice(0, 15)}…` : title;
+  const color = colors[node.state] || colors.idle;
+  const hours = (secondsSince(node.it_at) || 0) / 3600;
+  const centerOpacity = 1 - .85 * Math.min(1, Math.max(0, (hours - 1) / 47));
+  view.center.setAttribute('stop-color', color);
+  view.center.setAttribute('stop-opacity', centerOpacity);
+  view.rim.setAttribute('stop-color', color);
+  view.body.setAttribute('class', node.state === 'attention' ? 'attention' : '');
+  view.pulse.style.display = node.state === 'working' ? '' : 'none';
+  view.pulse.setAttribute('stroke', color);
+  const youHours = (secondsSince(node.you_at) || 0) / 3600;
+  const circumference = 2 * Math.PI * 17;
+  view.ring.setAttribute('stroke', youHours > 24 && !node.never_addressed ? '#9aa0b4' : '#ffffff');
+  let dash = `${circumference * Math.min(1, youHours / 24)} ${circumference}`;
+  if (youHours > 24) dash = 'none';
+  if (youHours > 7 * 24) dash = '3 3';
+  if (node.never_addressed) dash = '2 3';
+  view.ring.setAttribute('stroke-dasharray', dash);
+}
+function endpoint(id) {
+  if (!nodes.has(id)) return null;
+  const position = positions.get(id);
+  if (!position) return null;
+  const cluster = clusters.get(position.cluster);
+  const y = position.y - cluster.scroller.scrollTop;
+  if (y < 0 || y > cluster.height) return null;
+  return {x: cluster.x + position.x, y: cluster.y + y};
+}
+function drawEdges() {
+  const fragment = document.createDocumentFragment();
+  for (const edge of snapshot.edges) {
+    const src = endpoint(edge.src), dst = endpoint(edge.dst);
+    if (!src || !dst) continue;
+    const minutes = (secondsSince(edge.newest) ?? 3600) / 60;
+    const opacity = 1 - .75 * Math.min(1, Math.max(0, (minutes - 10) / 50));
+    const line = svg('line', {x1: src.x, y1: src.y, x2: dst.x, y2: dst.y, stroke: edge.kind === 'subagent' ? '#9aa0b4' : '#7a9acb', 'stroke-width': edge.kind === 'subagent' ? 1 : 1.5, 'stroke-opacity': opacity});
+    if (edge.kind === 'dispatch') line.setAttribute('stroke-dasharray', '6 4');
+    fragment.append(line);
+  }
+  $('edges').replaceChildren(fragment);
+}
+function render() {
+  nodes = new Map(snapshot.nodes.map(node => [node.id, node]));
+  for (const region of regions.values()) region.group.style.display = 'none';
+  for (const host of snapshot.hosts) {
+    const region = ensureRegion(host);
+    region.group.style.display = '';
+    region.label.textContent = host.label || host.name;
+    region.badge.style.display = host.reachable === false ? '' : 'none';
+  }
+  for (const cluster of clusters.values()) cluster.group.style.display = 'none';
+  for (const view of nodeViews.values()) view.group.style.display = 'none';
+  // Parents get slots before their subagents, regardless of snapshot ordering.
+  for (const node of [...snapshot.nodes].sort((a, b) => (a.kind === 'subagent') - (b.kind === 'subagent'))) {
+    const cluster = ensureCluster(node);
+    cluster.group.style.display = '';
+    updateNode(node);
+  }
+  let height = 340;
+  for (const region of regions.values()) {
+    region.background.setAttribute('height', region.nextY);
+    height = Math.max(height, region.nextY + 20);
+  }
+  $('map').setAttribute('width', Math.max(COLUMN, regions.size * COLUMN));
+  $('map').setAttribute('height', height);
+  drawEdges();
+  renderRail();
+}
+function selectNode(id) {
+  if (!nodes.has(id)) return;
+  selectedId = id;
+  assignmentChoices = '';
+  $('action-error').hidden = true;
+  $('action-status').textContent = '';
+  $('rail').scrollTop = 0;
+  for (const [nodeId, view] of nodeViews) view.group.setAttribute('aria-pressed', String(id === nodeId));
+  renderRail();
+}
+function renderRail() {
+  const node = nodes.get(selectedId);
+  $('empty').hidden = Boolean(node);
+  $('details').hidden = !node;
+  if (!node) {
+    $('empty').lastElementChild.textContent = selectedId ? 'This session is no longer in the current snapshot. Select another session.' : 'Select a session to see its purpose, recent work, and terminal actions.';
+    return;
+  }
+  setText('node-title', node.title || node.id);
+  setText('node-kind', `${node.kind === 'terminal' ? 'Terminal only' : node.kind === 'subagent' ? 'Subagent' : 'Claude session'} · ${node.state === 'attention' ? 'Needs you' : node.state} · ${node.cluster || 'Unsorted'}`);
+  for (const field of ['purpose', 'doing', 'repo', 'worktree', 'branch', 'model']) setText(field, node[field]);
+  setText('you-age', node.never_addressed ? 'Never addressed' : node.you_at == null ? 'Unknown' : `${age(node.you_at)} ago`);
+  setText('it-age', node.it_at == null ? 'Unknown' : `${age(node.it_at)} ago`);
+  const hosting = node.hosting === 'orca' ? 'Orca' : node.hosting;
+  setText('host', hosting && hosting !== node.host ? `${node.host} · ${hosting}` : node.host);
+  setText('context', node.ctx_pct == null ? 'Unknown' : `${node.ctx_pct}%`);
+  setText('cost', node.cost == null ? 'Unknown' : typeof node.cost === 'number' ? `$${node.cost.toFixed(2)}` : node.cost);
+  const partners = new Map();
+  for (const edge of snapshot.edges) {
+    const other = edge.src === node.id ? edge.dst : edge.dst === node.id ? edge.src : null;
+    if (other && edge.kind !== 'subagent') partners.set(other, (partners.get(other) || 0) + edge.count);
+  }
+  $('partners').replaceChildren();
+  for (const [id, count] of partners) {
+    const item = document.createElement('li'), button = document.createElement('button');
+    button.type = 'button'; button.className = 'link';
+    button.textContent = `${nodes.get(id)?.title || id} (${count} ${count === 1 ? 'message' : 'messages'})`;
+    button.addEventListener('click', () => selectNode(id));
+    item.append(button); $('partners').append(item);
+  }
+  if (!partners.size) $('partners').textContent = 'No recorded messages';
+  $('moves').replaceChildren();
+  for (const [at, description] of [...(node.moves || [])].sort((a, b) => b[0] - a[0]).slice(0, 5)) {
+    const item = document.createElement('li'); item.textContent = `${age(at)} ago · ${description}`; $('moves').append(item);
+  }
+  if (!node.moves?.length) $('moves').textContent = 'No recorded moves';
+  $('parent-row').hidden = node.kind !== 'subagent';
+  $('parent-link').textContent = `Open parent: ${nodes.get(node.parent)?.title || node.parent || 'unavailable'}`;
+  $('parent-link').disabled = !nodes.has(node.parent);
+  const hasTarget = [node.terminal, node.tmux, node.kitty_window].some(value => value !== null && value !== undefined && value !== '');
+  $('actions').hidden = node.kind === 'subagent' || !hasTarget;
+  const names = [...new Set(snapshot.nodes.map(item => item.cluster || 'Unsorted'))].sort();
+  const signature = JSON.stringify([selectedId, names]);
+  if (assignmentChoices !== signature) {
+    const previous = assignmentChoices ? $('cluster-choice').value : node.cluster || 'Unsorted';
+    $('cluster-choice').replaceChildren(...names.map(name => new Option(name, name)), new Option('New cluster…', ''));
+    $('cluster-choice').value = previous;
+    $('new-cluster-row').hidden = $('cluster-choice').value !== '';
+    assignmentChoices = signature;
+  }
+}
+function openOverlay(title, nodeId) {
+  dialogNodeId = nodeId;
+  $('overlay-title').textContent = title;
+  $('overlay-text').textContent = '';
+  $('screen').hidden = true;
+  $('send-form').hidden = true;
+  $('confirm-close').hidden = true;
+  $('overlay-error').hidden = true;
+  $('cancel-overlay').textContent = 'Cancel';
+  $('overlay').showModal();
+}
+async function runAction(work) {
+  if (actionBusy) return;
+  actionBusy = true;
+  $('action-error').hidden = true;
+  $('overlay-error').hidden = true;
+  document.querySelectorAll('#actions button, #confirm-close, #send-submit').forEach(button => button.disabled = true);
+  try { await work(); } catch (error) { showError(error, $('overlay').open); }
+  finally {
+    actionBusy = false;
+    document.querySelectorAll('#actions button, #confirm-close, #send-submit').forEach(button => button.disabled = false);
+  }
+}
+$('actions').addEventListener('click', event => {
+  const action = event.target.dataset.action, id = selectedId;
+  if (!action || !nodes.has(id)) return;
+  runAction(async () => {
+    if (action === 'send') {
+      openOverlay(`Send to ${nodes.get(id).title || 'session'}`, id);
+      $('send-form').hidden = false; $('send-text').value = ''; $('send-text').focus();
+    } else if (action === 'close') {
+      const result = await request(`/api/confirm?node=${encodeURIComponent(id)}`);
+      openOverlay('Close this session?', id);
+      $('overlay-text').textContent = result.text;
+      $('confirm-close').hidden = false;
+      $('cancel-overlay').focus();
+    } else {
+      const result = await request('/api/action', {node: id, action});
+      if (action === 'peek') {
+        openOverlay(`Peek · ${nodes.get(id)?.title || 'session'}`, id);
+        $('screen').textContent = result.output || '(Screen is empty)'; $('screen').hidden = false;
+        $('cancel-overlay').textContent = 'Done'; $('screen').focus();
+      } else $('action-status').textContent = 'Jump requested.';
+    }
+  });
+});
+$('confirm-close').addEventListener('click', () => {
+  const id = dialogNodeId;
+  runAction(async () => {
+    await request('/api/action', {node: id, action: 'close'});
+    $('overlay').close(); $('action-status').textContent = 'Close requested.';
+    await refresh();
+  });
+});
+$('send-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const id = dialogNodeId, text = $('send-text').value;
+  runAction(async () => {
+    await request('/api/action', {node: id, action: 'send', text});
+    $('overlay').close(); $('action-status').textContent = 'Line sent.';
+  });
+});
+$('cancel-overlay').addEventListener('click', () => $('overlay').close());
+$('parent-link').addEventListener('click', () => selectNode(nodes.get(selectedId)?.parent));
+$('cluster-choice').addEventListener('change', () => { $('new-cluster-row').hidden = $('cluster-choice').value !== ''; });
+$('assign-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const id = selectedId, initiative = $('cluster-choice').value || $('new-cluster').value.trim();
+  if (!initiative) { showError(new Error('Enter a cluster name.')); return; }
+  const button = event.target.querySelector('button'); button.disabled = true;
+  $('action-error').hidden = true;
+  try {
+    await request('/api/assign', {node: id, initiative});
+    $('action-status').textContent = `Move to ${initiative} saved. The next snapshot will show the assignment.`;
+  } catch (error) { showError(error); }
+  finally { button.disabled = false; }
+});
+function startPolling() {
+  clearInterval(timer);
+  timer = null;
+  if (document.visibilityState === 'visible') timer = setInterval(refresh, pollSeconds * 1000);
+}
+async function refresh() {
+  if (loading || document.visibilityState !== 'visible') return;
+  loading = true;
+  try {
+    snapshot = await request('/api/state');
+    const nextSeconds = Number(snapshot.poll_seconds);
+    if (Number.isFinite(nextSeconds) && nextSeconds > 0 && nextSeconds !== pollSeconds) { pollSeconds = nextSeconds; startPolling(); }
+    render();
+    $('status').textContent = snapshot.generated_at == null ? 'Waiting for the first snapshot…' : `${snapshot.nodes.length} sessions · updated ${age(snapshot.generated_at)} ago`;
+    $('status').style.color = '';
+  } catch (error) {
+    $('status').textContent = `Connection error: ${error.message}. Retrying…`;
+    $('status').style.color = '#ffafb9';
+  } finally { loading = false; }
+}
+document.addEventListener('visibilitychange', () => {
+  startPolling();
+  if (document.visibilityState === 'visible') refresh();
+  else $('status').textContent = 'Paused while hidden';
+});
+startPolling();
+refresh();
+</script>
+</body>
+</html>
