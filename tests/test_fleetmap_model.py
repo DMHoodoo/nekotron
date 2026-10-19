@@ -119,13 +119,32 @@ class SnapshotAssembler(unittest.TestCase):
         node = self.node(collector.snapshot())
         self.assertIsNone(node['you_at'])
         self.assertTrue(node['never_addressed'])
-        self.assertEqual(node['cluster'], 'review')
+        self.assertEqual(node['purpose'], 'Review PR 6869 under run 20261007')
+        self.assertEqual((node['worktree'], node['branch']), ('/work/project', 'feature/review'))
+        self.assertEqual(node['cluster'], 'Unsorted')
+        self.config.write_text(json.dumps({'assign': {'s1': 'Pinned'}}))
+        node = self.node(collector.snapshot())
+        self.assertIsNone(node['you_at'])
+        self.assertEqual(node['cluster'], 'Pinned')
+        self.config.unlink()
+        self.assertEqual(self.node(collector.snapshot())['cluster'], 'Unsorted')
         with self.transcript.open('a') as fh:
             fh.write(json.dumps({'type': 'user', 'timestamp': '2026-10-19T10:10:00Z',
                                  'message': {'content': 'Please continue'}}) + '\n')
         node = self.node(collector.snapshot())
         self.assertEqual(node['you_at'], NOW)
         self.assertFalse(node['never_addressed'])
+        self.assertEqual(node['cluster'], 'review')
+
+    def test_dispatched_worker_run_objective_applies_before_human_follow_up(self):
+        self.orca.put('orchestration worker-list', 'workers',
+                      [{'dispatchId': 'd1', 'agentTerminalHandle': 'term_a', 'runId': 'r1'}])
+        self.orca.put('orchestration run-list', 'runs',
+                      [{'id': 'r1', 'objective': 'Fleet map: assemble'}])
+        node = self.node(self.collector().snapshot())
+        self.assertIsNone(node['you_at'])
+        self.assertTrue(node['never_addressed'])
+        self.assertEqual(node['cluster'], 'Fleet map')
 
     def test_unreachable_environment_is_listed_without_nodes(self):
         snap = self.collector(orca_errors={'laptop2': OrcaError('timeout')}).snapshot()
@@ -210,11 +229,15 @@ class SnapshotAssembler(unittest.TestCase):
                       [{'dispatchId': 'd1', 'agentTerminalHandle': 'term_a'}])
         self.assertTrue(self.node(collector.snapshot())['never_addressed'])
 
-    def test_no_human_prompt_is_unsorted_regardless_of_worktree_or_pin(self):
+    def test_no_human_prompt_is_unsorted_unless_pinned(self):
         self.transcript.write_text('{"type":"ai-title","aiTitle":"Review"}\n')
-        self.config.write_text(json.dumps({'assign': {'s1': 'Pinned'}}))
-        node = self.node(self.collector().snapshot())
+        collector = self.collector()
+        node = self.node(collector.snapshot())
         self.assertEqual(node['cluster'], 'Unsorted')
+        self.assertTrue(node['never_addressed'])
+        self.config.write_text(json.dumps({'assign': {'s1': 'Pinned'}}))
+        node = self.node(collector.snapshot())
+        self.assertEqual(node['cluster'], 'Pinned')
         self.assertTrue(node['never_addressed'])
 
     def test_hosting_precedence_and_action_targets(self):

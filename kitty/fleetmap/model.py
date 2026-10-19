@@ -188,8 +188,11 @@ class Collector:
                         ctx_pct=session.ctx_pct, cost=session.cost,
                         state=session.hook_state if session.hook_state in ('attention', 'done')
                         else 'working' if session.status == 'busy' else 'idle')
-            node['cluster'] = ('Unsorted' if facts.purpose is None and facts.you_at is None
-                               else cluster(node))
+            # Dispatch prompts provide purpose, but only human messages enable
+            # inferred clustering; explicit pins and run bindings still apply.
+            unaddressed_unbound = (facts.you_at is None and node_id not in config.assign
+                                  and not objectives.get(handle))
+            node['cluster'] = 'Unsorted' if unaddressed_unbound else cluster(node)
             nodes.append(node)
             for agent in session.subagents:
                 child_id = f'local:agent:{agent.agent_id}'
