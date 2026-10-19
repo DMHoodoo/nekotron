@@ -91,7 +91,7 @@ def _consume(line, facts, treat_dispatch_prompt_as_hassan):
     if is_hassan_prompt(record):
         first = not facts._human_prompt_seen
         facts._human_prompt_seen = True
-        if facts.purpose is None and not text.startswith('<'):
+        if facts.purpose is None:
             facts.purpose = text
         if epoch is not None and (treat_dispatch_prompt_as_hassan or not first):
             facts.you_at = max(facts.you_at, epoch) if facts.you_at is not None else epoch
@@ -100,9 +100,12 @@ def _consume(line, facts, treat_dispatch_prompt_as_hassan):
     if kind == 'user':
         for match in _CROSS_SESSION.finditer(text):
             facts.inbound.append((epoch, match.group(2)))
+    tool_result = kind == 'user' and isinstance(content, list) and any(
+        isinstance(block, dict) and block.get('type') == 'tool_result' for block in content)
+    if kind == 'assistant' or tool_result:
+        facts.it_at = max(facts.it_at, epoch) if facts.it_at is not None else epoch
     if kind != 'assistant':
         return
-    facts.it_at = max(facts.it_at, epoch) if facts.it_at is not None else epoch
     blocks = [{'type': 'text', 'text': content}] if isinstance(content, str) else content
     if not isinstance(blocks, list):
         return

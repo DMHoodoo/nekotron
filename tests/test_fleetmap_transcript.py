@@ -88,6 +88,22 @@ class TranscriptReader(unittest.TestCase):
     def test_meta_peer_record_is_not_hassan(self):
         self.assertFalse(is_hassan_prompt(record('user', 'x', isMeta=True, turnOrigin='peer')))
 
+    def test_tool_result_updates_activity_but_human_text_does_not(self):
+        first = read_transcript(self.copy)
+        append_line(self.copy, record('user', [
+            {'type': 'tool_result', 'content': 'Completed'},
+        ], '2026-10-19T10:10:00Z'))
+        append_line(self.copy, record('user', 'Follow up', '2026-10-19T10:11:00Z'))
+        for prev in (None, first):
+            with self.subTest(incremental=prev is not None):
+                facts = read_transcript(self.copy, prev)
+                self.assertEqual(facts.it_at, iso('2026-10-19T10:10:00Z'))
+                self.assertEqual(facts.you_at, iso('2026-10-19T10:11:00Z'))
+                self.assertEqual(facts.moves, first.moves)
+                self.assertEqual(facts.doing, first.doing)
+                self.assertEqual(facts.last_said, first.last_said)
+        self.assertEqual(first.it_at, iso('2026-10-19T10:08:00Z'))
+
     def test_hassan_prompt_rules(self):
         for origin in (None, 'human'):
             with self.subTest(origin=origin):
@@ -186,16 +202,19 @@ class TranscriptReader(unittest.TestCase):
         self.assertEqual(second.purpose, first.purpose)
         self.assertIsNone(first.you_at)
 
-    def test_wrapper_counts_as_human_but_not_as_purpose(self):
+    def test_human_prompt_beginning_with_angle_bracket_is_purpose(self):
         self.copy.write_bytes(b'')
-        append_line(self.copy, record('user', '<wrapper>injected</wrapper>'))
+        prompt = '<request>Review this PR</request>'
+        append_line(self.copy, record('user', prompt))
         first = read_transcript(self.copy)
-        self.assertIsNone(first.purpose)
+        self.assertEqual(first.purpose, prompt)
         self.assertEqual(first.you_at, iso('2026-10-19T10:09:00Z'))
         first_worker = read_transcript(self.copy, treat_dispatch_prompt_as_hassan=False)
-        append_line(self.copy, record('user', 'Actual purpose', '2026-10-19T10:10:00Z'))
+        self.assertEqual(first_worker.purpose, prompt)
+        self.assertIsNone(first_worker.you_at)
+        append_line(self.copy, record('user', 'Follow up', '2026-10-19T10:10:00Z'))
         second = read_transcript(self.copy, first_worker, treat_dispatch_prompt_as_hassan=False)
-        self.assertEqual(second.purpose, 'Actual purpose')
+        self.assertEqual(second.purpose, prompt)
         self.assertEqual(second.you_at, iso('2026-10-19T10:10:00Z'))
 
     def test_empty_transcript_can_be_followed_with_dispatch_policy(self):
