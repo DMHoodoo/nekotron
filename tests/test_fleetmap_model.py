@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Snapshot integration with real transcripts and a canned Orca boundary."""
 from dataclasses import replace
 from datetime import datetime

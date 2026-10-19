@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Local registry discovery without real ps calls or transcript parsing."""
 import json
 import os

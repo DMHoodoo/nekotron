@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Serve a cached fleet snapshot and terminal actions over authenticated loopback."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json

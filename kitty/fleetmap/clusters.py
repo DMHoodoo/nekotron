@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Infer initiative clusters and persist explicit node assignments."""
 from dataclasses import dataclass
 import json

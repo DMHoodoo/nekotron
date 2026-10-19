@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Assemble host-qualified fleet nodes and traffic from local and Orca facts."""
 from dataclasses import asdict
 import os

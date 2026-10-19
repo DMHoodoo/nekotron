@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Route fleet map actions to the terminal that hosts a snapshot node."""
 import glob
 import os

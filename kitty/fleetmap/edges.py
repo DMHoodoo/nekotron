@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Resolve traffic endpoints and combine directed fleet map edges."""
 from dataclasses import dataclass
 from datetime import datetime, timezone

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Exercise the fleet map over loopback without live collectors or terminals."""
 import contextlib
 import io

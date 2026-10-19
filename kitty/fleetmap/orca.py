@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """The fleet map's subprocess boundary for local and remote Orca runtimes."""
 import json
 import subprocess

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Transcript facts from bounded initial reads and complete appended lines."""
 import builtins
 from datetime import datetime

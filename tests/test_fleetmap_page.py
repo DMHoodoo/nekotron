@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Check the standalone fleet map page's public integration markers."""
 from pathlib import Path
 import unittest

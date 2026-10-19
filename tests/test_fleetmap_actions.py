@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Test action routing with disposable CLI executables, never live terminals."""
 import json
 import os

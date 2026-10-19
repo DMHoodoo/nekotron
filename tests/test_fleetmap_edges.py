@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Traffic resolution using real session facts and plain Orca records."""
 from pathlib import Path
 import sys

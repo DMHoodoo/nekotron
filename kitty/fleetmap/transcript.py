@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Read session facts from a transcript without rescanning consumed bytes."""
 from dataclasses import dataclass, field, replace
 from datetime import datetime

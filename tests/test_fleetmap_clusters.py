@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Initiative precedence and config persistence through public interfaces."""
 import json
 from pathlib import Path

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Discover local Claude sessions and their transcript locations."""
 from dataclasses import dataclass
 import json

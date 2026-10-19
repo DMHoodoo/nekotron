@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Exercise the Orca CLI boundary using temporary executables only."""
 import json
 from pathlib import Path
