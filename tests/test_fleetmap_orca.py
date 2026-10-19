@@ -91,6 +91,20 @@ class OrcaCLI(unittest.TestCase):
         with self.assertRaisesRegex(OrcaError, 'OFFLINE.*Host unavailable'):
             c.terminals()
 
+    def test_failed_envelope_preserves_string_error(self):
+        c = OrcaClient(binary=self.fake_orca(json.dumps({
+            'ok': False, 'error': 'offline'})))
+        with self.assertRaises(OrcaError) as caught:
+            c.terminals()
+        self.assertEqual(str(caught.exception), 'offline')
+
+    def test_failed_envelope_preserves_list_error(self):
+        c = OrcaClient(binary=self.fake_orca(json.dumps({
+            'ok': False, 'error': ['OFFLINE', 'Host unavailable']})))
+        with self.assertRaises(OrcaError) as caught:
+            c.terminals()
+        self.assertEqual(str(caught.exception), "['OFFLINE', 'Host unavailable']")
+
     def test_invalid_utf8_stdout_preserves_valid_json(self):
         c = OrcaClient(binary=self.tool('orca', stdout=b'{"ok":true,"result":{"text":"x\xff"}}'))
         self.assertEqual(c.screen('t1'), 'x\ufffd')

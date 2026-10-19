@@ -33,8 +33,10 @@ class OrcaClient:
         if not isinstance(envelope, dict):
             raise OrcaError('Orca returned an invalid envelope')
         if envelope.get('ok') is False:
-            error = envelope.get('error') or {}
-            raise OrcaError(f"{error.get('code', '')}: {error.get('message', '')}")
+            error = envelope.get('error')
+            diagnostic = (f"{error.get('code', '')}: {error.get('message', '')}"
+                          if isinstance(error, dict) else str(error))
+            raise OrcaError(diagnostic)
         if envelope.get('ok') is not True or not isinstance(envelope.get('result'), dict):
             raise OrcaError('Orca returned an invalid envelope')
         return envelope['result']
