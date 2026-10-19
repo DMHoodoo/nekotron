@@ -259,7 +259,7 @@ function makeNode(node) {
   const ring = svg('circle', {r: 17, fill: 'none', 'stroke-width': 3, transform: 'rotate(-90)'});
   const label = svg('text', {y: 52, 'text-anchor': 'middle', class: 'node-label'});
   group.append(defs, title, hit, selection, ringBackground, ring, pulse, body, label);
-  if (small) { ringBackground.style.display = 'none'; ring.style.display = 'none'; label.style.display = 'none'; }
+  if (small) label.style.display = 'none';
   group.addEventListener('click', () => selectNode(node.id));
   group.addEventListener('keydown', event => {
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectNode(node.id); }
