@@ -16,7 +16,12 @@ state="$1"
 case "$state" in done|attention|working|reset) ;; *) exit 0 ;; esac
 
 payload=""
-[ ! -t 0 ] && payload=$(cat)
+if [ ! -t 0 ]; then
+    # Read to EOF with one total deadline, even if the writer keeps the pipe open.
+    # Bash 3.2 leaves payload empty on timeout; newer Bash returns a status >128.
+    IFS= read -r -d '' -t 2 payload
+    [ "$?" -gt 128 ] && payload=""
+fi
 sid=$(printf '%s' "$payload" | jq -r '.session_id // empty' 2>/dev/null) || sid=""
 
 dir=/tmp/claude-kitty-status

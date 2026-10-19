@@ -44,6 +44,40 @@ class SidStateFile(unittest.TestCase):
                        env=dict(os.environ, KITTY_PID='', KITTY_WINDOW_ID='',
                                 TMUX='', NEKOTRON_TMUX_SESSION=''))
 
+    def test_open_stdin_pipe_exits_without_session_state(self):
+        self.check_open_pipe(b'')
+
+    def test_unclosed_payload_is_discarded_and_other_state_is_published(self):
+        for payload in (b'{"session_id":"abc-123"}', b'{"session_id":'):
+            with self.subTest(payload=payload):
+                self.check_open_pipe(payload)
+
+    def check_open_pipe(self, payload):
+        key = f'test-sid-pipe-{os.getpid()}'
+        kitty_file = STATE / f'{key}-1'
+        tmux_file = STATE / f'tmux-neko-{key}'
+        for path in (kitty_file, tmux_file, STATE / f'provider-{key}-1'):
+            path.unlink(missing_ok=True)
+            self.addCleanup(path.unlink, missing_ok=True)
+        process = subprocess.Popen(
+            [str(ROOT / 'hooks/kitty-tab-status.sh'), 'working'],
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            env=dict(os.environ, KITTY_PID=key, KITTY_WINDOW_ID='1',
+                     TMUX='', NEKOTRON_TMUX_SESSION=f'neko-{key}'))
+        try:
+            if payload:
+                process.stdin.write(payload)
+                process.stdin.flush()
+            self.assertEqual(process.wait(timeout=5), 0)
+            self.assertFalse(self.sid_file.exists())
+            self.assertEqual(kitty_file.read_text(), 'working')
+            self.assertEqual(tmux_file.read_text(), 'working')
+        finally:
+            process.stdin.close()
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+
 
 if __name__ == '__main__':
     unittest.main()
