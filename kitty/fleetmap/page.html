@@ -108,7 +108,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospac
     <p><strong>Gray ring:</strong> Solid gray after 24h.</p>
     <p><strong>Dashed ring:</strong> After 7d, gray dashes of 3px with 3px gaps.</p>
     <p><strong>Dotted ring:</strong> Never addressed; 2px marks with 3px gaps.</p>
-    <p><strong>Subagents:</strong> Radius 6, joined to a parent by a 20px line; select for ages and a parent link.</p>
+    <p><strong>Subagents:</strong> Radius 6, joined to a parent by a 20px line when space allows; overflow uses free grid slots with longer parent links.</p>
     <p><strong>Edge kinds:</strong> Solid = message, dashed = dispatch, thin gray = subagent.</p>
     <p><strong>Edge age:</strong> Full opacity under 10m; fades linearly to 25% at 60m, then stays at 25%.</p>
   </div>
@@ -129,7 +129,6 @@ const positions = new Map(); // Retained for this page's life, including tempora
 const regions = new Map();
 const clusters = new Map();
 const nodeViews = new Map();
-const childSlots = new Map();
 const COLUMN = 380, GRID_COLUMNS = 3, CELL_X = 110, CELL_Y = 94;
 let snapshot = {hosts: [], nodes: [], edges: []};
 let nodes = new Map(), selectedId = null, dialogNodeId = null;
@@ -224,14 +223,20 @@ function placeNode(node) {
   // An explicit cluster change rehomes a node; ordinary polls never repack it.
   if (node.kind === 'subagent' && nodes.has(node.parent)) {
     const parent = placeNode(nodes.get(node.parent));
-    if (!childSlots.has(node.id)) {
-      const siblings = [...childSlots.values()].filter(item => item.parent === node.parent).length;
-      childSlots.set(node.id, {parent: node.parent, index: siblings});
+    // Reserve room for each radius-17 age ring, including absent nodes that may return.
+    // Once the short attachments are full, use the same unbounded grid as sessions.
+    for (let direction = 0; direction < 8; direction++) {
+      const angle = direction * Math.PI / 4;
+      const position = {cluster: parent.cluster, x: parent.x + 20 * Math.cos(angle), y: parent.y + 20 * Math.sin(angle)};
+      if (position.x < 20 || position.y < 20) continue;
+      const occupied = [...positions].some(([id, other]) =>
+        id !== node.id && id !== node.parent && other.cluster === position.cluster &&
+        Math.hypot(other.x - position.x, other.y - position.y) < 40);
+      if (!occupied) {
+        positions.set(node.id, position);
+        return position;
+      }
     }
-    const angle = childSlots.get(node.id).index * Math.PI / 4;
-    const position = {cluster: parent.cluster, x: parent.x + 20 * Math.cos(angle), y: parent.y + 20 * Math.sin(angle)};
-    positions.set(node.id, position);
-    return position;
   }
   let slot = 0;
   while (cluster.slots.has(slot) && cluster.slots.get(slot) !== node.id) slot++;
@@ -258,6 +263,8 @@ function makeNode(node) {
   const ringBackground = svg('circle', {r: 17, fill: 'none', stroke: 'rgba(127,127,127,.25)', 'stroke-width': 3});
   const ring = svg('circle', {r: 17, fill: 'none', 'stroke-width': 3, transform: 'rotate(-90)'});
   const label = svg('text', {y: 52, 'text-anchor': 'middle', class: 'node-label'});
+  // Decorative rings can cross a short parent attachment, but must not steal clicks.
+  for (const decoration of [selection, ringBackground, ring, pulse]) decoration.setAttribute('pointer-events', 'none');
   group.append(defs, title, hit, selection, ringBackground, ring, pulse, body, label);
   if (small) label.style.display = 'none';
   group.addEventListener('click', () => selectNode(node.id));
