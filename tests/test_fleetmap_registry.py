@@ -63,11 +63,10 @@ class LocalRegistry(unittest.TestCase):
         self.write_registry(pid=os.getpid(), sid='s3', name='x', cwd='/w')
         self.assertEqual(self.sessions(lambda pid: '/usr/bin/python3 something.py'), [])
 
-    def test_permission_error_is_alive_but_still_requires_claude(self):
+    def test_permission_error_is_skipped_even_with_claude_command(self):
         self.write_registry()
         self.kill.side_effect = PermissionError
-        self.assertEqual(len(self.sessions()), 1)
-        self.assertEqual(self.sessions(lambda pid: 'python3'), [])
+        self.assertEqual(self.sessions(lambda pid: 'claude'), [])
 
     def test_subagents_are_listed_from_project_dir(self):
         self.write_registry(sid='s4')

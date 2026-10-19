@@ -107,10 +107,7 @@ def list_local_sessions(*, sessions_dir=SESSIONS, projects_dir=PROJECTS,
                 continue
             started_at = float(data.get('startedAt', 0)) / 1000
             status_updated_at = float(data.get('statusUpdatedAt', 0)) / 1000
-            try:
-                os.kill(pid, 0)
-            except PermissionError:
-                pass
+            os.kill(pid, 0)
             command = ps(pid)
             if 'claude' not in command:
                 continue
