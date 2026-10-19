@@ -140,12 +140,12 @@ PR with "6962 ready, green". Five sessions you never prompted sit at Asked with 
     - **Decided by:** Hassan, 2026-10-19, screens "run-card" and "project-slice-stage".
 
 12. **Stages are the process's gates, and progress is evidence, not activity.**
-    - **Decision:** the seven stages are Goal, Design, Plan (readiness), Implementing, Review, Delivery, Accepted, in that order. A package has a dispatch state: planned, assigned, running, returned, verified, blocked. The only number shown is verified units of total, weighted S=1, M=2, L=3. No fractional credit for running or checks.
+    - **Decision:** the seven stages are Goal, Design, Plan (readiness), Implementing, Review, Delivery, Accepted, in that order. A package has a dispatch state: planned, assigned, running, returned, verified, blocked. The only number shown is verified units of total, weighted S=1, M=2, L=3. No fractional credit for running or checks. Columns map to the projection as: Goal, Design, Plan and Delivery each to the gate of that id; Review to the four gates `test-quality, code-standards, commenting, general-code`, drawn as four verdict chips; Implementing to the row's packages; Accepted to `acceptance`. Proofs have no column; they show in the cluster header and the rail. A run-level gate fans out to every slice row unless the slice carries its own gate with the same id. A run with no slices has one row named after the run, so review-only runs still get a stepper and a matrix.
     - **Why:** the Engineering OS process marks completion from evidence and required review, and names activity, task counts and green checks as what readiness is not.
     - **Decided by:** Claude, 2026-10-19, from `engineering-os-lab/process.md` and `roles/chief.md`; shown to Hassan on the "run-card" screen.
 
 13. **The run plan stays the single record; the map reads a projection of it.**
-    - **Decision:** the run plan carries the progress data itself, as one fenced `json progress` block in its Status card section. The lab tool `render-progress.py` (Decision 21) extracts that block, validates it against Reference H, stamps the plan's commit, and writes `~/.glow/orca-progress/<run>.json` atomically. The map reads only `schemaVersion: 2` files; a file with any other version, or no file, shows the run's Orca objective and a rail note "projection v1, Chief must re-render". The map never translates older shapes and never parses run plans. Reference H is normative field for field.
+    - **Decision:** the run plan carries the progress data itself, as exactly one fenced `json progress` block anywhere in the file; the Status card section is the recommended place, and a plan with zero or two such blocks fails the render. The lab tool `render-progress.py` (Decision 21) extracts that block, validates it against Reference H, stamps the plan's commit, and writes `~/.glow/orca-progress/<run>.json` atomically. The map reads only `schemaVersion: 2` files; a file with any other version, or no file, shows the run's Orca objective and a rail note "projection v1, Chief must re-render". The map never translates older shapes and never parses run plans. Reference H is normative field for field.
     - **Why:** the process forbids a status document beside the run plan, so the block lives inside it. Translating the existing v1 file would mean inventing a mapping for its fractional statuses, which Decision 12 rejects.
     - **Decided by:** Claude, 2026-10-19, after the builder check; the Handoff Project Chief session is sent Reference H once Hassan approves this addition.
 
@@ -160,11 +160,11 @@ PR with "6962 ready, green". Five sessions you never prompted sit at Asked with 
     - **Decided by:** Hassan, 2026-10-19 13:29 PDT.
 
 16. **Worker caps against memory, per region.**
-    - **Decision:** each region header shows free memory percent, swap used, and running workers against the cap. Local probes: `vm_stat`, `sysctl hw.memsize`, `sysctl vm.swapusage`. A remote region probes the same over SSH using the host from the config's `hosts` map (Reference J). The cap comes from the projection's `caps` for that host, else the config's `caps`, else none. The header turns amber when workers exceed the cap or free memory is under 40 percent, the thresholds the handoff run plan uses. An unreachable probe shows blanks.
+    - **Decision:** each region header shows free memory percent, swap used, and running workers against the cap. Local probes: `vm_stat`, `sysctl hw.memsize`, `sysctl vm.swapusage`. A remote region probes the same over SSH using the host from the config's `hosts` map (Reference J). A running worker is an Orca dispatch from `worker-list`, on any host's list, whose `agentTerminalHandle` is in that region's terminal list and whose `workerState` is not settled, released or abandoned; the worker record's own `host` field is ignored because it reports `local` for laptop2 workers. The cap comes from the projection's `caps` for that host, else the config's `caps`, else none. The header turns amber when workers exceed the cap or free memory is under 40 percent, the thresholds the handoff run plan uses. An unreachable probe shows blanks.
     - **Decided by:** Hassan, 2026-10-19 13:29 PDT.
 
 17. **Stale evidence flag.**
-    - **Decision:** a passed gate that carries a `headSha` is compared with the current head of the slice's branch (or the run's PR head, from `gh pr view --json headRefOid`). If the head moved, the cell shows "evidence stale" and the rail lists the commits since. Without a `headSha` or branch, no check and no flag.
+    - **Decision:** a passed gate that carries a `headSha` is compared with the current head: for the run, `gh pr view <pr.number> --repo <pr.repo> --json headRefOid`; for a slice with a `branch`, `git ls-remote origin <branch>` run in `runPlan.worktree`. If the head moved, the cell shows "evidence stale". The rail lists the commits since only when `runPlan.worktree` already holds them; otherwise it says "head moved, commits not fetched". The map never runs `git fetch`. Without a `headSha`, or without both a PR and a branch, no check and no flag. Results are cached for 60 s.
     - **Why:** PR 6869's head moved three times during its review.
     - **Decided by:** Hassan, 2026-10-19 13:29 PDT.
 
@@ -177,7 +177,7 @@ PR with "6962 ready, green". Five sessions you never prompted sit at Asked with 
     - **Decided by:** Hassan, 2026-10-19 13:29 PDT.
 
 20. **Open the run plan's Resume here.**
-    - **Decision:** a cluster with a projection has an "Open run plan" control that resolves `runPlan.path` under the Chief terminal's worktree and opens it with nekotron's `bin/md-preview` in a kitty overlay, scrolled to "Resume here".
+    - **Decision:** a cluster with a projection has an "Open run plan" control that opens `runPlan.worktree/runPlan.path` and opens it with nekotron's `bin/md-preview` in a kitty overlay, scrolled to "Resume here".
     - **Decided by:** Hassan, 2026-10-19 13:29 PDT.
 
 21. **The lab renders the projection.**
@@ -259,11 +259,11 @@ A session named by a run projection (Reference H, through its package `dispatchI
     {"name": "PR 6869 review", "match": ["pr-6869", "lookdown"]},
     {"name": "Commissions", "match": ["commission", "compensation"]}
   ],
-  "assign": {"<sessionId>": "Commissions"}
+  "assign": {"local:sid:<sessionId>": "Commissions", "env:laptop2:term:<handle>": "Handoff scheduling"}
 }
 ```
 
-`match` entries are case-insensitive substrings tested against title, purpose, worktree path and branch. `assign` pins one session by id and beats everything. The rail's "move to…" control writes to `assign`.
+`match` entries are case-insensitive substrings tested against title, purpose, worktree path and branch. `assign` pins one node by its node id and beats everything below it; a bare session id is accepted as `local:sid:<id>`. Terminal-only nodes can be pinned and promoted by their handle, which is stable for the terminal's life. The rail's "move to…" control writes to `assign`.
 
 ### E. Traffic edges
 
@@ -302,7 +302,10 @@ The run plan holds one fenced block, opened with ```` ```json progress ````, in 
   "run": "run_4d94eb181d65",
   "title": "Handoff scheduling",
   "updatedAt": "2026-10-19T20:15:53Z",
-  "runPlan": {"path": "engineering-os/20261015-handoff-scheduling/run-plan.md", "commit": "0eb10688f1"},
+  "runPlan": {"path": "engineering-os/20261015-handoff-scheduling/run-plan.md", "commit": "0eb10688f1",
+              "worktree": "/Users/hassankhan/Documents/GlowDevelopment/glow-core/.claude/worktrees/handoff-scheduling"},
+  "pr": {"repo": "TuleInc/glow-core", "number": null},
+  "acceptance": {"state": "pending", "at": null, "by": null},
   "chiefTerminal": "term_c585d3a9-91d2-4e9e-a368-2016d2b3b47b",
   "now": "wave 1 running on laptop2; wave 2 starts when P00 pushes",
   "statusCard": {"done": "requirements accepted; designs passed", "running": "P00, P02, P04, P05 on laptop2",
@@ -325,7 +328,7 @@ The run plan holds one fenced block, opened with ```` ```json progress ````, in 
 }
 ```
 
-Vocabulary: `stage` is one of `goal, design, plan, implementing, review, delivery, accepted`. Package `state` is one of `planned, assigned, running, returned, verified, blocked`. `verdict` is `pass, revise, pending`. Decision `class` is `B, C, D`; `applyAt` is an ISO 8601 time for class B defaults, else null. Gate `id` is one of `goal, design, plan, test-quality, code-standards, commenting, general-code, delivery`. Optional fields: `caps`, `slices[].branch`, `gates[].headSha`, `gates[].ref`, `decisions[].packet`, `decisions[].applyAt`, `packages[].headSha`, `packages[].lastEvent`, `packages[].lastEventAt`. A package's `dispatchId` links to its worker node through Orca's worker list; `chiefTerminal` links to the Chief node through the terminal lists of every host.
+Vocabulary: `stage` is one of `goal, design, plan, implementing, review, delivery, accepted`. Package `state` is one of `planned, assigned, running, returned, verified, blocked`. `verdict` is `pass, revise, pending`. Decision `class` is `B, C, D`; `applyAt` is an ISO 8601 time for class B defaults, else null. Gate `id` is one of `goal, design, plan, test-quality, code-standards, commenting, general-code, delivery`. `runPlan.worktree` is the absolute path of the checkout holding the plan; the tool fills it from its own working directory. `pr.number` is null until a PR exists. `acceptance.state` is one of `pending, accepted, merged`. Optional fields: `pr.number`, `acceptance.at`, `acceptance.by`, `caps`, `slices[].branch`, `gates[].headSha`, `gates[].ref`, `decisions[].packet`, `decisions[].applyAt`, `packages[].headSha`, `packages[].lastEvent`, `packages[].lastEventAt`. A package's `dispatchId` links to its worker node through Orca's worker list; `chiefTerminal` links to the Chief node through the terminal lists of every host.
 
 ### I. One-off ladder
 
@@ -338,7 +341,7 @@ For a `claude` node with no run and no promotion, from its worktree:
 | PR | `gh pr list --head <branch> --json number,state,isDraft,statusCheckRollup` returns an open PR; the cell shows number, draft flag and checks |
 | Merged | that PR's state is `MERGED` |
 
-Results are cached per branch for 60 s. A node whose transcript has no human prompt is "never prompted" and listed in a closing row at the bottom of the One-offs group.
+Results are cached per branch for 60 s. A node whose transcript has no human prompt is "never prompted" and listed in a closing row at the bottom of the Unsorted cluster (Decision 14).
 
 ### J. Promotion
 
@@ -348,7 +351,7 @@ Results are cached per branch for 60 s. A node whose transcript has no human pro
 {"projects": [{"name": "Core lint speed",
                "slices": [{"name": "root cause 6962", "stage": "review", "sessions": ["local:sid:…"]}]}],
  "hosts": {"laptop2": {"ssh": "hok@Hassans-MacBook-Pro.local"}},
- "caps": {"laptop2": 7, "local": 2}}
+ "caps": {"laptop2": 7, "local": 3}}
 ```
 
 `hosts` supplies the SSH target for remote memory probes (Decision 16); `caps` supplies worker caps when a projection has none.
