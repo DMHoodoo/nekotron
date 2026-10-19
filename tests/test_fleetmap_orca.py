@@ -122,6 +122,10 @@ class OrcaCLI(unittest.TestCase):
                 self.assertEqual(getattr(self.client({key: records}), method)(env='laptop2'), records)
                 self.assertEqual(self.argv(), ['--environment', 'laptop2', 'orchestration', command, '--json'])
 
+    def test_tasks_can_select_a_run(self):
+        self.assertEqual(self.client({'tasks': []}).tasks(run_id='run_x'), [])
+        self.assertEqual(self.argv(), ['orchestration', 'task-list', '--run', 'run_x', '--json'])
+
     def test_screen_uses_first_string_field_in_priority_order(self):
         for result, expected in (({'screen': 'screen', 'text': 'text'}, 'screen'),
                                  ({'screen': '', 'text': 'text'}, ''),

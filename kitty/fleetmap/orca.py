@@ -79,8 +79,11 @@ class OrcaClient:
     def workers(self, env: str | None = None) -> list[dict]:
         return self.call(['orchestration', 'worker-list'], env)['workers']
 
-    def tasks(self, env: str | None = None) -> list[dict]:
-        return self.call(['orchestration', 'task-list'], env)['tasks']
+    def tasks(self, env: str | None = None, run_id: str | None = None) -> list[dict]:
+        args = ['orchestration', 'task-list']
+        if run_id is not None:
+            args.extend(['--run', run_id])
+        return self.call(args, env)['tasks']
 
     def screen(self, handle: str, env: str | None = None) -> str:
         result = self.call(['terminal', 'read', '--terminal', handle, '--screen'], env)

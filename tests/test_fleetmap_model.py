@@ -153,20 +153,63 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertFalse([n for n in snap['nodes'] if n['host'] == 'laptop2'])
         self.assertEqual(len(snap['nodes']), 1)
 
-    def test_any_host_call_failure_discards_all_its_nodes(self):
+    def test_only_terminal_list_failure_discards_host_nodes(self):
         self.orca.put('terminal list', 'terminals', [terminal('term_remote')], 'laptop2')
         for env in (None, 'laptop2'):
-            for command in ('terminal list', 'orchestration run-list',
-                            'orchestration worker-list', 'orchestration task-list',
-                            'orchestration inbox', 'terminal read'):
-                with self.subTest(env=env, command=command):
-                    self.orca.put('terminal list', 'terminals', [terminal(), terminal('term_other')])
-                    self.orca.errors = {(env, tuple(command.split())): OrcaError('offline')}
+            with self.subTest(env=env):
+                self.orca.errors = {(env, ('terminal', 'list')): OrcaError('offline')}
+                snap = self.collector().snapshot()
+                host = 'local' if env is None else env
+                self.assertIn({'name': host, 'label': 'This Mac' if env is None else host,
+                               'reachable': False, 'error': 'offline'}, snap['hosts'])
+                self.assertFalse([n for n in snap['nodes'] if n['host'] == host])
+
+    def test_optional_source_failure_preserves_host_nodes(self):
+        self.orca.put('terminal list', 'terminals', [terminal(), terminal('term_other')])
+        self.orca.put('terminal list', 'terminals', [terminal('term_remote')], 'laptop2')
+        for env in (None, 'laptop2'):
+            self.orca.put('orchestration run-list', 'runs', [{'id': 'run_x'}], env)
+            for source, command in (('runs', 'orchestration run-list'),
+                                    ('workers', 'orchestration worker-list'),
+                                    ('tasks', 'orchestration task-list'),
+                                    ('inbox', 'orchestration inbox'),
+                                    ('screen', 'terminal read')):
+                with self.subTest(env=env, source=source):
+                    error = 'run_required: No Run is bound' if source == 'tasks' else 'offline'
+                    self.orca.errors = {(env, tuple(command.split())): OrcaError(error)}
                     snap = self.collector().snapshot()
-                    host = 'local' if env is None else env
-                    self.assertIn({'name': host, 'label': 'This Mac' if env is None else host,
-                                   'reachable': False, 'error': 'offline'}, snap['hosts'])
-                    self.assertFalse([n for n in snap['nodes'] if n['host'] == host])
+                    host = next(h for h in snap['hosts']
+                                if h['name'] == ('local' if env is None else env))
+                    self.assertTrue(host['reachable'])
+                    self.assertIn(f'{source}: {error}', host['degraded'])
+                    self.assertNotIn('error', host)
+                    self.assertEqual(len([n for n in snap['nodes'] if n['host'] == host['name']]),
+                                     2 if env is None else 1)
+
+    def test_tasks_are_collected_per_run_and_failed_run_is_skipped(self):
+        self.orca.put('orchestration run-list', 'runs',
+                      [{'id': 'run_bad'}, {'id': 'run_good'}])
+        original_call = self.orca.call
+        calls = []
+
+        def call(args, env=None):
+            if args[:2] == ['orchestration', 'task-list']:
+                calls.append((args, env))
+                if args[-1] == 'run_bad':
+                    raise OrcaError('run_required: No Run is bound')
+                return {'tasks': [{'id': 'task_good'}]}
+            return original_call(args, env)
+
+        with patch.object(self.orca, 'call', side_effect=call):
+            records = self.collector()._poll_host('local', self.local)
+        self.assertEqual(calls, [(['orchestration', 'task-list', '--run', 'run_bad'], None),
+                                 (['orchestration', 'task-list', '--run', 'run_good'], None)])
+        self.assertEqual(records['tasks'], [{'id': 'task_good'}])
+        self.assertEqual(records['degraded'], ['tasks: run_required: No Run is bound'])
+
+    def test_no_runs_does_not_query_unbound_tasks(self):
+        with patch.object(self.orca, 'tasks', side_effect=AssertionError('unbound task-list')):
+            self.assertTrue(self.collector().snapshot()['hosts'][0]['reachable'])
 
     def test_remote_terminal_nodes_from_environment(self):
         remote = [terminal('term_r1'), terminal('term_r2')]
@@ -312,8 +355,8 @@ class SnapshotAssembler(unittest.TestCase):
         with patch.object(self.orca, 'environments', side_effect=OrcaError('offline')):
             snap = self.collector().snapshot()
         self.assertEqual(snap['hosts'], [dict(name='local', label='This Mac',
-                                             reachable=False, error='offline')])
-        self.assertEqual((snap['nodes'], snap['edges']), ([], []))
+                                             reachable=True, degraded=['environments: offline'])])
+        self.assertEqual(len(snap['nodes']), 1)
 
     def test_first_seen_is_scoped_to_host_and_edges_require_visible_nodes(self):
         self.local.clear()

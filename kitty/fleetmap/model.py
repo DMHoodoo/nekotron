@@ -111,14 +111,26 @@ class Collector:
 
     def _poll_host(self, host, sessions):
         env = None if host == 'local' else host
-        records = dict(terminals=self.orca.terminals(env), runs=self.orca.runs(env),
-                       workers=self.orca.workers(env), tasks=self.orca.tasks(env),
-                       inbox=self.orca.inbox(env))
+        # Only terminal discovery determines whether this host is reachable.
+        records = dict(terminals=self.orca.terminals(env), degraded=[])
+
+        def optional(source, call, fallback, **kwargs):
+            try:
+                return call(env=env, **kwargs)
+            except OrcaError as error:
+                records['degraded'].append(f'{source}: {error}')
+                return fallback
+
+        for source in ('runs', 'workers', 'inbox'):
+            records[source] = optional(source, getattr(self.orca, source), [])
+        records['tasks'] = []
+        for run in records['runs']:
+            records['tasks'].extend(optional('tasks', self.orca.tasks, [], run_id=run['id']))
         matches = _match_terminals(sessions, records['terminals']) if host == 'local' else {}
         used = {terminal['handle'] for terminal in matches.values()}
         records['matches'] = matches
         records['screens'] = {
-            terminal['handle']: self.orca.screen(terminal['handle'], env)
+            terminal['handle']: optional('screen', self.orca.screen, '', handle=terminal['handle'])
             for terminal in records['terminals'] if terminal['handle'] not in used
             and (host != 'local' or terminal.get('agentIdentity'))}
         return records
@@ -131,20 +143,21 @@ class Collector:
         try:
             environments = self.orca.environments()
         except OrcaError as error:
-            hosts[0].update(reachable=False, error=str(error))
+            hosts[0]['degraded'] = [f'environments: {error}']
             environments = []
         for name in dict.fromkeys(environments):
             if name != 'local':
                 hosts.append(dict(name=name, label=name, reachable=True))
-        sessions = self.sessions() if hosts[0]['reachable'] else []
+        sessions = self.sessions()
         for host in hosts:
-            if not host['reachable']:
-                continue
             try:
                 data[host['name']] = self._poll_host(host['name'], sessions)
             except OrcaError as error:
-                # Publish a host only after every call, including previews, succeeds.
                 host.update(reachable=False, error=str(error))
+            else:
+                degraded = data[host['name']]['degraded']
+                if degraded:
+                    host.setdefault('degraded', []).extend(degraded)
         if 'local' not in data:
             sessions = []
         tmux = self.tmux_sessions() if sessions else {}
