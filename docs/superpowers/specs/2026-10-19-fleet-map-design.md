@@ -1,6 +1,6 @@
 # Fleet map: one board for every agent session
 
-Date: 2026-10-19. State: base design approved by Hassan Khan, 2026-10-19 13:09 PDT; the run-tracking addition (Decisions 11 to 14, References H to J) awaits his approval. Owner: Hassan Khan.
+Date: 2026-10-19. State: approved in full by Hassan Khan, base at 13:09 PDT and Decisions 11 to 22 at 13:55 PDT. Owner: Hassan Khan.
 
 ## The ask
 
