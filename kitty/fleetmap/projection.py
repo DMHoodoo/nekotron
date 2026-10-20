@@ -14,6 +14,7 @@ REQUIRED_FIELDS = (
 )
 STAGES = ('goal', 'design', 'plan', 'implementing', 'review', 'delivery', 'accepted')
 PACKAGE_STATES = ('planned', 'assigned', 'running', 'returned', 'verified', 'blocked')
+SIZES = ('S', 'M', 'L')
 GATE_IDS = ('goal', 'design', 'plan', 'test-quality', 'code-standards',
             'commenting', 'general-code', 'delivery')
 VERDICTS = ('pass', 'revise', 'pending')
@@ -57,6 +58,7 @@ def validate(data: dict) -> list[str]:
     nullable_string = (str, type(None))
     stages = ('goal', 'design', 'plan', 'implementing', 'review', 'delivery', 'accepted')
     states = ('planned', 'assigned', 'running', 'returned', 'verified', 'blocked')
+    sizes = ('S', 'M', 'L')
     gate_ids = ('goal', 'design', 'plan', 'test-quality', 'code-standards',
                 'commenting', 'general-code', 'delivery')
     verdicts = ('pass', 'revise', 'pending')
@@ -135,6 +137,29 @@ def validate(data: dict) -> list[str]:
         return errors
     if type(data.get('schemaVersion')) is int and data['schemaVersion'] != 2:
         errors.append('schemaVersion: expected 2')
+    packages = data.get('packages')
+    if isinstance(packages, list):
+        package_ids = set()
+        for index, package in enumerate(packages):
+            if not isinstance(package, dict):
+                continue
+            if isinstance(package.get('id'), str):
+                package_ids.add(package['id'])
+            size = package.get('size')
+            if isinstance(size, str) and size not in sizes:
+                errors.append(f'packages[{index}].size: not in SIZES')
+        slices = data.get('slices')
+        if isinstance(slices, list):
+            for index, slice_record in enumerate(slices):
+                if not isinstance(slice_record, dict):
+                    continue
+                references = slice_record.get('packages')
+                if not isinstance(references, list):
+                    continue
+                for ref_index, package_id in enumerate(references):
+                    if isinstance(package_id, str) and package_id not in package_ids:
+                        errors.append(f'slices[{index}].packages[{ref_index}]: '
+                                      f'unknown package {package_id}')
     plan = data.get('runPlan')
     if isinstance(plan, dict) and isinstance(plan.get('worktree'), str):
         if not isabs(plan['worktree']):

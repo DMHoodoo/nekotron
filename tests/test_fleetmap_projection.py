@@ -14,7 +14,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'kitty'))
 from fleetmap.projection import (
-    GATE_IDS, PACKAGE_STATES, REQUIRED_FIELDS, STAGES, VERDICTS,
+    GATE_IDS, PACKAGE_STATES, REQUIRED_FIELDS, SIZES, STAGES, VERDICTS,
     Projection, load_projections, validate,
 )
 
@@ -66,6 +66,20 @@ class ProjectionReader(unittest.TestCase):
     def test_unknown_stage_is_a_violation(self):
         self.data['slices'][0]['stage'] = 'shipping'
         self.assertIn("slices[0].stage: 'shipping' not in STAGES", validate(self.data))
+
+    def test_unknown_package_size_is_a_violation(self):
+        self.data['packages'][0]['size'] = 'XL'
+        self.assertEqual(validate(self.data), ['packages[0].size: not in SIZES'])
+        self.write(self.data)
+        self.assertEqual(load_projections(self.dir),
+                         ([], {'run_v2.json': 'packages[0].size: not in SIZES'}))
+
+    def test_unknown_slice_package_reference_is_a_violation(self):
+        self.data['slices'][0]['packages'].append('missing')
+        error = 'slices[0].packages[8]: unknown package missing'
+        self.assertEqual(validate(self.data), [error])
+        self.write(self.data)
+        self.assertEqual(load_projections(self.dir), ([], {'run_v2.json': error}))
 
     def test_half_written_file_is_skipped(self):
         (self.dir / 'partial.json').write_text('{"schemaVersion":2,')
@@ -232,9 +246,11 @@ class ProjectionReader(unittest.TestCase):
             'commenting', 'general-code', 'delivery',
         })
         self.assertEqual(set(VERDICTS), {'pass', 'revise', 'pending'})
+        self.assertEqual(set(SIZES), {'S', 'M', 'L'})
         for choices, record, key in (
                 (STAGES, self.data['slices'][0], 'stage'),
                 (PACKAGE_STATES, self.data['packages'][0], 'state'),
+                (SIZES, self.data['packages'][0], 'size'),
                 (GATE_IDS, self.data['gates'][0], 'id'),
                 (VERDICTS, self.data['gates'][0], 'verdict')):
             for choice in choices:
