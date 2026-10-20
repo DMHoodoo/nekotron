@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 
 SESSIONS = Path.home() / '.claude' / 'sessions'
@@ -46,6 +47,25 @@ def run_ps(pid: int) -> str:
         return result.stdout
     except (OSError, subprocess.SubprocessError):
         return ''
+
+
+def run_args(pid: int) -> str:
+    """Read process arguments separately so inherited environment cannot prove identity."""
+    try:
+        result = subprocess.run(['ps', '-p', str(pid), '-o', 'args='],
+                                capture_output=True, text=True, timeout=5)
+        return result.stdout
+    except (OSError, subprocess.SubprocessError):
+        return ''
+
+
+def _is_claude(args):
+    # The repository launches the Claude executable directly, including --resume.
+    try:
+        argv = shlex.split(args)
+    except ValueError:
+        return False
+    return bool(argv) and Path(argv[0]).name == 'claude'
 
 
 def _project_dir(cwd, projects_dir):
@@ -94,7 +114,7 @@ def _subagents(project, session_id):
 
 
 def list_local_sessions(*, sessions_dir=SESSIONS, projects_dir=PROJECTS,
-                        state_dir=STATE_DIR, ps=run_ps) -> list[LocalSession]:
+                        state_dir=STATE_DIR, ps=run_ps, identity=run_args) -> list[LocalSession]:
     """Read live registry entries, host metadata, and optional hook state."""
     sessions = []
     state = Path(state_dir)
@@ -110,9 +130,9 @@ def list_local_sessions(*, sessions_dir=SESSIONS, projects_dir=PROJECTS,
             started_at = float(data.get('startedAt', 0)) / 1000
             status_updated_at = float(data.get('statusUpdatedAt', 0)) / 1000
             os.kill(pid, 0)
-            command = ps(pid)
-            if 'claude' not in command:
+            if not _is_claude(identity(pid)):
                 continue
+            command = ps(pid)
         except (OSError, subprocess.SubprocessError, TypeError, ValueError,
                 KeyError, OverflowError):
             continue

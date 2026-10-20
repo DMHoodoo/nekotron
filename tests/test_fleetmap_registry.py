@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'kitty'))
-from fleetmap.registry import list_local_sessions, run_ps, transcript_path
+from fleetmap.registry import list_local_sessions, run_ps, run_args, transcript_path
 
 
 class LocalRegistry(unittest.TestCase):
@@ -35,9 +35,9 @@ class LocalRegistry(unittest.TestCase):
         data.update(extra)
         (self.sess / f'{pid}.json').write_text(json.dumps(data))
 
-    def sessions(self, ps=lambda pid: 'claude'):
+    def sessions(self, ps=lambda pid: 'claude', identity=None):
         return list_local_sessions(sessions_dir=self.sess, projects_dir=self.proj,
-                                   state_dir=self.state, ps=ps)
+                                   state_dir=self.state, ps=ps, identity=identity or ps)
 
     def test_lists_live_claude_session_with_pane_and_hook_state(self):
         self.write_registry(pid=os.getpid())
@@ -64,6 +64,27 @@ class LocalRegistry(unittest.TestCase):
     def test_reused_pid_without_claude_command_is_skipped(self):
         self.write_registry(pid=os.getpid(), sid='s3', name='x', cwd='/w')
         self.assertEqual(self.sessions(lambda pid: '/usr/bin/python3 something.py'), [])
+
+    def test_environment_and_unrelated_arguments_do_not_identify_claude(self):
+        self.write_registry()
+        for command in ('/usr/bin/python3 worker.py PATH=/Users/hok/.claude/local:/usr/bin',
+                        '/usr/bin/python3 worker.py CLAUDE_SESSION=active',
+                        '/bin/echo claude', '/usr/bin/python3 worker.py --label=claude'):
+            with self.subTest(command=command):
+                self.assertEqual(self.sessions(lambda pid: command), [])
+        self.assertEqual(self.sessions(lambda pid: 'claude KITTY_PID=1',
+                                       identity=lambda pid: '/bin/python worker.py'), [])
+
+    def test_claude_executable_launch_forms(self):
+        self.write_registry()
+        for command in ('claude --resume session', '/Users/hok/.local/bin/claude --model opus'):
+            with self.subTest(command=command):
+                self.assertEqual(len(self.sessions(identity=lambda pid: command)), 1)
+
+    def test_identity_query_excludes_environment(self):
+        with patch('subprocess.run', return_value=Mock(stdout='/bin/claude --resume s')) as run:
+            self.assertEqual(run_args(123), '/bin/claude --resume s')
+        self.assertEqual(run.call_args.args[0], ['ps', '-p', '123', '-o', 'args='])
 
     def test_permission_error_is_skipped_even_with_claude_command(self):
         self.write_registry()
