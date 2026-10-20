@@ -12,9 +12,10 @@ import time
 from urllib.parse import parse_qs, urlsplit
 
 from .actions import Actions
-from .clusters import CONFIG_PATH, save_assign
+from .clusters import CONFIG_PATH, move, promote, save_assign
 from .model import Collector
 from .orca import OrcaClient
+from .projection import STAGES
 
 PAGE = Path(__file__).with_name('page.html')
 SERVER_INFO = Path.home() / '.config' / 'nekotron' / 'fleet-map.server.json'
@@ -95,7 +96,8 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         # Authentication precedes body reads and all side effects.
         fleet = self.server.fleet
-        if self.route.path not in ('/api/action', '/api/assign'):
+        if self.route.path not in ('/api/action', '/api/assign', '/api/promote',
+                                   '/api/move', '/api/broadcast', '/api/open-plan'):
             self._json({'ok': False, 'error': 'Not found'}, status=404)
             return
         try:
@@ -113,6 +115,42 @@ class _Handler(BaseHTTPRequestHandler):
                     args.append(text)
                 output = getattr(fleet.actions, action)(*args)
                 result = {'ok': True, 'output': output or ''}
+            elif self.route.path in ('/api/promote', '/api/move'):
+                node = self._node(body.get('node'))
+                fields = ('project', 'slice', 'stage') if self.route.path == '/api/promote' else ('cluster',)
+                for field in fields:
+                    if not isinstance(body.get(field), str) or not body[field].strip():
+                        raise ValueError(f'{field} must be a nonempty string')
+                if 'stage' in fields and body['stage'] not in STAGES:
+                    raise ValueError('Unknown stage')
+                with fleet._assign_lock:
+                    if self.route.path == '/api/promote':
+                        promote(node['id'], body['project'], body['slice'], body['stage'],
+                                path=fleet.config_path)
+                    else:
+                        move(node['id'], body['cluster'], path=fleet.config_path)
+                result = {'ok': True}
+            elif self.route.path == '/api/broadcast':
+                cluster, text = body.get('cluster'), body.get('text')
+                include = body.get('include_terminals', False)
+                if not isinstance(cluster, str) or not cluster:
+                    raise ValueError('cluster must be a nonempty string')
+                if not isinstance(text, str) or type(include) is not bool:
+                    raise ValueError('text must be a string and include_terminals a boolean')
+                kinds = ('claude', 'terminal') if include else ('claude',)
+                nodes = [node for node in fleet._snapshot_copy().get('nodes', [])
+                         if node.get('cluster') == cluster and node.get('kind') in kinds]
+                result = {'ok': True, 'results': fleet.actions.broadcast(nodes, text)}
+            elif self.route.path == '/api/open-plan':
+                run_id = body.get('run')
+                if not isinstance(run_id, str) or not run_id:
+                    raise ValueError('run must be a nonempty string')
+                run = fleet._snapshot_copy().get('runs', {}).get(run_id)
+                if run is None:
+                    raise ValueError('run_not_found')
+                plan = run['run_plan']
+                fleet.actions.open_plan(str(Path(plan['worktree']) / plan['path']))
+                result = {'ok': True}
             else:
                 node_id, initiative = body.get('node'), body.get('initiative')
                 if not isinstance(node_id, str) or not node_id:
@@ -145,7 +183,9 @@ class FleetMapServer:
         self._stopped = threading.Event()
         self._serving = False
         self._http = None
-        self._snapshot = {'generated_at': None, 'hosts': [], 'nodes': [], 'edges': []}
+        self._snapshot = {'generated_at': None, 'hosts': [], 'nodes': [], 'edges': [],
+                          'runs': {}, 'clusters': {}, 'decisions': [], 'rejected_projections': {}}
+        self._snapshot_ready = threading.Event()
 
     def _snapshot_copy(self):
         with self._lock:
@@ -161,7 +201,25 @@ class FleetMapServer:
             else:
                 with self._lock:
                     self._snapshot = snapshot
+                self._snapshot_ready.set()
             if self._stopped.wait(self.poll_seconds):
+                return
+
+    def _refresh_slow(self):
+        while not self._snapshot_ready.wait(0.1):
+            if self._stopped.is_set():
+                return
+        refresh = getattr(self.collector, 'refresh_slow', None)
+        if refresh is None:
+            return
+        while not self._stopped.is_set():
+            deadline = time.monotonic() + 30
+            try:
+                refresh()
+            except Exception:
+                # Keep the prior probe results on a failed pass.
+                pass
+            if self._stopped.wait(max(0, deadline - time.monotonic())):
                 return
 
     def _watch_idle(self):
@@ -203,6 +261,7 @@ class FleetMapServer:
                 raise
             self._last_request = time.monotonic()
             threading.Thread(target=self._refresh, name='fleetmap-collector', daemon=True).start()
+            threading.Thread(target=self._refresh_slow, name='fleetmap-probes', daemon=True).start()
             threading.Thread(target=self._watch_idle, name='fleetmap-idle', daemon=True).start()
             return self._http.server_port, self.key
 

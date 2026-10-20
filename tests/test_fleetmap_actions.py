@@ -56,6 +56,22 @@ class ActionRouting(unittest.TestCase):
     def kitty_args(self, command):
         return ['@', '--to', f'unix:{self.sock}', command, '--match', 'id:42']
 
+    def test_broadcast_continues_after_a_target_failure(self):
+        targets = [node(id='bad', hosting='unknown'), node(id='good')]
+        self.assertEqual(self.actions.broadcast(targets, 'hello'), [
+            {'node': 'bad', 'ok': False, 'error': 'Unsupported hosting: unknown'},
+            {'node': 'good', 'ok': True, 'error': None}])
+        self.assertIn('hello', self.argv('orca'))
+
+    def test_open_plan_uses_overlay_and_literal_path(self):
+        path = '/work/tree with spaces/plan.md'
+        self.assertIsNone(self.actions.open_plan(path))
+        self.assertEqual(self.argv('kitten'), ['@', '--to', f'unix:{self.sock}',
+            'launch', '--type=overlay', os.path.expanduser('~/bin/md-preview'), path])
+        with patch('fleetmap.actions.glob.glob', return_value=[]):
+            with self.assertRaises(ActionError):
+                self.actions.open_plan(path)
+
     def test_orca_actions_use_host_environment(self):
         for hosting, host in [('orca', 'local'), ('orca', 'laptop2'),
                               ('laptop2', 'laptop2')]:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """Snapshot integration with real transcripts and a canned Orca boundary."""
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime
 import json
 from pathlib import Path
@@ -18,6 +18,7 @@ from fleetmap.model import Collector
 from fleetmap.orca import OrcaClient, OrcaError
 from fleetmap.registry import LocalSession, Subagent
 from fleetmap.transcript import read_transcript
+from tests.test_fleetmap_matrix import projection, package, slice_row
 
 FIX = ROOT / 'tests/fixtures/fleetmap/session.jsonl'
 NOW = datetime.fromisoformat('2026-10-19T10:10:00+00:00').timestamp()
@@ -78,10 +79,161 @@ class SnapshotAssembler(unittest.TestCase):
     def collector(self, orca_errors=None):
         self.orca.errors.update(orca_errors or {})
         return Collector(self.orca, config_path=self.config,
-                         sessions=lambda: self.local, tmux_sessions=lambda: self.tmux)
+                         sessions=lambda: self.local, tmux_sessions=lambda: self.tmux,
+                         projection_dir=self.base / "progress")
 
     def node(self, snapshot, node_id='local:sid:s1'):
         return next(n for n in snapshot['nodes'] if n['id'] == node_id)
+
+    def write_projection(self, value):
+        directory = self.base / 'progress'
+        directory.mkdir(exist_ok=True)
+        data = asdict(value)
+        data.pop('path')
+        data.pop('mtime')
+        (directory / (value.run + '.json')).write_text(json.dumps(data))
+        self.orca.put('orchestration run-list', 'runs',
+                      [{'id': value.run, 'objective': 'Legacy objective',
+                        'coordinator_handle': value.chiefTerminal}])
+
+    def test_projection_joins_remote_chief_and_local_worker_over_pin(self):
+        self.config.write_text(json.dumps({'assign': {'s1': 'Pinned'}, 'projects': [
+            {'name': 'Pinned', 'slices': [{'name': 'Manual', 'stage': 'goal',
+                                         'sessions': ['s1']}]}], 'caps': {'laptop2': 0}}))
+        self.orca.put('terminal list', 'terminals', [terminal('term_chief')], 'laptop2')
+        self.orca.put('orchestration worker-list', 'workers', [
+            {'dispatchId': 'd1', 'runId': 'run_test', 'agentTerminalHandle': 'term_a',
+             'workerState': 'running', 'host': 'laptop2'},
+            {'dispatchId': 'd2', 'agentTerminalHandle': 'term_chief',
+             'workerState': 'running', 'host': 'local'}])
+        self.write_projection(projection(
+            slices=[slice_row(stage='review', packages=['P1'])],
+            packages=[package('P1', dispatchId='d1', machine='laptop2')],
+            caps={'laptop2': 3}, decisions=[{'id': 'D1', 'class': 'D', 'text': 'Approve'}]))
+        snap = self.collector().snapshot()
+        node = self.node(snap)
+        self.assertEqual((node['cluster'], node['cluster_source'], node['stage']),
+                         ('Review run', 'run', 'review'))
+        self.assertEqual(node['pin_overridden'], 'Pinned')
+        self.assertIsNone(node['ladder'])
+        matrix = snap['runs']['run_test']
+        self.assertEqual(matrix['chief_node'], 'env:laptop2:term:term_chief')
+        self.assertEqual(matrix['rows'][0]['live'], ['local:sid:s1'])
+        self.assertEqual(snap['clusters']['Review run']['matrix_host'], 'laptop2')
+        self.assertEqual(snap['decisions'][0]['run'], 'run_test')
+        self.assertEqual([(h['workers'], h['cap'], h['amber']) for h in snap['hosts']],
+                         [(1, None, False), (1, 3, False)])
+        self.assertEqual(matrix['packages'][0]['id'], 'P1')
+        self.assertEqual(matrix['run_plan']['path'], 'plan.md')
+
+    def test_rejected_and_missing_projection_notes_are_on_run_clusters(self):
+        self.write_projection(projection(chiefTerminal='term_a'))
+        (self.base / 'progress/run_test.json').write_text('{"schemaVersion": 1}')
+        collector = self.collector()
+        snap = collector.snapshot()
+        reason = snap['rejected_projections']['run_test.json']
+        self.assertIn(reason, snap['clusters']['Legacy objective']['notes'])
+        (self.base / 'progress/run_test.json').unlink()
+        snap = collector.snapshot()
+        self.assertIn('projection v1, Chief must re-render',
+                      snap['clusters']['Legacy objective']['notes'])
+        self.assertEqual(snap['runs'], {})
+
+    def test_projection_package_binds_even_when_not_listed_in_a_slice(self):
+        self.write_projection(projection(slices=[slice_row(stage='review')],
+            packages=[package('P1', dispatchId='d1')]))
+        self.orca.put('orchestration worker-list', 'workers',
+                      [{'dispatchId': 'd1', 'agentTerminalHandle': 'term_a'}])
+        snap = self.collector().snapshot()
+        self.assertEqual((self.node(snap)['cluster'], self.node(snap)['stage']),
+                         ('Review run', 'review'))
+        self.assertEqual(snap['clusters']['Review run']['matrix_host'], 'local')
+
+    def test_run_without_terminals_keeps_note_and_does_not_bind_unhosted_session(self):
+        self.orca.put('terminal list', 'terminals', [])
+        self.orca.put('orchestration run-list', 'runs',
+                      [{'id': 'missing', 'objective': 'Missing run: continue'}])
+        snap = self.collector().snapshot()
+        self.assertIsNone(self.node(snap)['run'])
+        self.assertIn('projection v1, Chief must re-render',
+                      snap['clusters']['Missing run']['notes'])
+
+    def test_activity_stamp_tracks_all_three_inputs_and_first_observation(self):
+        collector = self.collector()
+        self.assertEqual(self.node(collector.snapshot())['activity_changed_at'], NOW)
+        self.clock.return_value = NOW + 600
+        self.assertTrue(self.node(collector.snapshot())['stalled'])
+        with self.transcript.open('a') as output:
+            output.write('{"type": "system"}\n')
+        node = self.node(collector.snapshot())
+        self.assertFalse(node['stalled'])
+        self.assertEqual(node['activity_changed_at'], NOW + 600)
+        self.clock.return_value = NOW + 1200
+        self.assertTrue(self.node(collector.snapshot())['stalled'])
+        self.orca.put('terminal list', 'terminals', [dict(terminal(), lastOutputAt=NOW + 1)])
+        self.assertFalse(self.node(collector.snapshot())['stalled'])
+        self.clock.return_value = NOW + 1800
+        self.assertTrue(self.node(collector.snapshot())['stalled'])
+        with self.transcript.open('a') as output:
+            output.write(json.dumps({'type': 'assistant', 'timestamp': '2026-10-19T10:20:00Z',
+                                      'message': {'content': []}}) + '\n')
+        self.assertFalse(self.node(collector.snapshot())['stalled'])
+
+    def test_slow_refresh_publishes_ladders_memory_and_stale_cells(self):
+        self.write_projection(projection(chiefTerminal='term_other',
+            gates=[{'id': 'goal', 'verdict': 'pass', 'at': None, 'headSha': 'aaaa'}]))
+        collector = self.collector()
+        initial = collector.snapshot()
+        self.assertIsNone(self.node(initial)['ladder'])
+        with patch.object(collector.ladder, 'rung', return_value={'rung': 'working', 'ahead': 2, 'pr': None}), \
+             patch.object(collector.memory, 'probe', return_value={'free_pct': 30, 'swap_gb': 1}), \
+             patch.object(collector.stale, 'check', return_value={'moved': True, 'commits': None}):
+            collector.refresh_slow()
+        snap = collector.snapshot()
+        self.assertEqual(self.node(snap)['ladder']['rung'], 'working')
+        self.assertTrue(snap['hosts'][0]['amber'])
+        self.assertEqual(snap['runs']['run_test']['rows'][0]['cells']['goal']['stale'],
+                         {'moved': True, 'commits': None})
+        self.assertIsNone(initial['runs']['run_test']['rows'][0]['cells']['goal']['stale'])
+
+    def test_stale_overlay_uses_effective_gate_and_invalidates_new_projection(self):
+        value = projection(chiefTerminal='term_a',
+            gates=[{'id': 'goal', 'verdict': 'pass', 'at': None, 'headSha': 'aaaa'},
+                   {'id': 'general-code', 'verdict': 'pass', 'at': None, 'headSha': 'bbbb'}],
+            slices=[dict(slice_row('1', gates=[
+                {'id': 'general-code', 'verdict': 'pass', 'at': None, 'headSha': 'cccc'}]),
+                branch='feature/slice')])
+        self.write_projection(value)
+        collector = self.collector()
+        collector.snapshot()
+        def evidence(p, gate, branch):
+            return {'moved': True, 'commits': [branch or 'run', gate['headSha']]}
+        with patch.object(collector.stale, 'check', side_effect=evidence), \
+             patch.object(collector.memory, 'probe', return_value={'free_pct': None, 'swap_gb': None}):
+            collector.refresh_slow()
+        row = collector.snapshot()['runs']['run_test']['rows'][0]
+        self.assertEqual(row['cells']['goal']['stale']['commits'], ['run', 'aaaa'])
+        self.assertEqual(row['cells']['review']['chips'][-1]['stale']['commits'],
+                         ['feature/slice', 'cccc'])
+        value.gates[0]['headSha'] = 'dddd'
+        self.write_projection(value)
+        self.assertIsNone(collector.snapshot()['runs']['run_test']['rows'][0]['cells']['goal']['stale'])
+
+    def test_memory_failure_blanks_and_worker_cap_is_independent(self):
+        self.config.write_text(json.dumps({'caps': {'local': 0},
+            'hosts': {'laptop2': {'ssh': 'test@remote'}}}))
+        self.orca.put('orchestration worker-list', 'workers', [
+            {'dispatchId': 'd1', 'agentTerminalHandle': 'term_a', 'workerState': 'running'}])
+        collector = self.collector()
+        collector.snapshot()
+        with patch.object(collector.memory, 'probe', return_value={'free_pct': 70, 'swap_gb': 0}) as probe:
+            collector.refresh_slow()
+        self.assertIn(unittest.mock.call('laptop2', 'test@remote'), probe.call_args_list)
+        snap = collector.snapshot()
+        self.assertTrue(snap['hosts'][0]['amber'])
+        self.assertFalse(snap['hosts'][1]['amber'])
+        self.orca.errors['laptop2'] = OrcaError('offline')
+        self.assertEqual(collector.snapshot()['hosts'][1]['memory'], {'free_pct': None, 'swap_gb': None})
 
     def test_claude_node_state_prefers_hook_file(self):
         for hook, status, expected in (('attention', 'busy', 'attention'),
@@ -95,15 +247,19 @@ class SnapshotAssembler(unittest.TestCase):
 
     def test_snapshot_contract_and_transcript_fields(self):
         snap = self.collector().snapshot()
-        self.assertEqual(set(snap), {'generated_at', 'hosts', 'nodes', 'edges'})
+        self.assertEqual(set(snap), {'generated_at', 'hosts', 'nodes', 'edges', 'runs', 'clusters',
+                                     'decisions', 'rejected_projections'})
         self.assertEqual(snap['generated_at'], NOW)
-        self.assertIn({'name': 'local', 'label': 'This Mac', 'reachable': True}, snap['hosts'])
+        self.assertEqual(snap['hosts'][0], dict(name='local', label='This Mac', reachable=True,
+            memory={'free_pct': None, 'swap_gb': None}, workers=0, cap=None, amber=False))
         node = self.node(snap)
         self.assertEqual(set(node), {
             'id', 'host', 'kind', 'parent', 'title', 'purpose', 'doing', 'last_said',
             'state', 'you_at', 'it_at', 'never_addressed', 'cluster', 'repo',
             'worktree', 'branch', 'hosting', 'model', 'ctx_pct', 'cost', 'moves',
-            'terminal', 'tmux', 'kitty_window', 'subagents_total', 'subagents_shown'})
+            'terminal', 'tmux', 'kitty_window', 'subagents_total', 'subagents_shown',
+            'stalled', 'ladder', 'stage', 'cluster_source', 'activity_changed_at',
+            'transcript_offset', 'last_output_at', 'run', 'pin_overridden'})
         self.assertEqual((node['title'], node['purpose'], node['doing'], node['last_said']),
                          ('Handoff scheduling run', 'Review PR 6869 under run 20261007',
                           'SendMessage: PR Review', 'Review complete. The checks passed.'))
@@ -163,8 +319,8 @@ class SnapshotAssembler(unittest.TestCase):
                 self.orca.errors = {(env, ('terminal', 'list')): OrcaError('offline')}
                 snap = self.collector().snapshot()
                 host = 'local' if env is None else env
-                self.assertIn({'name': host, 'label': 'This Mac' if env is None else host,
-                               'reachable': False, 'error': 'offline'}, snap['hosts'])
+                record = next(h for h in snap['hosts'] if h['name'] == host)
+                self.assertEqual((record['reachable'], record['error']), (False, 'offline'))
                 self.assertFalse([n for n in snap['nodes'] if n['host'] == host])
 
     def test_optional_source_failure_preserves_host_nodes(self):
@@ -364,7 +520,8 @@ class SnapshotAssembler(unittest.TestCase):
         with patch.object(self.orca, 'environments', side_effect=OrcaError('offline')):
             snap = self.collector().snapshot()
         self.assertEqual(snap['hosts'], [dict(name='local', label='This Mac',
-                                             reachable=True, degraded=['environments: offline'])])
+                                             reachable=True, degraded=['environments: offline'],
+            memory={'free_pct': None, 'swap_gb': None}, workers=0, cap=None, amber=False)])
         self.assertEqual(len(snap['nodes']), 1)
 
     def test_first_seen_is_scoped_to_host_and_edges_require_visible_nodes(self):

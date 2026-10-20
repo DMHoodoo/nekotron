@@ -5,13 +5,18 @@ from dataclasses import asdict
 import os
 from pathlib import Path
 import subprocess
+import threading
 import time
 
 import fleet_tmux
-from .clusters import CONFIG_PATH, cluster_for, load
+from .clusters import CONFIG_PATH, cluster_for, load, stage_for
 from .edges import Edge, Resolver, build_edges
+from .ladder import Ladder
+from .matrix import build_matrix, derive_stage
 from .orca import OrcaClient, OrcaError
+from .projection import PROGRESS_DIR, load_projections
 from .registry import list_local_sessions
+from .signals import MemoryProbe, StaleChecker, decision_strip, is_stalled, running_workers
 from .transcript import TranscriptFacts, read_transcript
 
 
@@ -68,6 +73,9 @@ def _node(node_id, host, kind, facts=None):
         state='idle', you_at=facts.you_at, it_at=facts.it_at,
         never_addressed=facts.you_at is None, cluster='Unsorted', repo='', worktree='',
         branch='', hosting='unknown', model=None, ctx_pct=None, cost=None,
+        stalled=False, ladder=None, stage=None, cluster_source='unsorted',
+        activity_changed_at=None, transcript_offset=facts.offset, last_output_at=None,
+        run=None, pin_overridden=None,
         moves=[list(move) for move in facts.moves], terminal=None, tmux=None, kitty_window=None)
 
 
@@ -87,7 +95,8 @@ def _run_objectives(data):
 
 class Collector:
     def __init__(self, orca: OrcaClient | None = None, config_path=CONFIG_PATH,
-                 sessions=list_local_sessions, tmux_sessions=fleet_tmux.sessions):
+                 sessions=list_local_sessions, tmux_sessions=fleet_tmux.sessions,
+                 projection_dir=PROGRESS_DIR):
         self.orca = orca if orca is not None else OrcaClient()
         self.config_path = config_path
         self.sessions = sessions
@@ -95,6 +104,44 @@ class Collector:
         self.facts = {}
         self.first_seen = {}
         self._sources = {}
+        self.projection_dir = projection_dir
+        self.ladder = Ladder()
+        self.stale = StaleChecker()
+        self.memory = MemoryProbe()
+        self._activity = {}
+        self._slow_lock = threading.Lock()
+        self._slow_input = None
+        self._slow = {'ladders': {}, 'memory': {}, 'stale': {}}
+
+    @staticmethod
+    def _gates(projection):
+        """Yield effective row gates, keeping run and slice head targets distinct."""
+        inherited = {gate['id']: (gate, None) for gate in projection.gates}
+        rows = projection.slices or [{'id': projection.run, 'gates': []}]
+        for row in rows:
+            gates = dict(inherited)
+            gates.update({gate['id']: (gate, row.get('branch')) for gate in row['gates']})
+            for gate_id, (gate, branch) in gates.items():
+                key = (projection.run, projection.mtime, row['id'], gate_id)
+                yield key, gate, branch
+
+    def refresh_slow(self):
+        """Run only on the probe thread; publish a complete cache without I/O locks."""
+        with self._slow_lock:
+            inputs = self._slow_input
+        if inputs is None:
+            return
+        ladders, projections, hosts = inputs
+        result = {
+            'ladders': {key: self.ladder.rung(*key) for key in ladders},
+            'memory': {key: self.memory.probe(*key) for key in hosts},
+            'stale': {},
+        }
+        for projection in projections:
+            for key, gate, branch in self._gates(projection):
+                result['stale'][key] = self.stale.check(projection, gate, branch)
+        with self._slow_lock:
+            self._slow = result
 
     def _read(self, node_id, path, *, dispatched=False):
         source = (path, dispatched)
@@ -113,6 +160,137 @@ class Collector:
         self.facts[node_id] = facts
         self._sources[node_id] = source
         return facts
+
+    def _enrich(self, nodes, hosts, data, resolver, config, now):
+        """Join projections and cheap overlays using the last completed probe pass."""
+        projections, rejected = load_projections(self.projection_dir)
+        orca_runs = {run['id']: run for records in data.values() for run in records['runs']}
+        projections = [p for p in projections if p.run in orca_runs]
+        by_run = {p.run: p for p in projections}
+        matrices, bindings, clusters = {}, {}, {}
+        with self._slow_lock:
+            slow = self._slow
+
+        def cluster_record(name):
+            return clusters.setdefault(name, dict(name=name, run=None, matrix_host=None,
+                                                  waiting=0, stalled=0, notes=[]))
+
+        for p in projections:
+            matrix = build_matrix(p, resolver)
+            matrix.update(run_plan=dict(p.runPlan), packages=p.packages,
+                          status_card=dict(p.statusCard))
+            matrices[p.run] = matrix
+            stages = {row['id']: row['stage'] for row in matrix['rows']}
+            for package in p.packages:
+                if package['dispatchId']:
+                    node_id = resolver.node_for_handle('dispatch:' + package['dispatchId'],
+                                                       package['machine'] or 'local')
+                    if node_id:
+                        bindings[node_id] = (p, stages.get(package['slice'], derive_stage(p)))
+            for row in matrix['rows']:
+                for node_id in row['live']:
+                    bindings[node_id] = (p, row['stage'])
+                for gate_id in ('goal', 'design', 'plan', 'delivery'):
+                    row['cells'][gate_id]['stale'] = slow['stale'].get(
+                        (p.run, p.mtime, row['id'], gate_id))
+                for chip in row['cells']['review']['chips']:
+                    chip['stale'] = slow['stale'].get((p.run, p.mtime, row['id'], chip['id']))
+            if matrix['chief_node']:
+                bindings[matrix['chief_node']] = (p, derive_stage(p))
+            matrix_host = next((host for host, records in data.items()
+                                if any(t['handle'] == p.chiefTerminal
+                                       for t in records['terminals'])), 'local')
+            cluster_record(p.title).update(run=p.run, matrix_host=matrix_host,
+                                           waiting=matrix['waiting'])
+
+        objectives = _run_objectives(data)
+        run_by_terminal = {run['coordinator_handle']: run['id'] for run in orca_runs.values()
+                           if run.get('coordinator_handle')}
+        run_by_terminal.update({w.get('agentTerminalHandle'): w.get('runId')
+                                for records in data.values() for w in records['workers']
+                                if w.get('agentTerminalHandle') and w.get('runId') in orca_runs})
+        for run_id, run in orca_runs.items():
+            if run_id not in by_run and run.get('objective'):
+                name = cluster_for('', run_objective=run['objective'], title='', purpose=None,
+                                   worktree='', branch='', config=config)
+                cluster_record(name)['notes'].append(
+                    rejected.get(run_id + '.json', 'projection v1, Chief must re-render'))
+        ladders = set()
+        by_node = {node['id']: node for node in nodes}
+        activity = {}
+        for node in nodes:
+            node_id = node['id']
+            binding = bindings.get(node_id)
+            promoted = stage_for(node_id, config)
+            pinned = node_id in config.assign or promoted is not None
+            objective = objectives.get(node['terminal'])
+            projection_cluster = binding[0].title if binding else None
+            if node['kind'] == 'subagent':
+                parent = by_node[node['parent']]
+                for key in ('cluster', 'cluster_source', 'run', 'stage'):
+                    node[key] = parent[key]
+            elif node['you_at'] is None and node['kind'] == 'claude' and not (
+                    binding or pinned or objective):
+                node['cluster'] = 'Unsorted'
+            else:
+                node['cluster'] = cluster_for(
+                    node_id, run_objective=objective, projection_cluster=projection_cluster,
+                    title=node['title'], purpose=node['purpose'] if node['you_at'] is not None else None,
+                    worktree=node['worktree'], branch=node['branch'], config=config)
+                fields = [str(node[key] or '').casefold()
+                          for key in ('title', 'purpose', 'worktree', 'branch')]
+                matched = any(pattern.casefold() in value for _, patterns in config.initiatives
+                              for pattern in patterns for value in fields)
+                node['cluster_source'] = ('run' if binding else 'pin' if pinned else
+                                          'run' if objective else 'match' if matched else
+                                          'worktree' if node['cluster'] != 'Unsorted' else 'unsorted')
+                node['stage'] = binding[1] if binding else promoted
+                node['run'] = binding[0].run if binding else run_by_terminal.get(node['terminal'])
+                if binding and pinned:
+                    node['pin_overridden'] = config.assign.get(node_id)
+            signature = (node['it_at'], node['transcript_offset'], node['last_output_at'])
+            previous = self._activity.get(node_id)
+            stamp = previous[1] if previous and previous[0] == signature else now
+            activity[node_id] = (signature, stamp)
+            node['activity_changed_at'] = stamp
+            node['stalled'] = node['kind'] in ('claude', 'terminal') and is_stalled(node, None, now)
+            if node['kind'] == 'claude' and node['run'] is None and promoted is None:
+                key = (node['worktree'], node['branch'])
+                ladders.add(key)
+                node['ladder'] = slow['ladders'].get(key)
+            record = cluster_record(node['cluster'])
+            record['stalled'] += int(node['stalled'])
+            run_id = node['run']
+            if run_id and run_id not in by_run:
+                reason = rejected.get(run_id + '.json', 'projection v1, Chief must re-render')
+                if reason not in record['notes']:
+                    record['notes'].append(reason)
+        self._activity = activity
+        for p in projections:
+            matrices[p.run]['stalled'] = clusters[p.title]['stalled']
+
+        counts = running_workers({h: r['workers'] for h, r in data.items()},
+                                 {h: r['terminals'] for h, r in data.items()})
+        caps = dict(config.caps)
+        # Sorted projection-file order makes overlapping host caps deterministic.
+        for p in projections:
+            caps.update(p.caps)
+        probes = []
+        for host in hosts:
+            name = host['name']
+            key = (name, config.hosts.get(name, {}).get('ssh'))
+            if host['reachable']:
+                probes.append(key)
+            memory = slow['memory'].get(key) if host['reachable'] else None
+            memory = memory or {'free_pct': None, 'swap_gb': None}
+            count, cap = counts.get(name, 0), caps.get(name)
+            amber = ((cap is not None and count > cap) or
+                     (memory['free_pct'] is not None and memory['free_pct'] < 40))
+            host.update(memory=memory, workers=count, cap=cap, amber=amber)
+        with self._slow_lock:
+            self._slow_input = (ladders, projections, probes)
+        return dict(runs=matrices, clusters=clusters, decisions=decision_strip(projections),
+                    rejected_projections=rejected)
 
     def _poll_host(self, host, sessions):
         env = None if host == 'local' else host
@@ -168,15 +346,9 @@ class Collector:
         tmux = self.tmux_sessions() if sessions else {}
         workers = {worker.get('agentTerminalHandle') for records in data.values()
                    for worker in records['workers'] if worker.get('agentTerminalHandle')}
-        objectives = _run_objectives(data)
         nodes, subagent_edges, facts_by_node = [], [], {}
         local_matches = data.get('local', {}).get('matches', {})
         git_by_path = {}
-
-        def cluster(node):
-            return cluster_for(node['id'], run_objective=objectives.get(node['terminal']),
-                               title=node['title'], purpose=node['purpose'],
-                               worktree=node['worktree'], branch=node['branch'], config=config)
 
         def local_git(path):
             if path not in git_by_path:
@@ -202,15 +374,11 @@ class Collector:
                         branch=terminal.get('branch') or branch,
                         repo=Path(root or session.cwd).name, hosting=hosting,
                         terminal=handle, tmux=tmux_name,
+                        last_output_at=terminal.get('lastOutputAt'),
                         kitty_window=int(session.kitty_key.rsplit('-', 1)[1]) if session.kitty_key else None,
                         ctx_pct=session.ctx_pct, cost=session.cost,
                         state=session.hook_state if session.hook_state in ('attention', 'done')
                         else 'working' if session.status == 'busy' else 'idle')
-            # Dispatch prompts provide purpose, but only human messages enable
-            # inferred clustering; explicit pins and run bindings still apply.
-            unaddressed_unbound = (facts.you_at is None and node_id not in config.assign
-                                  and not objectives.get(handle))
-            node['cluster'] = 'Unsorted' if unaddressed_unbound else cluster(node)
             node.update(subagents_total=len(session.subagents), subagents_shown=0)
             nodes.append(node)
             for agent in session.subagents:
@@ -242,11 +410,11 @@ class Collector:
                 node.update(title=terminal.get('title') or '', last_said=screen,
                             doing=screen.rstrip().split('\n')[-1][:60],
                             it_at=terminal['lastOutputAt'],
+                            last_output_at=terminal['lastOutputAt'],
                             state='working' if now - terminal['lastOutputAt'] < 60 else 'idle',
                             worktree=root or worktree, branch=terminal.get('branch') or branch,
                             repo=Path(root or worktree).name, hosting='orca' if host == 'local' else host,
                             terminal=handle, model=identity.get('model') if isinstance(identity, dict) else None)
-                node['cluster'] = cluster(node)
                 nodes.append(node)
 
         resolver = Resolver(sessions, {h: r['terminals'] for h, r in data.items()},
@@ -266,6 +434,7 @@ class Collector:
                 inbox[host].append(dict(message, id=key))
         edges = build_edges(resolver, facts_by_node, inbox, self.first_seen) + subagent_edges
         visible = {node['id'] for node in nodes}
+        additions = self._enrich(nodes, hosts, data, resolver, config, now)
         return dict(generated_at=now, hosts=hosts, nodes=nodes,
                     edges=[asdict(edge) for edge in edges
-                           if edge.src in visible and edge.dst in visible])
+                           if edge.src in visible and edge.dst in visible], **additions)

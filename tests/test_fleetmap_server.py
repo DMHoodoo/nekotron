@@ -19,11 +19,13 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'kitty'))
-from fleetmap.actions import ActionError
+from fleetmap.actions import ActionError, Actions
+from fleetmap.clusters import load, stage_for
+from fleetmap import clusters
 from fleetmap import server
 
 
-NODE = {'id': 'local:sid:s1', 'host': 'local', 'hosting': 'orca', 'terminal': 'term_one'}
+NODE = {'kind': 'claude', 'cluster': 'Review', 'id': 'local:sid:s1', 'host': 'local', 'hosting': 'orca', 'terminal': 'term_one'}
 
 
 class StubCollector:
@@ -60,6 +62,12 @@ class StubActions:
     def close(self, node):
         self.calls.append(('close', node))
         raise ActionError('terminal_not_found')
+
+    def broadcast(self, nodes, text):
+        return Actions.broadcast(self, nodes, text)
+
+    def open_plan(self, path):
+        self.calls.append(('open_plan', path))
 
     def describe_close(self, node):
         self.calls.append(('describe_close', node))
@@ -124,6 +132,8 @@ class FleetMapHTTP(unittest.TestCase):
                            ('/api/confirm?node=local:sid:s1', None),
                            ('/api/action', {'node': NODE['id'], 'action': 'close'}),
                            ('/api/assign', {'node': NODE['id'], 'initiative': 'Pin'}),
+                           ('/api/promote', {}), ('/api/move', {}),
+                           ('/api/broadcast', {}), ('/api/open-plan', {}),
                            ('/missing', None)]:
             for query in ('', '?key=wrong'):
                 with self.subTest(path=path, query=query):
@@ -189,6 +199,101 @@ class FleetMapHTTP(unittest.TestCase):
         self.assertEqual(self.json_request('/api/confirm?' + urlencode({'node': NODE['id']})),
                          {'text': 'Close Orca terminal term_one on local.'})
         self.assertEqual(self.actions.calls, [('describe_close', NODE)])
+
+    def test_promote_and_move_update_pin_and_stage(self):
+        self.wait_for_snapshot()
+        self.assertEqual(self.json_request('/api/promote', body={
+            'node': NODE['id'], 'project': 'Core lint', 'slice': 'Cause', 'stage': 'review'}),
+            {'ok': True})
+        config = load(self.collector.config_path)
+        self.assertEqual((config.assign[NODE['id']], stage_for(NODE['id'], config)),
+                         ('Core lint', 'review'))
+        self.assertEqual(self.json_request('/api/move', body={
+            'node': NODE['id'], 'cluster': 'Commissions'}), {'ok': True})
+        config = load(self.collector.config_path)
+        self.assertEqual(config.assign[NODE['id']], 'Commissions')
+        self.assertIsNone(stage_for(NODE['id'], config))
+
+    def test_promote_move_and_assign_share_one_write_lock(self):
+        other = dict(NODE, id='local:sid:s2')
+        self.collector.value['nodes'] = [NODE, other]
+        self.wait_for_snapshot()
+        entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+        original_replace = os.replace
+        results = []
+        def delayed_replace(source, destination):
+            if not entered.is_set():
+                entered.set()
+                release.wait(1)
+            original_replace(source, destination)
+        def promote_request():
+            results.append(self.json_request('/api/promote', body={
+                'node': NODE['id'], 'project': 'P', 'slice': 'S', 'stage': 'review'}))
+        def other_requests():
+            results.append(self.json_request('/api/move', body={'node': other['id'], 'cluster': 'Moved'}))
+            results.append(self.json_request('/api/assign', body={'node': 'third', 'initiative': 'Pinned'}))
+            finished.set()
+        with patch.object(clusters.os, 'replace', side_effect=delayed_replace):
+            first = threading.Thread(target=promote_request)
+            second = threading.Thread(target=other_requests)
+            first.start()
+            self.assertTrue(entered.wait(1))
+            second.start()
+            self.assertFalse(finished.wait(0.1))
+            release.set()
+            first.join(2)
+            second.join(2)
+        self.assertEqual(results, [{'ok': True}] * 3)
+        self.assertEqual(load(self.collector.config_path).assign,
+                         {NODE['id']: 'P', other['id']: 'Moved', 'local:sid:third': 'Pinned'})
+
+    def test_broadcast_excludes_terminals_and_subagents_by_default(self):
+        nodes = [NODE, dict(NODE, id='terminal', kind='terminal'),
+                 dict(NODE, id='child', kind='subagent'), dict(NODE, id='other', cluster='Other')]
+        self.collector.value['nodes'] = nodes
+        self.wait_for_snapshot()
+        for include, expected in [(False, nodes[:1]), (True, nodes[:2])]:
+            result = self.json_request('/api/broadcast', body={
+                'cluster': 'Review', 'text': 'hello', **({'include_terminals': True} if include else {})})
+            self.assertEqual(result, {'ok': True, 'results': [
+                {'node': n['id'], 'ok': True, 'error': None} for n in expected]})
+        self.assertEqual([call[1]['id'] for call in self.actions.calls],
+                         [NODE['id'], NODE['id'], 'terminal'])
+
+    def test_open_plan_resolves_run_from_snapshot(self):
+        self.collector.value['runs'] = {'r1': {'run_plan': {
+            'worktree': '/work/a tree', 'path': 'docs/plan.md'}}}
+        self.wait_for_snapshot()
+        self.assertEqual(self.json_request('/api/open-plan', body={'run': 'r1'}), {'ok': True})
+        self.assertEqual(self.actions.calls, [('open_plan', '/work/a tree/docs/plan.md')])
+        self.assertFalse(self.json_request('/api/open-plan', body={'run': 'missing'})['ok'])
+
+    def test_invalid_new_route_payloads_have_no_side_effects(self):
+        self.wait_for_snapshot()
+        for route, body in [('promote', {'node': NODE['id'], 'project': 'P', 'slice': 'S', 'stage': 'bad'}),
+                            ('move', {'node': NODE['id'], 'cluster': []}),
+                            ('broadcast', {'cluster': 'Review', 'text': 2}),
+                            ('broadcast', {'cluster': 'Review', 'text': 'x', 'include_terminals': 'yes'}),
+                            ('open-plan', {'run': []})]:
+            self.assertFalse(self.json_request('/api/' + route, body=body)['ok'])
+        self.assertFalse(self.collector.config_path.exists())
+        self.assertEqual(self.actions.calls, [])
+
+    def test_blocked_slow_probes_do_not_delay_snapshot_refresh(self):
+        self.instance.stop()
+        entered, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+        def slow():
+            entered.set()
+            release.wait(2)
+        self.collector.refresh_slow = slow
+        self.start_server(poll_seconds=0.02)
+        self.assertTrue(entered.wait(1))
+        self.collector.value = dict(self.collector.value, generated_at=456)
+        self.wait_for_snapshot(456)
+        self.assertFalse(release.is_set())
+        release.set()
 
     def test_assign_writes_config(self):
         self.collector.config_path.write_text(json.dumps({'future': 42, 'assign': {'other': 'Keep'}}))

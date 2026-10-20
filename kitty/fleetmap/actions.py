@@ -114,6 +114,21 @@ class Actions:
             self._run([self.tmux, 'send-keys', '-t', target, '-l', '--', text])
             self._run([self.tmux, 'send-keys', '-t', target, 'Enter'])
 
+    def broadcast(self, nodes, text) -> list[dict]:
+        results = []
+        for node in nodes:
+            try:
+                self.send(node, text)
+            except Exception as error:
+                results.append({'node': node['id'], 'ok': False, 'error': str(error)})
+            else:
+                results.append({'node': node['id'], 'ok': True, 'error': None})
+        return results
+
+    def open_plan(self, path) -> None:
+        self._kitty('launch', '--type=overlay', os.path.expanduser('~/bin/md-preview'),
+                    os.fspath(path))
+
     def close(self, node) -> None:
         route, target = self._target(node)
         if route == 'orca':
