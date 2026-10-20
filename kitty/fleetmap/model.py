@@ -14,7 +14,7 @@ from .edges import Edge, Resolver, build_edges
 from .ladder import Ladder, never_prompted
 from .matrix import build_matrix, derive_stage
 from .orca import OrcaClient, OrcaError
-from .projection import PROGRESS_DIR, load_projections
+from .providers import load_from_providers, providers_from_config
 from .registry import list_local_sessions
 from .signals import MemoryProbe, StaleChecker, decision_strip, is_stalled, running_workers
 from .transcript import TranscriptFacts, read_transcript
@@ -84,7 +84,7 @@ def _run_objectives(data):
 class Collector:
     def __init__(self, orca: OrcaClient | None = None, config_path=CONFIG_PATH,
                  sessions=list_local_sessions, tmux_sessions=fleet_tmux.sessions,
-                 projection_dir=PROGRESS_DIR):
+                 providers=None):
         self.orca = orca if orca is not None else OrcaClient()
         self.config_path = config_path
         self.sessions = sessions
@@ -92,7 +92,7 @@ class Collector:
         self.facts = {}
         self.first_seen = {}
         self._sources = {}
-        self.projection_dir = projection_dir
+        self.providers = providers if providers is not None else providers_from_config(load(config_path))
         self.ladder = Ladder()
         self.stale = StaleChecker()
         self.memory = MemoryProbe()
@@ -237,7 +237,11 @@ class Collector:
 
     def _enrich(self, nodes, hosts, data, resolver, config, now):
         """Join projections and cheap overlays using the last completed probe pass."""
-        projections, rejected = load_projections(self.projection_dir)
+        roots = sorted({Path(node['worktree']) for node in nodes
+                        if node['host'] == 'local' and node['worktree']})
+        projections, rejected = load_from_providers(self.providers, roots)
+        rejected.update({f'config:providers:{index}': note
+                         for index, note in enumerate(config.notes)})
         orca_runs = {run['id']: run for records in data.values() for run in records['runs']}
         projections = [p for p in projections if p.run in orca_runs]
         by_run = {p.run: p for p in projections}

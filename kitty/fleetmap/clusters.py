@@ -18,6 +18,8 @@ class ClusterConfig:
     projects: list[dict] = field(default_factory=list)
     hosts: dict[str, dict] = field(default_factory=dict)
     caps: dict[str, int] = field(default_factory=dict)
+    providers: dict | None = None
+    notes: list[str] = field(default_factory=list)
 
 
 def _node_id(node_id: str) -> str:
@@ -32,7 +34,7 @@ def _read_config(path):
 
 
 def load(path=CONFIG_PATH) -> ClusterConfig:
-    """Load rules, pins, projects, hosts and caps; a missing file is empty.
+    """Load rules, pins, projects, hosts, caps and providers; a missing file is empty.
 
     Canonical node IDs take precedence when a bare session alias also exists.
     Invalid JSON and I/O errors propagate so damaged config is not overwritten.
@@ -47,7 +49,10 @@ def load(path=CONFIG_PATH) -> ClusterConfig:
             item['sessions'] = [_node_id(session) for session in item.get('sessions', [])]
     return ClusterConfig(
         [(entry['name'], entry['match']) for entry in data.get('initiatives', [])],
-        normalized, projects, data.get('hosts', {}), data.get('caps', {}))
+        normalized, projects, data.get('hosts', {}), data.get('caps', {}),
+        data.get('providers'),
+        [f'unknown provider: {name}' for name in (data.get('providers') or {})
+         if name not in ('engineering_os', 'directory')])
 
 
 def _write_config(data, path):

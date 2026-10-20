@@ -12,10 +12,11 @@ import time
 from urllib.parse import parse_qs, urlsplit
 
 from .actions import ActionError, Actions
-from .clusters import CONFIG_PATH, move, promote, save_assign, update_stage
+from .clusters import CONFIG_PATH, load, move, promote, save_assign, update_stage
 from .model import Collector
 from .orca import OrcaClient
 from .projection import STAGES
+from .providers import providers_from_config
 
 PAGE = Path(__file__).with_name('page.html')
 SERVER_INFO = Path.home() / '.config' / 'nekotron' / 'fleet-map.server.json'
@@ -332,7 +333,8 @@ class FleetMapServer:
 
 
 def main():
-    fleet = FleetMapServer(Collector(OrcaClient()), Actions(OrcaClient()))
+    providers = providers_from_config(load())
+    fleet = FleetMapServer(Collector(OrcaClient(), providers=providers), Actions(OrcaClient()))
     try:
         port, key = fleet.start()
         print(json.dumps({'url': f'http://127.0.0.1:{port}/?key={key}'}), flush=True)

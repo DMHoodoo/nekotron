@@ -372,6 +372,7 @@ class FleetMapHTTP(unittest.TestCase):
         release.set()
 
     def test_local_transcript_publishes_on_cadence_during_twenty_slow_screens(self):
+        from fleetmap.providers.directory import DirectoryProvider
         from fleetmap.model import Collector
         from fleetmap.registry import LocalSession
         from tests.test_fleetmap_model import FakeOrca, terminal
@@ -405,7 +406,7 @@ class FleetMapHTTP(unittest.TestCase):
         orca.screen, orca.terminals = screen, terminals
         self.collector = Collector(orca, config_path=self.base / 'config.json',
                                    sessions=lambda: [session], tmux_sessions=lambda: {},
-                                   projection_dir=self.base / 'progress')
+                                   providers=[DirectoryProvider(self.base / 'progress')])
         self.collector.ladder.rung = lambda *args: None
         self.collector.memory.probe = lambda *args: None
         started = time.monotonic()

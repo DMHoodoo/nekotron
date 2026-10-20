@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'kitty'))
+from fleetmap.providers.directory import DirectoryProvider
 from fleetmap.model import Collector
 from fleetmap.clusters import load
 from fleetmap.orca import OrcaClient, OrcaError
@@ -91,7 +92,7 @@ class SnapshotAssembler(unittest.TestCase):
         self.orca.errors.update(orca_errors or {})
         return PrimedCollector(self.orca, config_path=self.config,
                          sessions=lambda: self.local, tmux_sessions=lambda: self.tmux,
-                         projection_dir=self.base / "progress")
+                         providers=[DirectoryProvider(self.base / "progress")])
 
     def node(self, snapshot, node_id='local:sid:s1'):
         return next(n for n in snapshot['nodes'] if n['id'] == node_id)
@@ -107,10 +108,54 @@ class SnapshotAssembler(unittest.TestCase):
                       [{'id': value.run, 'objective': 'Legacy objective',
                         'coordinator_handle': value.chiefTerminal}])
 
+    def test_local_worktree_run_status_reaches_run_and_cluster_and_refreshes(self):
+        root = self.base / 'checkout'
+        directory = root / 'engineering-os' / 'run_a'
+        directory.mkdir(parents=True)
+        (directory / 'run-plan.md').write_text('# Run plan\n')
+        fixture = ROOT / 'tests/fixtures/fleetmap/run_v2.json'
+        path = directory / 'run-status.json'
+        shutil.copyfile(fixture, path)
+        record = json.loads(fixture.read_text())
+        self.local[0] = replace(self.local[0], cwd=str(root))
+        local_terminal = dict(terminal(record['chiefTerminal']), worktreePath=str(root),
+                              leafId='term_a')
+        self.orca.put('terminal list', 'terminals', [local_terminal])
+        self.orca.put('orchestration run-list', 'runs', [{
+            'id': record['run'], 'objective': 'Legacy title',
+            'coordinator_handle': record['chiefTerminal']}])
+        collector = PrimedCollector(self.orca, config_path=self.config,
+                                   sessions=lambda: self.local, tmux_sessions=lambda: {})
+        snapshot = collector.snapshot()
+        self.assertIn(record['run'], snapshot['runs'])
+        self.assertEqual(snapshot['clusters'][record['title']]['run'], record['run'])
+        self.assertEqual(self.node(snapshot)['cluster'], record['title'])
+        record['statusCard']['running'] = 'Next checkpoint'
+        path.write_text(json.dumps(record))
+        self.assertEqual(collector.snapshot()['runs'][record['run']]['status_card']['running'],
+                         'Next checkpoint')
+        # A reachable path from a remote terminal must not become a local root.
+        self.local = []
+        self.orca.put('terminal list', 'terminals', [])
+        self.orca.put('terminal list', 'terminals', [local_terminal], 'laptop2')
+        self.assertEqual(collector.snapshot()['runs'], {})
+
+    def test_provider_config_and_rejections_are_visible_in_snapshot(self):
+        directory = self.base / 'exports'
+        directory.mkdir()
+        (directory / 'bad.json').write_text('{')
+        self.config.write_text(json.dumps({'providers': {
+            'directory': {'path': str(directory)}, 'future': {}}}))
+        with self.assertLogs('fleetmap.providers', level='WARNING'):
+            collector = Collector(self.orca, config_path=self.config, sessions=lambda: [])
+        snapshot = collector.snapshot()
+        self.assertEqual(snapshot['rejected_projections']['bad.json'], 'unreadable')
+        self.assertIn('unknown provider: future', snapshot['rejected_projections'].values())
+
     def test_snapshot_never_calls_orca_git_or_tmux(self):
         collector = Collector(self.orca, config_path=self.config, sessions=lambda: self.local,
                               tmux_sessions=lambda: self.fail('foreground tmux probe'),
-                              projection_dir=self.base / 'progress')
+                              providers=[DirectoryProvider(self.base / 'progress')])
         with patch.object(self.orca, 'call', side_effect=AssertionError('foreground Orca')), \
                 patch('fleetmap.model._git_metadata', side_effect=AssertionError('foreground git')):
             first = collector.snapshot()
@@ -124,7 +169,7 @@ class SnapshotAssembler(unittest.TestCase):
         self.local.clear()
         self.orca.put('terminal list', 'terminals', [terminal()])
         collector = Collector(self.orca, config_path=self.config, sessions=lambda: [],
-                              tmux_sessions=lambda: {}, projection_dir=self.base / 'progress')
+                              tmux_sessions=lambda: {}, providers=[DirectoryProvider(self.base / 'progress')])
         collector._local_input = ([], {'/work/project'}, [])
         with patch.object(self.orca, 'screen', return_value='screen') as screen, \
                 patch('fleetmap.model._git_metadata', return_value=('/work/project', 'main')) as git:
@@ -150,7 +195,7 @@ class SnapshotAssembler(unittest.TestCase):
         for cached in (False, True):
             with self.subTest(cached=cached):
                 collector = Collector(self.orca, config_path=self.config, sessions=lambda: [],
-                                      projection_dir=self.base / 'progress')
+                                      providers=[DirectoryProvider(self.base / 'progress')])
                 clock = [100.0]
                 reads = []
                 if cached:

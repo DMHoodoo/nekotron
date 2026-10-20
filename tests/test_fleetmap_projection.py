@@ -15,8 +15,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'kitty'))
 from fleetmap.projection import (
     GATE_IDS, PACKAGE_STATES, REQUIRED_FIELDS, SIZES, STAGES, VERDICTS,
-    Projection, load_projections, validate,
+    Projection, parse_projection, validate,
 )
+
+from fleetmap.providers.directory import DirectoryProvider
 
 FIX_V2 = ROOT / 'tests/fixtures/fleetmap/run_v2.json'
 FIX_V1 = ROOT / 'tests/fixtures/fleetmap/run_v1.json'
@@ -33,8 +35,15 @@ class ProjectionReader(unittest.TestCase):
     def write(self, data, name='run_v2.json'):
         (self.dir / name).write_text(json.dumps(data))
 
+    def test_parse_projection_validates_and_preserves_record_without_io(self):
+        parsed = parse_projection(self.data, 42.0)
+        self.assertEqual((parsed.run, parsed.mtime, parsed.path),
+                         ('run_4d94eb181d65', 42.0, ''))
+        with self.assertRaisesRegex(ValueError, 'packages: expected array'):
+            parse_projection(dict(self.data, packages=None), 42.0)
+
     def test_v2_fixture_loads_every_field(self):
-        good, bad = load_projections(self.dir)
+        good, bad = DirectoryProvider(self.dir).load([])
         self.assertEqual(bad, {})
         self.assertEqual(len(good), 1)
         projection = good[0]
@@ -51,7 +60,7 @@ class ProjectionReader(unittest.TestCase):
 
     def test_v1_file_is_rejected_with_rerender_reason(self):
         shutil.copyfile(FIX_V1, self.dir / FIX_V1.name)
-        good, bad = load_projections(self.dir)
+        good, bad = DirectoryProvider(self.dir).load([])
         self.assertEqual(len(good), 1)
         self.assertEqual(bad['run_v1.json'], 'schemaVersion 1, Chief must re-render')
 
@@ -59,7 +68,7 @@ class ProjectionReader(unittest.TestCase):
         del self.data['packages'][0]['size']
         self.assertIn('packages[0].size: missing', validate(self.data))
         self.write(self.data)
-        good, bad = load_projections(self.dir)
+        good, bad = DirectoryProvider(self.dir).load([])
         self.assertEqual(good, [])
         self.assertEqual(bad['run_v2.json'], 'packages[0].size: missing')
 
@@ -71,7 +80,7 @@ class ProjectionReader(unittest.TestCase):
         self.data['packages'][0]['size'] = 'XL'
         self.assertEqual(validate(self.data), ['packages[0].size: not in SIZES'])
         self.write(self.data)
-        self.assertEqual(load_projections(self.dir),
+        self.assertEqual(DirectoryProvider(self.dir).load([]),
                          ([], {'run_v2.json': 'packages[0].size: not in SIZES'}))
 
     def test_unknown_slice_package_reference_is_a_violation(self):
@@ -79,24 +88,24 @@ class ProjectionReader(unittest.TestCase):
         error = 'slices[0].packages[8]: unknown package missing'
         self.assertEqual(validate(self.data), [error])
         self.write(self.data)
-        self.assertEqual(load_projections(self.dir), ([], {'run_v2.json': error}))
+        self.assertEqual(DirectoryProvider(self.dir).load([]), ([], {'run_v2.json': error}))
 
     def test_half_written_file_is_skipped(self):
         (self.dir / 'partial.json').write_text('{"schemaVersion":2,')
         (self.dir / 'bad-encoding.json').write_bytes(b'\xff')
         (self.dir / 'ignored.tmp').write_text('{')
-        good, bad = load_projections(self.dir)
+        good, bad = DirectoryProvider(self.dir).load([])
         self.assertEqual(len(good), 1)
         self.assertEqual(bad, {'partial.json': 'unreadable', 'bad-encoding.json': 'unreadable'})
 
     def test_unreadable_file_does_not_hide_valid_file(self):
         (self.dir / 'missing.json').symlink_to(self.dir / 'absent')
-        good, bad = load_projections(self.dir)
+        good, bad = DirectoryProvider(self.dir).load([])
         self.assertEqual(len(good), 1)
         self.assertEqual(bad, {'missing.json': 'unreadable'})
 
     def test_missing_directory_is_empty(self):
-        self.assertEqual(load_projections(self.dir / 'absent'), ([], {}))
+        self.assertEqual(DirectoryProvider(self.dir / 'absent').load([]), ([], {}))
 
     def test_version_must_be_integer_two(self):
         for version in (1, 3, '2', 2.0, True, None):
@@ -104,13 +113,13 @@ class ProjectionReader(unittest.TestCase):
                 self.data['schemaVersion'] = version
                 self.assertTrue(validate(self.data))
                 self.write(self.data)
-                good, bad = load_projections(self.dir)
+                good, bad = DirectoryProvider(self.dir).load([])
                 self.assertEqual(good, [])
                 self.assertEqual(bad['run_v2.json'],
                                  f'schemaVersion {version}, Chief must re-render')
         del self.data['schemaVersion']
         self.write(self.data)
-        self.assertEqual(load_projections(self.dir)[1]['run_v2.json'],
+        self.assertEqual(DirectoryProvider(self.dir).load([])[1]['run_v2.json'],
                          'schemaVersion 1, Chief must re-render')
 
     def test_all_violations_are_returned_including_nested_fields(self):
@@ -177,7 +186,7 @@ class ProjectionReader(unittest.TestCase):
                 item.pop(key, None)
         self.assertEqual(validate(self.data), [])
         self.write(self.data)
-        good, bad = load_projections(self.dir)
+        good, bad = DirectoryProvider(self.dir).load([])
         self.assertEqual(bad, {})
         self.assertEqual(good[0].caps, {})
 
@@ -220,13 +229,13 @@ class ProjectionReader(unittest.TestCase):
     def test_unknown_fields_do_not_prevent_loading(self):
         self.data['futureField'] = {'something': True}
         self.write(self.data)
-        good, bad = load_projections(self.dir)
+        good, bad = DirectoryProvider(self.dir).load([])
         self.assertEqual(len(good), 1)
         self.assertEqual(bad, {})
 
     def test_non_object_json_is_rejected_with_first_violation(self):
         self.write([])
-        self.assertEqual(load_projections(self.dir),
+        self.assertEqual(DirectoryProvider(self.dir).load([]),
                          ([], {'run_v2.json': '$: expected object'}))
 
     def test_exported_vocabulary_matches_reference_h(self):
