@@ -714,7 +714,7 @@ function stepper(row) {
 function renderCluster(cluster) {
   const panel = cluster.panel, info = clusterInfo(cluster), run = clusterRun(cluster);
   const open = expanded.has(cluster.id), elsewhere = run && info.matrix_host !== cluster.host;
-  const signature = JSON.stringify([info, run, open, clusterItems(cluster).map(node => [node.id, node.title, node.stage, node.ladder, node.never_addressed, node.terminal, node.tmux, node.kitty_window])]);
+  const signature = JSON.stringify([info, run, open, clusterItems(cluster).map(node => [node.id, node.title, node.stage, node.ladder, node.never_prompted, node.terminal, node.tmux, node.kitty_window])]);
   if (cluster.renderSignature === signature) return;
   cluster.renderSignature = signature;
   const priorViews = miniViews; miniViews = [];
@@ -788,7 +788,7 @@ function matrixTable(run) {
   }
   table.append(body); return table;
 }
-function isNeverPrompted(node) { return node.kind === 'claude' && node.never_addressed === true; }
+function isNeverPrompted(node) { return node.kind === 'claude' && node.never_prompted === true; }
 function ladderTable(cluster) {
   const table = html('table'); table.setAttribute('aria-label', `${cluster.name} ladder`);
   const head = html('thead'), labels = html('tr');

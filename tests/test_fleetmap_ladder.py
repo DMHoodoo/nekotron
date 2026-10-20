@@ -278,10 +278,11 @@ class OneOffLadder(unittest.TestCase):
         self.save()
         self.assertEqual(self.rung(), {'rung': 'asked', 'ahead': 0, 'pr': None})
 
-    def test_never_prompted_requires_both_fields_to_be_none(self):
+    def test_never_prompted_requires_no_timestamp_and_no_purpose(self):
         for node, expected in (({}, True), ({'you_at': None, 'purpose': None}, True),
                                ({'you_at': 0, 'purpose': None}, False),
-                               ({'you_at': None, 'purpose': ''}, False),
+                               ({'you_at': None, 'purpose': ''}, True),
+                               ({'you_at': None, 'purpose': 'Older human prompt'}, False),
                                ({'you_at': 10, 'purpose': 'Fix it'}, False)):
             with self.subTest(node=node):
                 self.assertEqual(never_prompted(node), expected)

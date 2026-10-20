@@ -292,7 +292,7 @@ class SnapshotAssembler(unittest.TestCase):
         node = self.node(snap)
         self.assertEqual(set(node), {
             'id', 'host', 'kind', 'parent', 'title', 'purpose', 'doing', 'last_said',
-            'state', 'you_at', 'it_at', 'never_addressed', 'cluster', 'repo',
+            'state', 'you_at', 'it_at', 'never_addressed', 'never_prompted', 'cluster', 'repo',
             'worktree', 'branch', 'hosting', 'model', 'ctx_pct', 'cost', 'moves',
             'terminal', 'tmux', 'kitty_window', 'subagents_total', 'subagents_shown',
             'stalled', 'ladder', 'stage', 'cluster_source', 'activity_changed_at',
@@ -308,6 +308,22 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertEqual(node['moves'][0], [NOW - 120, 'said: Review complete. The checks passed.'])
         self.assertEqual(json.loads(json.dumps(snap)), snap)
 
+    def test_prompt_without_timestamp_is_not_eligible_for_close_all(self):
+        self.transcript.write_text(json.dumps({
+            'type': 'user', 'message': {'content': 'Keep this human task'}}) + '\n')
+        node = self.node(self.collector().snapshot())
+        self.assertEqual(node['purpose'], 'Keep this human task')
+        self.assertIsNone(node['you_at'])
+        self.assertTrue(node['never_addressed'])
+        self.assertFalse(node['never_prompted'])
+
+    def test_no_prompt_and_no_timestamp_is_eligible_for_close_all(self):
+        self.transcript.write_text('')
+        node = self.node(self.collector().snapshot())
+        self.assertEqual(node['purpose'], '')
+        self.assertIsNone(node['you_at'])
+        self.assertTrue(node['never_prompted'])
+
     def test_dispatched_worker_ignores_first_prompt(self):
         self.orca.put('orchestration worker-list', 'workers',
                       [{'dispatchId': 'd1', 'agentTerminalHandle': 'term_a'}], 'laptop2')
@@ -316,6 +332,7 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertIsNone(node['you_at'])
         self.assertTrue(node['never_addressed'])
         self.assertEqual(node['purpose'], 'Review PR 6869 under run 20261007')
+        self.assertFalse(node['never_prompted'])
         self.assertEqual((node['worktree'], node['branch']), ('/work/project', 'feature/review'))
         self.assertEqual(node['cluster'], 'Unsorted')
         self.config.write_text(json.dumps({'assign': {'s1': 'Pinned'}}))

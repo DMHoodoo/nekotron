@@ -8,7 +8,7 @@ import time
 
 
 def never_prompted(node: dict) -> bool:
-    return node.get('you_at') is None and node.get('purpose') is None
+    return node.get('you_at') is None and node.get('purpose') in (None, '')
 
 
 def _checks(rollup: list | None) -> str:

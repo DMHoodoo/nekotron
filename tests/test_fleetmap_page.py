@@ -29,7 +29,11 @@ class FleetMapPage(unittest.TestCase):
 
     def test_close_all_uses_snapshot_human_prompt_flag(self):
         html = (ROOT / "kitty/fleetmap/page.html").read_text()
-        self.assertIn("node.never_addressed === true", html)
+        predicate = html.split('function isNeverPrompted(node)', 1)[1].split('}', 1)[0]
+        self.assertIn("node.never_prompted === true", predicate)
+        for field in ('you_at', 'never_addressed', 'purpose'):
+            self.assertNotIn(field, predicate)
+        self.assertIn("const never = items.filter(isNeverPrompted)", html)
         self.assertNotIn("node.you_at == null && !node.purpose", html)
 
     def test_batch_confirmation_loads_descriptions_and_full_targets(self):

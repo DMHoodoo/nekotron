@@ -11,7 +11,7 @@ import time
 import fleet_tmux
 from .clusters import CONFIG_PATH, cluster_for, load, stage_for
 from .edges import Edge, Resolver, build_edges
-from .ladder import Ladder
+from .ladder import Ladder, never_prompted
 from .matrix import build_matrix, derive_stage
 from .orca import OrcaClient, OrcaError
 from .projection import PROGRESS_DIR, load_projections
@@ -249,6 +249,7 @@ class Collector:
                 node['run'] = binding[0].run if binding else run_by_terminal.get(node['terminal'])
                 if binding and pinned:
                     node['pin_overridden'] = config.assign.get(node_id)
+            node['never_prompted'] = never_prompted(node)
             signature = (node['it_at'], node['transcript_offset'], node['last_output_at'])
             previous = self._activity.get(node_id)
             stamp = previous[1] if previous and previous[0] == signature else now
