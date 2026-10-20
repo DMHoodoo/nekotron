@@ -770,10 +770,9 @@ console.log(JSON.stringify({first, stages, boxes, stableBoxes, regionBoxes, stab
                       "Confirmation unavailable", "closeBatch.every(node => node.description)"):
             self.assertIn(value, html)
 
-
     def run_decision_js(self, source, chief=True):
         return self.run_selection_js(page_functions(
-            'renderDecisions', 'openRun', 'showDecision', 'decisionCard', 'openSend',
+            'renderDecisions', 'openRun', 'showDecision', 'decisionCard', 'openSend', 'openRunPlan',
             'clusterKey', 'svg') + """
 let decisionSignature = '', actionBusy = false;
 const makeNode = () => ({group: new Element(), label: new Element()}), paintNode = () => {};
@@ -793,7 +792,7 @@ snapshot.nodes = [chief]; nodes.set('chief', chief);
 snapshot.decisions = [{run: 'run_test', title: 'Review run', id: 'E3', class: 'C',
   text: 'Approve the delivery order for slice 2', packet: 'P-12', applyAt: null}];
 const chip = () => descendants($('decisions')).find(el => el.tagName === 'button');
-const card = () => byClass($('context-details'), 'decision-card')[0];
+const card = () => byClass($('decision-slot'), 'decision-card')[0];
 const buttonNamed = (root, name) => descendants(root).find(el => el.tagName === 'button' && text(el) === name);
 renderDecisions();
 """ + source)
@@ -848,6 +847,31 @@ console.log(JSON.stringify({card: found ? text(found) : null,
         self.assertIn('Approve the delivery order for slice 2', output['card'])
         self.assertEqual(output['mini'], 0)
         self.assertEqual(output['buttons'], ['Open run plan'])
+
+
+    def test_decision_card_is_first_in_rail_and_renders_once(self):
+        output = self.run_decision_js("""
+let renders = 0; const inner = renderRail;
+renderRail = function() { renders++; return inner(); };
+chip().click();
+console.log(JSON.stringify({first: $('decision-slot').children[0] === card(),
+  renders, runCard: text($('context-details')).includes('Merge gate')}));
+""")
+        self.assertTrue(output['first'])
+        self.assertEqual(output['renders'], 1)
+        self.assertTrue(output['runCard'])
+        html = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        rail = html[html.index('<aside id="rail"'):]
+        self.assertLess(rail.index('id="decision-slot"'), rail.index('id="action-error"'))
+
+    def test_decision_card_open_run_plan_requests_the_decision_run(self):
+        output = self.run_decision_js("""
+chip().click();
+buttonNamed(card(), 'Open run plan').click();
+await Promise.resolve();
+console.log(JSON.stringify(requests));
+""".replace('await Promise.resolve();', ''))
+        self.assertEqual(output, [['/api/open-plan', {'run': 'run_test'}]])
 
 
 if __name__ == "__main__":
