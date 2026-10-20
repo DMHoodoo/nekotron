@@ -244,14 +244,19 @@ const BASE_MIN_REGION = 420, BASE_CELL = 70, BASE_GAP = 16;
 const LARGE_SCREEN = 2200, LARGE_RATIO = 14 / 12;
 function uiScale() { return viewportWidth() >= LARGE_SCREEN ? LARGE_RATIO : 1; }
 function baseFontPx() { return 12 * uiScale(); }
-let appliedScale = 1;
+let appliedScale = 1, refocusNode = null, returnNode = null;
 function applyScale() {
   const scale = uiScale();
   if (typeof document !== 'undefined' && document.documentElement?.style?.setProperty)
     document.documentElement.style.setProperty('--u', String(scale));
   if (scale === appliedScale) return;
   appliedScale = scale;
-  for (const view of nodeViews.values()) view.group.remove?.();
+  const active = typeof document !== 'undefined' ? document.activeElement : null;
+  for (const [id, view] of nodeViews) {
+    if (active && view.group === active) refocusNode = id;
+    if (railReturnFocus && view.group === railReturnFocus) returnNode = id;
+    view.group.remove?.();
+  }
   nodeViews.clear();
   layoutModeSignature = '';
 }
@@ -522,6 +527,17 @@ function layoutFleet(hosts) {
       if (foldedNodes.length && !preserved.has(chipId) && heldSlots.length) {
         slots.set(chipId, slots.get(heldSlots[0][0].id)); slots.delete(heldSlots[0][0].id);
       }
+      // A retired chip is 96 px wide; at the first or last column it shifts inward over the neighboring slot.
+      const chipNeighbor = slot => {
+        const column = slot % columns;
+        return columns < 2 ? null : column === 0 ? slot + 1 : column === columns - 1 ? slot - 1 : null;
+      };
+      if (preserved.has(retiredId)) {
+        const neighbor = chipNeighbor(slots.get(retiredId));
+        if (neighbor !== null && sorted.some(node => node.id !== retiredId && slots.get(node.id) === neighbor)) {
+          preserved.delete(retiredId); slots.delete(retiredId);
+        }
+      }
       for (const node of sorted) {
         let slot = slots.get(node.id);
         if (preserved.has(node.id)) continue;
@@ -537,7 +553,10 @@ function layoutFleet(hosts) {
                 py + 40 > box.top && py - 30 < box.top + box.height;
             });
           };
-          while ([...slots.values()].includes(slot) || blocked(slot)) slot++;
+          const reserved = preserved.has(retiredId) ? chipNeighbor(slots.get(retiredId)) : null;
+          const takenByChip = candidate => node.id === retiredId && chipNeighbor(candidate) !== null &&
+            [...slots.values()].includes(chipNeighbor(candidate));
+          while ([...slots.values()].includes(slot) || slot === reserved || takenByChip(slot) || blocked(slot)) slot++;
           slots.set(node.id, slot);
         }
         positions.set(node.id, {cluster: id, slot, columns,
@@ -554,11 +573,11 @@ function layoutFleet(hosts) {
           const angle = direction * Math.PI / 4;
           const candidate = {x: parent.x + reach * Math.cos(angle), y: parent.y + reach * Math.sin(angle)};
           if (candidate.x < 20 || candidate.x > baseWidth - 40 || candidate.y < 20) continue;
-          // Labels sit centered 26-42 px under each drawn node; a dot must not land on one.
+          // Labels sit centered 26-42 px (times the scale step) under each drawn node; a dot must not land on one.
           if (sorted.some(other => {
             if (other.kind === 'chip' || other.kind === 'subagent') return false;
             const at = positions.get(other.id), nearX = Math.max(at.x - CELL / 2, Math.min(candidate.x, at.x + CELL / 2)),
-              nearY = Math.max(at.y + 26, Math.min(candidate.y, at.y + 42));
+              nearY = Math.max(at.y + 26 * scale, Math.min(candidate.y, at.y + 42 * scale));
             return Math.hypot(candidate.x - nearX, candidate.y - nearY) < dotRadius;
           })) continue;
           if (sorted.some(other => {
@@ -661,6 +680,8 @@ function updateNode(node) {
   view.group.style.display = '';
   view.group.setAttribute('transform', `translate(${position.x} ${position.y})`);
   paintNode(node, view);
+  if (refocusNode === node.id) { refocusNode = null; view.group.focus?.(); }
+  if (returnNode === node.id) { returnNode = null; railReturnFocus = view.group; }
 }
 // Keeps a chip's rectangle inside its box: at least the 10 px panel padding from each edge.
 function chipX(cluster, position, half) {
@@ -914,7 +935,9 @@ function applyRail() {
     $('rail-close').focus();
   } else if (!railOpen && railReturnFocus) {
     const target = railReturnFocus; railReturnFocus = null;
-    if (target.focus) target.focus();
+    const gone = target.isConnected === false;
+    const next = gone ? $('search') : target;
+    if (next?.focus) next.focus();
   }
 }
 let revealTarget = null, railWasOpen = false, railReturnFocus = null;

@@ -1886,6 +1886,73 @@ console.log(JSON.stringify({full: radii('p0'), dot: radii('dot')}));
         for big, small in zip(output['full'], output['dot']):
             self.assertAlmostEqual(small, big * scale, places=6)
 
+    def test_subagent_dot_clears_the_scaled_label_band(self):
+        output = run_page_js("var window = {innerWidth: 2560};\n" + self.BOX_FIXTURE + """
+const parents = makeNodes('Live', 4, 'p');
+const dot = {id: 'dot', title: 'sub', state: 'working', kind: 'subagent', host: 'local',
+  cluster: 'Live', parent: 'p1'};
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes: [...parents, dot]};
+render();
+const s = 14 / 12, outer = Math.max(...descendants(nodeViews.get('dot').group)
+  .filter(el => el.tagName === 'circle' && el.attributes.fill === 'none')
+  .map(el => Number(el.attributes.r) + Number(el.attributes['stroke-width']) / 2));
+const d = endpoint('dot'), gaps = parents.map(n => {
+  const p = endpoint(n.id);
+  const nx = Math.max(p.x - 35 * s, Math.min(d.x, p.x + 35 * s)), ny = Math.max(p.y + 26 * s, Math.min(d.y, p.y + 42 * s));
+  return Math.hypot(d.x - nx, d.y - ny) - outer;
+});
+console.log(JSON.stringify({gaps}));
+""")
+        for gap in output['gaps']:
+            self.assertGreaterEqual(gap, 0)
+
+    def test_retired_chip_reserves_the_slot_it_shifts_into(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+const retired = [{title: 'Worker a', dispatchId: 'da', state: 'released', retainedFor: 600, host: 'local'}];
+const info = {name: 'Box', full_name: 'Box', short_name: 'Box', retired_workers: retired};
+snapshot = {generated_at: Date.now() / 1000, hosts: [{name: 'local'}], clusters: {Box: info},
+  runs: {}, nodes: [], edges: []};
+render();
+snapshot.nodes = [mk('a', 'working', 0), mk('b', 'working', 0), mk('c', 'working', 0)];
+render();
+const c = cluster(), chip = [...positions.entries()].find(([id]) => id.startsWith('retired:'))[1];
+const shifted = chipX(c, chip, 48);
+const rows = [...positions.entries()].filter(([id]) => !id.startsWith('retired:') && !id.startsWith('fold:'))
+  .map(([, p]) => p).filter(p => p.y === chip.y);
+console.log(JSON.stringify({left: shifted - 48, right: shifted + 48, nodes: rows.map(p => p.x)}));
+""")
+        self.assertTrue(output['nodes'] is not None)
+        for x in output['nodes']:
+            self.assertTrue(x - 22 >= output['right'] or x + 22 <= output['left'], output)
+
+    def test_closing_overlay_rail_falls_back_to_search_when_return_target_is_gone(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + """
+var window = {innerWidth: 768};
+selectNode('a');
+const stale = new Element('button'); stale.isConnected = false;
+railReturnFocus = stale;
+closeRail();
+console.log(JSON.stringify({search: document.activeElement === $('search'), stale: document.activeElement === stale}));
+""")
+        self.assertTrue(output['search'])
+        self.assertFalse(output['stale'])
+
+    def test_scale_rebuild_keeps_focus_on_the_same_node(self):
+        output = run_page_js("var window = {innerWidth: 1512};\n" + self.BOX_FIXTURE + """
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes: makeNodes('Live', 3, 'p')};
+render();
+const before = nodeViews.get('p1').group;
+before.focus(); railReturnFocus = before;
+window.innerWidth = 2560;
+render();
+const after = nodeViews.get('p1').group;
+console.log(JSON.stringify({rebuilt: after !== before, focused: document.activeElement === after,
+  returns: railReturnFocus === after}));
+""")
+        self.assertTrue(output['rebuilt'])
+        self.assertTrue(output['focused'])
+        self.assertTrue(output['returns'])
+
     def test_overlay_rail_traps_focus(self):
         output = run_page_js(self.ONDEMAND_FIXTURE + """
 var window = {innerWidth: 768};
