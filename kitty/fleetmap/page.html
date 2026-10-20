@@ -181,7 +181,7 @@ const regions = new Map();
 const clusters = new Map();
 const nodeViews = new Map();
 const MIN_REGION = 420, CELL = 70, GAP = 16;
-let layoutSignature = '';
+let layoutSignature = '', layoutModeSignature = '';
 let regionOrder = [];
 let snapshot = {hosts: [], nodes: [], edges: []};
 let nodes = new Map(), selectedId = null, dialogNodeId = null, closeToken = null;
@@ -270,12 +270,16 @@ function clusterRun(cluster) { return snapshot.runs?.[clusterInfo(cluster).run];
 function clusterItems(cluster) { return snapshot.nodes.filter(node => clusterKey(node) === cluster.id); }
 function layoutFleet(hosts) {
   const ordered = [...snapshot.nodes].sort((a, b) => a.id.localeCompare(b.id));
-  const width = Math.max($('map-scroll').clientWidth, hosts.length * MIN_REGION);
+  const viewport = $('map-scroll').clientWidth;
+  const mode = JSON.stringify([viewport, [...expanded].sort()]);
+  const repack = mode !== layoutModeSignature;
+  layoutModeSignature = mode;
+  let width = Math.max(viewport, hosts.length * MIN_REGION);
   const signature = JSON.stringify([width, hosts.map(host => host.name), [...expanded],
     ordered.map(node => [node.id, clusterKey(node), node.kind, node.parent]),
     Object.values(snapshot.runs || {}).map(run => [run.run, run.rows.map(row => [row.id, row.live])]),
     Object.values(snapshot.clusters || {}).map(info => [info.name, info.run, info.matrix_host])]);
-  if (signature === layoutSignature) return;
+  if (signature === layoutSignature && !repack) return;
   layoutSignature = signature;
   const members = new Map();
   for (const node of ordered) {
@@ -288,20 +292,22 @@ function layoutFleet(hosts) {
     if (info.run && !members.has(JSON.stringify([info.matrix_host, info.name])))
       members.set(JSON.stringify([info.matrix_host, info.name]), []);
   }
-  const counts = new Map(hosts.map(host => [host.name, ordered.filter(node => node.host === host.name).length]));
-  const widths = new Map();
-  let remaining = width, pending = [...hosts];
-  while (pending.length) {
-    const total = pending.reduce((sum, host) => sum + counts.get(host.name), 0);
-    const share = host => total ? remaining * counts.get(host.name) / total : remaining / pending.length;
-    const small = pending.filter(host => share(host) < MIN_REGION);
-    if (!small.length) { for (const host of pending) widths.set(host.name, share(host)); break; }
-    for (const host of small) { widths.set(host.name, MIN_REGION); remaining -= MIN_REGION; }
-    pending = pending.filter(host => !widths.has(host.name));
+  // Membership changes never redistribute established host widths or cluster boxes.
+  if (repack) {
+    positions.clear();
+    for (const cluster of clusters.values()) delete cluster.geometry;
+    for (const region of regions.values()) delete region.geometry;
   }
+  const initialRegionWidth = width / Math.max(1, hosts.length);
   let regionX = 0, height = 100;
   for (const host of hosts) {
-    const region = ensureRegion(host), regionWidth = widths.get(host.name), available = regionWidth - 36;
+    const region = ensureRegion(host);
+    if (!region.geometry) {
+      regionX = Math.max(regionX, ...[...regions.values()].map(r => r.geometry ? r.geometry.x + r.geometry.width : 0));
+      region.geometry = {x: regionX, width: repack ? initialRegionWidth : MIN_REGION};
+    }
+    regionX = region.geometry.x;
+    const regionWidth = region.geometry.width, available = regionWidth - 36;
     region.background.setAttribute('x', regionX + 8);
     region.background.setAttribute('width', regionWidth - 16);
     region.label.setAttribute('x', regionX + 24);
@@ -313,27 +319,48 @@ function layoutFleet(hosts) {
     for (const [id, items] of groups) {
       const cluster = ensureCluster({host: host.name, cluster: JSON.parse(id)[1]});
       const run = clusterRun(cluster), open = expanded.has(id);
-      const headerHeight = 125 + (run?.rows.length || 0) * 24;
-      const baseWidth = Math.min(available, Math.max(340, Math.ceil(Math.sqrt(items.length)) * CELL + 20));
-      const clusterWidth = open ? available : baseWidth;
-      if (x && x + clusterWidth > available) { x = 0; y += rowHeight + GAP; rowHeight = 0; }
+      const saved = cluster.geometry;
+      const headerHeight = saved?.headerHeight ?? (125 + (run?.rows.length || 0) * 24);
+      const baseWidth = saved?.baseWidth ?? Math.min(available, Math.max(340, Math.ceil(Math.sqrt(items.length)) * CELL + 20));
+      const clusterWidth = saved?.width ?? (open ? available : baseWidth);
+      if (saved) { x = saved.left; y = saved.top; }
+      else if (!repack) {
+        x = 0;
+        y = Math.max(82, ...[...clusters.values()].filter(c => c.host === host.name && c.geometry)
+          .map(c => c.geometry.top + c.geometry.height + GAP));
+      } else if (x && x + clusterWidth > available) { x = 0; y += rowHeight + GAP; rowHeight = 0; }
       const columns = Math.max(1, Math.floor((baseWidth - 20) / CELL));
       // Slots belong to node IDs, so expansion never rearranges untouched grids.
       const sorted = [...items].sort((a, b) => (a.kind === 'subagent') - (b.kind === 'subagent'));
-      const slots = new Map();
+      const slots = new Map(), preserved = new Set();
       for (const node of sorted) {
         const old = positions.get(node.id);
-        if (old?.cluster === id && old.columns === columns) slots.set(node.id, old.slot);
+        if (old?.cluster === id && old.columns === columns) { slots.set(node.id, old.slot); preserved.add(node.id); }
       }
       for (const node of sorted) {
         let slot = slots.get(node.id);
-        if (slot === undefined) { slot = 0; while ([...slots.values()].includes(slot)) slot++; slots.set(node.id, slot); }
+        if (preserved.has(node.id)) continue;
+        if (slot === undefined) {
+          slot = 0;
+          const blocked = candidate => {
+            const px = regionX + 28 + x + CELL / 2 + candidate % columns * CELL;
+            const py = y + headerHeight + 28 + Math.floor(candidate / columns) * CELL;
+            return [...clusters.values()].some(other => {
+              const box = other.geometry;
+              return other.id !== id && box && other.host === host.name &&
+                px + 30 > regionX + 18 + box.left && px - 30 < regionX + 18 + box.left + box.width &&
+                py + 40 > box.top && py - 30 < box.top + box.height;
+            });
+          };
+          while ([...slots.values()].includes(slot) || blocked(slot)) slot++;
+          slots.set(node.id, slot);
+        }
         positions.set(node.id, {cluster: id, slot, columns,
           x: CELL / 2 + slot % columns * CELL, y: 28 + Math.floor(slot / columns) * CELL});
       }
       // Retain the map's short parent attachments without changing reserved slots.
       for (const node of sorted) {
-        if (node.kind !== 'subagent') continue;
+        if (node.kind !== 'subagent' || preserved.has(node.id)) continue;
         const parent = positions.get(node.parent), point = positions.get(node.id);
         if (!parent || parent.cluster !== id) continue;
         for (let direction = 0; direction < 8; direction++) {
@@ -350,7 +377,8 @@ function layoutFleet(hosts) {
       }
       const bodyHeight = open ? (run ? 75 + run.rows.reduce((sum, row) => sum + Math.max(150, Math.ceil(row.live.length / 2) * 76 + 20), 0) : 85 + items.length * 78)
         : Math.max(50, ...items.map(node => positions.get(node.id).y + 42));
-      const clusterHeight = headerHeight + bodyHeight + 20;
+      const clusterHeight = Math.max(saved?.height || 0, headerHeight + bodyHeight + 20);
+      cluster.geometry = {left: x, top: y, width: clusterWidth, baseWidth, headerHeight, height: clusterHeight};
       Object.assign(cluster, {x: regionX + 28 + x, y: y + headerHeight, headerHeight});
       cluster.group.setAttribute('transform', `translate(${regionX + 18 + x} ${y})`);
       cluster.background.setAttribute('width', clusterWidth);
@@ -361,9 +389,12 @@ function layoutFleet(hosts) {
       cluster.grid.style.display = open ? 'none' : '';
       x += clusterWidth + GAP; rowHeight = Math.max(rowHeight, clusterHeight);
     }
-    region.background.setAttribute('height', y + rowHeight + 16);
-    height = Math.max(height, y + rowHeight + 26);
+    const bottom = Math.max(82, ...[...clusters.values()].filter(c => c.host === host.name && c.geometry)
+      .map(c => c.geometry.top + c.geometry.height));
+    region.background.setAttribute('height', bottom + 16);
+    height = Math.max(height, bottom + 26);
     regionX += regionWidth;
+    width = Math.max(width, regionX);
   }
   for (const id of positions.keys()) if (!nodes.has(id)) positions.delete(id);
   $('map').setAttribute('width', width);

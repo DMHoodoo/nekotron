@@ -13,8 +13,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def page_functions(*names):
     source = (ROOT / 'kitty/fleetmap/page.html').read_text()
-    return '\n'.join(re.search(r'^function ' + name + r'\([^\n]*\).*?^}', source,
-                               re.MULTILINE | re.DOTALL).group() for name in names)
+    functions = []
+    for name in names:
+        start = re.search(r'^function ' + name + r'\(', source, re.MULTILINE).start()
+        first_line = source[start:].splitlines()[0]
+        if first_line.endswith('}'):
+            functions.append(first_line)
+        else:
+            functions.append(re.search(r'^function .*?^}', source[start:],
+                                       re.MULTILINE | re.DOTALL).group())
+    return '\n'.join(functions)
 
 
 def run_js(source):
@@ -59,6 +67,50 @@ console.log(JSON.stringify([text(cluster.panel), text($('context-details'))]));
             self.assertIn('run_full_identity', rendered)
             self.assertIn('Handoff scheduling: wave 1 running; waiting for approval | full objective', rendered)
             self.assertIn('projection v1, Chief must re-render', rendered)
+
+    def test_layout_preserves_positions_across_membership_thresholds_and_hosts(self):
+        source = DOM + page_functions('ensureRegion', 'ensureCluster', 'clusterInfo',
+                                     'clusterRun', 'layoutFleet', 'endpoint')
+        output = run_js(source + """
+const svg = () => new Element();
+const positions = new Map(), regions = new Map(), clusters = new Map(), expanded = new Set();
+const MIN_REGION = 420, CELL = 70, GAP = 16;
+let layoutSignature = '', layoutModeSignature = '';
+const clusterKey = node => JSON.stringify([node.host, node.cluster]);
+const member = (id, host = 'local', cluster = 'A') => ({id, host, cluster, kind: 'claude'});
+let snapshot = {nodes: Array.from({length: 16}, (_, i) => member('s' + String(i).padStart(2, '0')))
+  .concat([member('remote', 'laptop2', 'R'), member('neighbor', 'local', 'B')]), clusters: {}, runs: {}};
+let nodes = new Map();
+$('map-scroll').clientWidth = 1600;
+const hosts = [{name: 'local'}, {name: 'laptop2'}];
+function layout() { nodes = new Map(snapshot.nodes.map(n => [n.id, n])); layoutFleet(hosts); }
+function capture() { return Object.fromEntries(snapshot.nodes.map(n => [n.id, endpoint(n.id)])); }
+function geometry() { return [...clusters.values()].map(c => [c.id, c.x, c.y, c.geometry.width, c.geometry.headerHeight]); }
+layout();
+const first = capture(), boxes = geometry(), regionBoxes = JSON.stringify([...regions.values()].map(r => r.geometry));
+const stages = [];
+snapshot.nodes.push(member('s16')); layout(); stages.push(capture());
+snapshot.nodes.push(...Array.from({length: 25}, (_, i) => member('new' + i, 'laptop2', 'R')));
+layout(); stages.push(capture());
+snapshot.nodes = snapshot.nodes.filter(n => !['s00', 's01', 's16'].includes(n.id));
+layout(); stages.push(capture());
+snapshot.nodes.push(member('replacement')); layout(); stages.push(capture());
+// A late run binding moves its own node without repacking unrelated nodes.
+snapshot.nodes.find(n => n.id === 'replacement').cluster = 'B'; layout(); stages.push(capture());
+const stableBoxes = geometry(), stableRegions = JSON.stringify([...regions.values()].map(r => r.geometry));
+const occupied = capture();
+$('map-scroll').clientWidth = 1100; layout();
+console.log(JSON.stringify({first, stages, boxes, stableBoxes, regionBoxes, stableRegions,
+  occupied, resized: capture()}));
+""")
+        for stage in output['stages']:
+            for node_id in output['first'].keys() & stage.keys():
+                self.assertEqual(stage[node_id], output['first'][node_id], node_id)
+        self.assertEqual(output['boxes'], output['stableBoxes'])
+        self.assertEqual(output['regionBoxes'], output['stableRegions'])
+        coordinates = [(p['x'], p['y']) for p in output['occupied'].values()]
+        self.assertEqual(len(coordinates), len(set(coordinates)))
+        self.assertNotEqual(output['occupied']['remote'], output['resized']['remote'])
 
     def test_page_references_every_endpoint_and_encoding(self):
         html = (ROOT / "kitty/fleetmap/page.html").read_text()
