@@ -354,14 +354,15 @@ function panelContentHeight(panel, width) {
     if (className.includes('cluster-heading')) {
       // The 14px bold name wraps beside the 26px toggle, never beneath it.
       const name = nodeText((child.children || [])[1] || ''), available = width - 20 - 26 - 10;
-      total += Math.max(32, Math.ceil(name.length * 8.5 / available) * 20 + 12);
+      total += Math.max(32, Math.ceil(name.length * 8.5 / available) * 21 + 12);
       continue;
     }
     // A slice row is one ellipsized line, a 6px margin and the 26px segment bar with 5px margins.
     if (className.includes('slice-row')) { total += 18 + 6 + 36; continue; }
-    total += Math.max(1, Math.ceil(nodeText(child).length / columns)) * 18 + 12;
+    total += Math.max(1, Math.ceil(nodeText(child).length / columns)) * 18 + 6;
   }
-  return total ? total + 32 : 0;
+  // Adjacent margins collapse to 6 px; the panel's own 10 px padding top and bottom is counted once.
+  return total ? total + 20 : 0;
 }
 function lastTouched(node) {
   const stamps = [node.you_at, node.it_at].filter(stamp => stamp != null);
@@ -514,8 +515,8 @@ function layoutFleet(hosts) {
         if (node.kind !== 'subagent' || preserved.has(node.id)) continue;
         const parent = positions.get(node.parent), point = positions.get(node.id);
         if (!parent || parent.cluster !== id) continue;
-        // A parent circle is 22 px and a dot 9 px; keep a 4 px gap from every node and every other dot.
-        const reach = 22 + 9 + 4;
+        // Outer selection rings: 22 px for a node, 22 * SUBAGENT_SCALE for a dot; keep a 4 px gap.
+        const dotRadius = 22 * SUBAGENT_SCALE, reach = 22 + dotRadius + 4;
         for (let direction = 0; direction < 8; direction++) {
           const angle = direction * Math.PI / 4;
           const candidate = {x: parent.x + reach * Math.cos(angle), y: parent.y + reach * Math.sin(angle)};
@@ -524,14 +525,14 @@ function layoutFleet(hosts) {
             if (other.id === node.id) return false;
             const occupied = positions.get(other.id);
             return Math.hypot(occupied.x - candidate.x, occupied.y - candidate.y) <
-              (other.kind === 'subagent' ? 9 : 22) + 9 + 4 - 1e-6;
+              (other.kind === 'subagent' ? dotRadius : 22) + dotRadius + 4 - 1e-6;
           })) continue;
           Object.assign(point, candidate); break;
         }
       }
       const bodyHeight = open ? (run ? 75 + run.rows.reduce((sum, row) => sum + Math.max(150, Math.ceil(row.live.length / 2) * 76 + 20), 0) : 85 + items.length * 78)
         : sorted.length ? Math.max(...sorted.map(node => positions.get(node.id).y + 42)) : 0;
-      const clusterHeight = headerHeight + bodyHeight + 20;
+      const clusterHeight = headerHeight + bodyHeight + (bodyHeight ? 20 : 0);
       cluster.geometry = {left: x, top: y, baseTop: y, width: clusterWidth, baseWidth,
         headerHeight, height: clusterHeight};
       Object.assign(cluster, {x: regionX + 28 + x, headerHeight});
@@ -575,23 +576,26 @@ function layoutFleet(hosts) {
   $('map').setAttribute('width', width);
   $('map').setAttribute('height', height);
 }
+const SUBAGENT_SCALE = 6 / 11;
 function makeNode(node, register = true) {
   const small = node.kind === 'subagent';
+  // A subagent draws every ring at the same proportion to its 6 px core as a full node's 11 px core.
+  const k = small ? SUBAGENT_SCALE : 1;
   const group = svg('g', {class: 'node', role: 'button', tabindex: 0});
   const title = svg('title');
-  const hit = svg('circle', {r: small ? 8 : 24, fill: 'transparent'});
-  const selection = svg('circle', {r: small ? 9 : 22, fill: 'none', 'stroke-width': 1, class: 'selection'});
+  const hit = svg('circle', {r: 24 * k, fill: 'transparent'});
+  const selection = svg('circle', {r: 22 * k, fill: 'none', 'stroke-width': 1, class: 'selection'});
   const gradient = svg('radialGradient', {id: `age-${++gradientId}`});
   const center = svg('stop', {offset: '0%'}), rim = svg('stop', {offset: '100%'});
   gradient.append(center, rim);
   const defs = svg('defs');
   defs.append(gradient);
-  const pulse = svg('circle', {r: 11, fill: 'none', 'stroke-width': 1.5, opacity: .6});
-  pulse.append(svg('animate', {attributeName: 'r', values: '11;16', dur: '1.6s', repeatCount: 'indefinite'}), svg('animate', {attributeName: 'opacity', values: '.6;0', dur: '1.6s', repeatCount: 'indefinite'}));
+  const pulse = svg('circle', {r: 11 * k, fill: 'none', 'stroke-width': 1.5 * k, opacity: .6});
+  pulse.append(svg('animate', {attributeName: 'r', values: `${11 * k};${16 * k}`, dur: '1.6s', repeatCount: 'indefinite'}), svg('animate', {attributeName: 'opacity', values: '.6;0', dur: '1.6s', repeatCount: 'indefinite'}));
   const body = svg('circle', {r: small ? 6 : 11, fill: `url(#${gradient.id})`});
   const hatch = svg('circle', {r: small ? 6 : 11, fill: 'url(#stalled-hatch)', 'pointer-events': 'none'});
-  const ringBackground = svg('circle', {r: 17, fill: 'none', stroke: 'rgba(127,127,127,.25)', 'stroke-width': 3});
-  const ring = svg('circle', {r: 17, fill: 'none', 'stroke-width': 3, transform: 'rotate(-90)'});
+  const ringBackground = svg('circle', {r: 17 * k, fill: 'none', stroke: 'rgba(127,127,127,.25)', 'stroke-width': 3 * k});
+  const ring = svg('circle', {r: 17 * k, fill: 'none', 'stroke-width': 3 * k, transform: 'rotate(-90)'});
   const label = svg('text', {y: 36, 'text-anchor': 'middle', class: 'node-label'});
   const badge = svg('text', {x: small ? 10 : 16, y: small ? -9 : -13, 'text-anchor': 'middle', class: 'edge-badge'});
   // Decorative rings can cross a short parent attachment, but must not steal clicks.
@@ -606,7 +610,7 @@ function makeNode(node, register = true) {
   group.addEventListener('mouseleave', () => {
     if (hoveredId === node.id) { hoveredId = null; paintFocus(); }
   });
-  const view = {group, title, center, rim, pulse, body, hatch, ring, label, badge};
+  const view = {radius: 17 * k, group, title, center, rim, pulse, body, hatch, ring, label, badge};
   if (register) nodeViews.set(node.id, view);
   return view;
 }
@@ -703,7 +707,8 @@ $('search').addEventListener('input', event => setSearchQuery(event.target.value
 const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
 function trapRailFocus(event) {
   const items = [...$('rail').querySelectorAll(FOCUSABLE)]
-    .filter(item => !item.disabled && !(item.closest && item.closest('[hidden]')));
+    .filter(item => !item.disabled && !(item.closest && item.closest('[hidden]')) &&
+      !(item.getClientRects && item.getClientRects().length === 0));
   if (!items.length) { event.preventDefault(); $('rail-close').focus(); return; }
   const first = items[0], last = items[items.length - 1], active = document.activeElement;
   const inside = $('rail').contains(active);
@@ -813,7 +818,7 @@ function paintNode(node, view) {
   view.pulse.style.display = node.state === 'working' ? '' : 'none';
   view.pulse.setAttribute('stroke', color);
   const youHours = (secondsSince(node.you_at) || 0) / 3600;
-  const circumference = 2 * Math.PI * 17;
+  const circumference = 2 * Math.PI * view.radius;
   view.ring.setAttribute('stroke', youHours > 24 && !node.never_addressed ? '#9aa0b4' : '#ffffff');
   let dash = `${circumference * Math.min(1, youHours / 24)} ${circumference}`;
   if (youHours > 24) dash = 'none';

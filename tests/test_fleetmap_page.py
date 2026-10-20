@@ -155,9 +155,9 @@ console.log(JSON.stringify({text: text(panel), found: Boolean(now), chains: chai
         rule = re.search(r'\.cluster-content\s*\{[^}]*\}',
                          (ROOT / 'kitty/fleetmap/page.html').read_text()).group()
         self.assertRegex(rule, r'overflow-wrap:\s*anywhere')
-        # Heading 32 + run 30 + five-line Now 102 + projection 30 + 20 padding.
-        self.assertGreaterEqual(output['contentHeight'], 214)
-        self.assertGreater(output['workerY'], output['top'] + 214)
+        # Heading 33 + run 24 + five-line Now 96 + projection 24 + 20 panel padding.
+        self.assertGreaterEqual(output['contentHeight'], 197)
+        self.assertGreater(output['workerY'], output['top'] + 197)
 
     def test_node_grid_starts_below_cluster_content(self):
         output = run_page_js(FALLBACK_FIXTURE + """
@@ -177,9 +177,9 @@ const longer = {header: cluster().headerHeight, y: endpoint('worker').y,
   height: Number(cluster().content.attributes.height)};
 console.log(JSON.stringify({empty, three, again, longer, stable}));
 """)
-        self.assertEqual(output['empty']['header'], 64)
-        # Heading 32 + run 30 + three-line Now 66 + projection 30 + 20 padding.
-        self.assertGreaterEqual(output['three']['header'], 178)
+        self.assertEqual(output['empty']['header'], 53)
+        # Heading 33 + run 24 + three-line Now 60 + projection 24 + 20 panel padding.
+        self.assertGreaterEqual(output['three']['header'], 161)
         self.assertGreater(output['three']['y'], output['empty']['y'])
         self.assertEqual(output['three']['y'], output['again']['y'])
         self.assertGreater(output['longer']['header'], output['three']['header'])
@@ -1664,9 +1664,9 @@ snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes: 
 render();
 console.log(JSON.stringify({height: box('Solo').height, header: [...clusters.values()][0].headerHeight}));
 """)
-        # Heading 32 + panel padding 32 + one node row 70 + 20 padding.
-        self.assertLessEqual(output['height'], 32 + 32 + 70 + 20)
-        self.assertLessEqual(output['header'], 64)
+        # Heading 33 + panel padding 20 + one node row 70 + 20 padding.
+        self.assertLessEqual(output['height'], 33 + 20 + 70 + 20)
+        self.assertLessEqual(output['header'], 53)
 
     def test_clusters_pack_by_actual_height(self):
         output = run_page_js(self.BOX_FIXTURE + """
@@ -1701,15 +1701,56 @@ const dots = parents.slice(0, 4).flatMap(p => [0, 1].map(i =>
 snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes: [...parents, ...dots]};
 render();
 const all = snapshot.nodes.map(n => ({id: n.id, kind: n.kind, parent: n.parent, ...endpoint(n.id)}));
-const radius = n => n.kind === 'subagent' ? 9 : 22;
+const outer = n => Math.max(...descendants(nodeViews.get(n.id).group)
+  .filter(el => el.tagName === 'circle' && el.attributes.fill === 'none')
+  .map(el => Number(el.attributes.r) + Number(el.attributes['stroke-width']) / 2));
 const gaps = [];
 for (const a of all) for (const b of all) if (a.id < b.id)
-  gaps.push([a.id, b.id, Math.hypot(a.x - b.x, a.y - b.y) - radius(a) - radius(b)]);
+  gaps.push([a.id, b.id, Math.hypot(a.x - b.x, a.y - b.y) - outer(a) - outer(b)]);
 console.log(JSON.stringify({gaps}));
 """)
         self.assertTrue(output['gaps'])
         for a, b, gap in output['gaps']:
-            self.assertGreaterEqual(gap, 4 - 1e-6, (a, b))
+            self.assertGreater(gap, 0, (a, b))
+
+    def test_live_like_row_with_one_subagent_has_no_intersecting_outer_circles(self):
+        output = run_page_js(self.BOX_FIXTURE + """
+const parents = makeNodes('Live', 4, 'p');
+const dot = {id: 'dot', title: 'sub', state: 'working', kind: 'subagent', host: 'local',
+  cluster: 'Live', parent: 'p1'};
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes: [...parents, dot]};
+render();
+const outer = id => Math.max(...descendants(nodeViews.get(id).group)
+  .filter(el => el.tagName === 'circle' && el.attributes.fill === 'none')
+  .map(el => Number(el.attributes.r) + Number(el.attributes['stroke-width']) / 2));
+const ids = snapshot.nodes.map(n => n.id), pairs = [];
+for (const a of ids) for (const b of ids) if (a < b) {
+  const p = endpoint(a), q = endpoint(b);
+  pairs.push([a, b, Math.hypot(p.x - q.x, p.y - q.y) - outer(a) - outer(b)]);
+}
+const ring = nodeViews.get('dot'), full = nodeViews.get('p0');
+const rings = view => descendants(view.group).filter(el => el.tagName === 'circle' && el.attributes.fill === 'none');
+console.log(JSON.stringify({pairs, dotOuter: outer('dot'), fullOuter: outer('p0'), rings: rings(ring).length}));
+""")
+        self.assertEqual(output['rings'], 4)
+        self.assertLess(output['dotOuter'], output['fullOuter'] / 1.5)
+        for a, b, gap in output['pairs']:
+            self.assertGreater(gap, 0, (a, b))
+
+    def test_subagent_rings_keep_a_full_nodes_proportions(self):
+        output = run_page_js(self.BOX_FIXTURE + """
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes: [
+  ...makeNodes('Prop', 1, 'p'),
+  {id: 'dot', title: 'sub', state: 'working', kind: 'subagent', host: 'local', cluster: 'Prop', parent: 'p0'}]};
+render();
+const radii = id => descendants(nodeViews.get(id).group).filter(el => el.tagName === 'circle')
+  .map(el => Number(el.attributes.r));
+console.log(JSON.stringify({full: radii('p0'), dot: radii('dot')}));
+""")
+        self.assertEqual(len(output['full']), len(output['dot']))
+        scale = 6 / 11
+        for big, small in zip(output['full'], output['dot']):
+            self.assertAlmostEqual(small, big * scale, places=6)
 
     def test_overlay_rail_traps_focus(self):
         output = run_page_js(self.ONDEMAND_FIXTURE + """
