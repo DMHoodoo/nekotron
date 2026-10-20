@@ -46,6 +46,7 @@ class Element {
   focus() { document.activeElement = this; }
   blur() { if (document.activeElement === this) document.activeElement = null; }
 }
+function applyRail() {}
 const elements = new Map();
 const $ = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
 const document = {createElement: tag => new Element(tag), createTextNode: text => String(text),
@@ -1528,6 +1529,64 @@ console.log(JSON.stringify({query, both, status: statusText()}));
         self.assertEqual(output['query'], {'n1': 0.25, 'n2': 1, 'n3': 1})
         self.assertEqual(output['both'], {'n1': 0.25, 'n2': 0.25, 'n3': 1})
         self.assertTrue(output['status'].endswith('· 2 match'), output['status'])
+
+    ONDEMAND_FIXTURE = EDGE_FIXTURE + """
+$('overlay').open = false;
+const rail = () => ({hidden: $('rail').hidden, main: $('main').className, backdrop: $('rail-backdrop').hidden});
+"""
+
+    def test_rail_hidden_until_selection(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + "console.log(JSON.stringify(rail()));")
+        self.assertTrue(output['hidden'])
+        self.assertNotIn('rail-open', output['main'])
+        self.assertTrue(output['backdrop'])
+
+    def test_selection_opens_rail_and_close_hides_it(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + """
+selectNode('a'); const opened = rail();
+$('rail-close').click(); const closed = rail();
+selectNode('b'); $('overlay').open = true;
+document.dispatch('keydown', {key: 'Escape'}); const dialog = rail();
+$('overlay').open = false;
+$('search').value = 'zz'; searchQuery = 'zz';
+document.dispatch('keydown', {key: 'Escape'}); const searchFirst = rail();
+document.dispatch('keydown', {key: 'Escape'}); const escaped = rail();
+console.log(JSON.stringify({opened, closed, dialog, searchFirst, escaped, selected: selectedId}));
+""")
+        self.assertFalse(output['opened']['hidden'])
+        self.assertIn('rail-open', output['opened']['main'])
+        self.assertTrue(output['closed']['hidden'])
+        self.assertFalse(output['dialog']['hidden'])
+        self.assertFalse(output['searchFirst']['hidden'])
+        self.assertTrue(output['escaped']['hidden'])
+        self.assertIsNone(output['selected'])
+
+    def test_narrow_width_rail_is_overlay(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + """
+var window = {innerWidth: 768};
+selectNode('a'); const narrow = rail();
+$('rail-backdrop').click(); const closed = rail();
+window.innerWidth = 1200; selectNode('a');
+console.log(JSON.stringify({narrow, closed, wide: rail(), width: $('map-scroll').clientWidth}));
+""")
+        self.assertIn('rail-overlay', output['narrow']['main'])
+        self.assertFalse(output['narrow']['backdrop'])
+        self.assertEqual(output['width'], 1200)
+        self.assertTrue(output['closed']['hidden'])
+        self.assertNotIn('rail-overlay', output['wide']['main'])
+        self.assertTrue(output['wide']['backdrop'])
+
+    def test_narrow_header_wraps_search_onto_second_line(self):
+        page = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        header = re.search(r'<header>(.*?)</header>', page, re.DOTALL).group(1)
+        first, second = header.split('<div class="header-tools">')
+        self.assertIn('<h1>', first)
+        self.assertIn('id="status"', first)
+        self.assertIn('id="search"', second)
+        self.assertIn('id="legend-toggle"', second)
+        media = re.search(r'@media \(max-width: 699px\) \{(.*?)\n\}', page, re.DOTALL).group(1)
+        self.assertRegex(media, r'\.header-main \{[^}]*flex: 1 1 100%')
+        self.assertRegex(media, r'header \{[^}]*flex-wrap: wrap')
 
 
 if __name__ == "__main__":

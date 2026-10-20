@@ -16,10 +16,24 @@ h1 { font-size: 18px; margin: 0; font-weight: 650; }
 #status { color: #a0a8be; font-size: 12px; }
 #status button { background: none; border: 0; padding: 0 2px; color: inherit; font: inherit; cursor: pointer; text-decoration: underline dotted; }
 #status button[aria-pressed=true] { color: #fff; text-decoration: underline; }
-main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; min-height: 0; }
+main { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; position: relative; }
+main.rail-open { grid-template-columns: minmax(0, 1fr) 320px; }
+main.rail-open.rail-overlay { grid-template-columns: minmax(0, 1fr); }
+#rail-backdrop { position: fixed; inset: 0; background: #05070b99; z-index: 9; }
+#rail-close { position: absolute; top: 8px; right: 10px; padding: 2px 9px; line-height: 1.2; }
+main.rail-overlay #rail { position: fixed; top: 0; right: 0; bottom: 0; width: 90%; z-index: 10; box-shadow: -8px 0 24px #000a; }
+.header-main, .header-tools { display: flex; align-items: center; gap: 20px; min-width: 0; }
+.header-tools { margin-left: auto; }
+@media (max-width: 699px) {
+  body { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  header { flex-wrap: wrap; gap: 6px 20px; padding: 8px 14px; }
+  .header-main { flex: 1 1 100%; flex-wrap: wrap; }
+  .header-tools { flex: 1 1 100%; margin-left: 0; }
+  header input#search { margin-left: 0; flex: 1 1 auto; width: auto; min-width: 0; }
+}
 #map-scroll { overflow: auto; position: relative; }
 #map { display: block; min-width: 100%; min-height: 100%; }
-#rail { overflow: auto; padding: 20px; border-left: 1px solid #303548; background: #161924; }
+#rail { position: relative; overflow: auto; padding: 20px; padding-top: 34px; border-left: 1px solid #303548; background: #161924; }
 h2 { font-size: 17px; line-height: 1.4; margin: 0 0 10px; overflow-wrap: anywhere; }
 p { margin: 8px 0; }
 .muted, dt { color: #a0a8be; }
@@ -114,11 +128,13 @@ input[type=checkbox] { width: auto; }
 </style>
 </head>
 <body>
-<header><h1>Fleet map</h1><span id="status" role="status">Connecting…</span><input id="search" type="search" placeholder="Find a session" aria-label="Find a session" autocomplete="off"><button id="legend-toggle" type="button" aria-label="Toggle legend" aria-controls="legend" aria-expanded="false">?</button></header>
+<header><div class="header-main"><h1>Fleet map</h1><span id="status" role="status">Connecting…</span></div><div class="header-tools"><input id="search" type="search" placeholder="Find a session" aria-label="Find a session" autocomplete="off"><button id="legend-toggle" type="button" aria-label="Toggle legend" aria-controls="legend" aria-expanded="false">?</button></div></header>
 <nav id="decisions" aria-label="Decision strip"></nav>
-<main>
+<main id="main">
   <div id="map-scroll"><svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="Agent sessions grouped by host and cluster"><defs><pattern id="stalled-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#f3d18a" stroke-width="2"/></pattern></defs><g id="regions"></g><g id="edges" pointer-events="none"></g><g id="clusters"></g></svg></div>
-  <aside id="rail" aria-label="Session details">
+  <div id="rail-backdrop" hidden></div>
+  <aside id="rail" aria-label="Session details" hidden>
+      <button id="rail-close" type="button" aria-label="Close details">×</button>
       <div id="decision-slot"></div>
       <div id="action-error" class="error" role="alert" hidden></div>
       <p id="action-status" class="muted" role="status"></p>
@@ -663,6 +679,8 @@ function setSearchQuery(value) {
   render();
   renderStatus();
 }
+$('rail-close').addEventListener('click', closeRail);
+$('rail-backdrop').addEventListener('click', closeRail);
 $('search').addEventListener('input', event => setSearchQuery(event.target.value));
 document.addEventListener('keydown', event => {
   const active = document.activeElement, tag = String(active?.tagName || '').toLowerCase();
@@ -674,6 +692,8 @@ document.addEventListener('keydown', event => {
     $('search').value = '';
     setSearchQuery('');
     if (active === $('search')) $('search').blur();
+  } else if (event.key === 'Escape' && !$('overlay').open && railOpen) {
+    closeRail();
   }
 });
 function setStateFilter(state) {
@@ -798,7 +818,21 @@ function paintFocus() {
     if (nodes.has(id)) paintNode(nodes.get(id), view);
   drawEdges();
 }
+let railOpen = false;
+function viewportWidth() { return typeof window !== 'undefined' && window.innerWidth ? window.innerWidth : 1200; }
+function applyRail() {
+  const overlay = viewportWidth() < 1000;
+  $('rail').hidden = !railOpen;
+  $('rail-backdrop').hidden = !(railOpen && overlay);
+  $('main').className = (railOpen ? 'rail-open' : '') + (overlay ? ' rail-overlay' : '');
+}
+function openRail() { railOpen = true; applyRail(); }
+function closeRail() {
+  railOpen = false; selectedId = null; selectedCluster = null; selectedContext = null;
+  render(); paintFocus(); renderRail();
+}
 function render() {
+  applyRail();
   nodes = new Map(snapshot.nodes.map(node => [node.id, node]));
   if (!nodes.has(hoveredId)) hoveredId = null;
   for (const region of regions.values()) region.group.style.display = 'none';
@@ -854,7 +888,7 @@ function render() {
 }
 function selectNode(id) {
   if (!nodes.has(id)) return;
-  selectedId = id;
+  selectedId = id; railOpen = true;
   selectedCluster = null;
   selectedContext = null;
   assignmentChoices = '';
@@ -866,7 +900,7 @@ function selectNode(id) {
 }
 function selectCluster(id) {
   if (!clusters.has(id)) return;
-  selectedCluster = id;
+  selectedCluster = id; railOpen = true;
   selectedId = null;
   selectedContext = null;
   assignmentChoices = '';
@@ -880,6 +914,7 @@ function openRunPlan(runId) {
   return runAction(async () => { await request('/api/open-plan', {run: runId}); });
 }
 function renderRail() {
+  applyRail();
   $('decision-slot').replaceChildren();
   const cluster = clusters.get(selectedCluster);
   if (cluster) {
@@ -1093,7 +1128,7 @@ function miniNode(id) {
   miniViews.push([id, view]); return wrapper;
 }
 function showContext(context, nodeId = null) {
-  selectedCluster = null; selectedContext = context; selectedId = nodeId; assignmentChoices = '';
+  railOpen = true; selectedCluster = null; selectedContext = context; selectedId = nodeId; assignmentChoices = '';
   $('rail').scrollTop = 0; renderRail();
   paintFocus();
 }
@@ -1101,7 +1136,7 @@ function openRun(runId, context = {run: runId}) {
   const run = snapshot.runs?.[runId]; if (!run) return;
   const info = snapshot.clusters?.[run.title]; if (!info) return;
   const id = JSON.stringify([info.matrix_host, run.title]);
-  selectedCluster = null;
+  railOpen = true; selectedCluster = null;
   expanded.add(id); selectedContext = context; selectedId = run.chief_node;
   render(); clusters.get(id)?.group.scrollIntoView({block: 'nearest', inline: 'nearest'});
   $('rail').scrollTop = 0;
