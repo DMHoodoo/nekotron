@@ -10,6 +10,7 @@
 :root { color-scheme: dark; font: 14px/1.5 system-ui, sans-serif; background: #10121a; color: #e4e7f0; }
 * { box-sizing: border-box; }
 body { margin: 0; height: 100vh; display: grid; grid-template-rows: 58px auto minmax(0, 1fr) auto; }
+header input#search { margin-left: auto; background: #1b1f2c; border: 1px solid #303548; border-radius: 6px; color: inherit; font: inherit; font-size: 12px; padding: 4px 8px; width: 180px; }
 header { display: flex; align-items: center; gap: 20px; padding: 0 22px; border-bottom: 1px solid #303548; }
 h1 { font-size: 18px; margin: 0; font-weight: 650; }
 #status { color: #a0a8be; font-size: 12px; }
@@ -111,7 +112,7 @@ input[type=checkbox] { width: auto; }
 </style>
 </head>
 <body>
-<header><h1>Fleet map</h1><span id="status" role="status">Connecting…</span><button id="legend-toggle" type="button" aria-label="Toggle legend" aria-controls="legend" aria-expanded="false">?</button></header>
+<header><h1>Fleet map</h1><span id="status" role="status">Connecting…</span><input id="search" type="search" placeholder="Find a session" aria-label="Find a session" autocomplete="off"><button id="legend-toggle" type="button" aria-label="Toggle legend" aria-controls="legend" aria-expanded="false">?</button></header>
 <nav id="decisions" aria-label="Decision strip"></nav>
 <main>
   <div id="map-scroll"><svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="Agent sessions grouped by host and cluster"><defs><pattern id="stalled-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#f3d18a" stroke-width="2"/></pattern></defs><g id="regions"></g><g id="edges" pointer-events="none"></g><g id="clusters"></g></svg></div>
@@ -214,7 +215,7 @@ const expanded = new Set(), unfolded = new Set(), foldChips = new Map();
 let selectedContext = null, selectedCluster = null, broadcastCluster = null, closeBatch = [];
 let overlayVersion = 0;
 let miniViews = [];
-let stateFilter = null;
+let stateFilter = null, searchQuery = '';
 let decisionSignature = '';
 
 function toggleLegend(open = $('legend').hidden) {
@@ -326,7 +327,15 @@ function foldable(node, now = Date.now() / 1000) {
   const stamps = [node.you_at, node.it_at].filter(stamp => stamp != null);
   return stamps.length > 0 && now - Math.max(...stamps) > 24 * 3600;
 }
-function isFolded(node) { return foldable(node) && !unfolded.has(clusterKey(node)); }
+function nodeMatches(node, query) {
+  const needle = String(query || '').trim().toLowerCase();
+  if (!needle) return true;
+  return ['title', 'purpose', 'doing', 'last_said', 'repo', 'branch']
+    .some(field => String(node[field] ?? '').toLowerCase().includes(needle));
+}
+function isFolded(node) {
+  return foldable(node) && !unfolded.has(clusterKey(node)) && !(searchQuery && nodeMatches(node, searchQuery));
+}
 function layoutFleet(hosts) {
   const ordered = [...snapshot.nodes].sort((a, b) => a.id.localeCompare(b.id));
   const viewport = $('map-scroll').clientWidth;
@@ -565,7 +574,28 @@ function paintFoldChips() {
   }
 }
 function nodeState(node) { return node.state === 'done' ? 'idle' : node.state; }
-function nodeDimmed(node) { return stateFilter !== null && nodeState(node) !== stateFilter; }
+function filtering() { return stateFilter !== null || searchQuery !== ''; }
+function nodeDimmed(node) {
+  return (stateFilter !== null && nodeState(node) !== stateFilter) || !nodeMatches(node, searchQuery);
+}
+function setSearchQuery(value) {
+  searchQuery = String(value || '').trim();
+  render();
+  renderStatus();
+}
+$('search').addEventListener('input', event => setSearchQuery(event.target.value));
+document.addEventListener('keydown', event => {
+  const active = document.activeElement, tag = String(active?.tagName || '').toLowerCase();
+  if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey &&
+      !['input', 'textarea', 'select'].includes(tag) && !active?.isContentEditable) {
+    event.preventDefault();
+    $('search').focus();
+  } else if (event.key === 'Escape' && (searchQuery || $('search').value)) {
+    $('search').value = '';
+    setSearchQuery('');
+    if (active === $('search')) $('search').blur();
+  }
+});
 function setStateFilter(state) {
   stateFilter = stateFilter === state ? null : state;
   renderStatus();
@@ -576,7 +606,7 @@ function setStateFilter(state) {
 }
 function dimClusters() {
   for (const cluster of clusters.values()) {
-    const dim = stateFilter !== null && !clusterItems(cluster).some(node => !nodeDimmed(node));
+    const dim = filtering() && !clusterItems(cluster).some(node => !nodeDimmed(node));
     const opacity = dim ? .25 : 1;
     cluster.background.style.opacity = opacity;
     cluster.content.style.opacity = opacity;
@@ -596,6 +626,7 @@ function renderStatus() {
     parts.push(document.createTextNode(' · '), button);
   }
   parts.push(document.createTextNode(` · updated ${age(snapshot.generated_at)} ago`));
+  if (searchQuery) parts.push(document.createTextNode(` · ${snapshot.nodes.filter(node => nodeMatches(node, searchQuery)).length} match`));
   $('status').replaceChildren(...parts);
 }
 function paintNode(node, view) {

@@ -43,6 +43,8 @@ class Element {
   setAttribute(name, value) { this.attributes[name] = value; }
   addEventListener(name, action) { this.listeners[name] = action; }
   click() { this.listeners.click?.(); }
+  focus() { document.activeElement = this; }
+  blur() { if (document.activeElement === this) document.activeElement = null; }
 }
 const elements = new Map();
 const $ = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
@@ -60,7 +62,10 @@ def run_page_js(source, storage="{}"):
     script = script.replace("const $ = id => document.getElementById(id);", "")
     return run_js(DOM + """
 document.createElementNS = (_, tag) => new Element(tag);
-document.addEventListener = () => {};
+document.listeners = {};
+document.activeElement = null;
+document.addEventListener = (name, action) => { (document.listeners[name] = document.listeners[name] || []).push(action); };
+document.dispatch = (name, event) => { event.preventDefault = event.preventDefault || (() => {}); (document.listeners[name] || []).forEach(action => action(event)); };
 document.visibilityState = 'hidden';
 const location = {search: ''};
 const ResizeObserver = class { observe() {} };
@@ -530,13 +535,13 @@ console.log(JSON.stringify([collapsed, {text: text(name), title: name.attributes
              'title': 'Review run: finish the pending delivery with all evidence'}])
 
     def test_node_label_wraps_to_two_lines_at_a_space(self):
-        output = run_js(DOM + page_functions('nodeState', 'nodeDimmed', 'paintNode') + """
+        output = run_js(DOM + page_functions('nodeState', 'nodeMatches', 'nodeDimmed', 'paintNode') + """
 const svg = (tag, attrs = {}) => {
   const element = new Element(tag);
   for (const [key, value] of Object.entries(attrs)) element.setAttribute(key, value);
   return element;
 };
-const stateFilter = null, selectedId = null, hoveredId = null, snapshot = {edges: []};
+const stateFilter = null, searchQuery = '', selectedId = null, hoveredId = null, snapshot = {edges: []};
 const colors = {idle: '#888'}, secondsSince = () => 0;
 const view = Object.fromEntries(['hatch', 'group', 'title', 'label', 'center',
   'rim', 'body', 'pulse', 'ring', 'badge'].map(key => [key, new Element()]));
@@ -1059,6 +1064,81 @@ console.log(JSON.stringify([
                 self.assertFalse(line.startswith(status), line)
             self.assertFalse(line.startswith(' ·'), line)
         self.assertTrue(output[1].startswith('55.0% free'), output[1])
+
+
+    SEARCH_FIXTURE = """
+const list = [
+  {id: 'n1', title: 'Fix PR 6897 flaky test', state: 'working', kind: 'claude', host: 'local', cluster: 'Box'},
+  {id: 'n2', title: 'Other', state: 'idle', kind: 'claude', host: 'local', cluster: 'Box', branch: 'main'},
+  {id: 'n3', title: 'Third', state: 'working', kind: 'claude', host: 'local', cluster: 'Box', last_said: 'Done'}];
+snapshot = {generated_at: Date.now() / 1000, hosts: [{name: 'local'}], clusters: {}, runs: {},
+  nodes: list, edges: []};
+$('map-scroll').clientWidth = 1200;
+render(); renderStatus();
+const statusText = () => text($('status')).replace(/\\s+/g, ' ').trim();
+const opacities = () => Object.fromEntries(snapshot.nodes.map(node =>
+  [node.id, nodeViews.get(node.id).group.style.opacity]));
+const type = value => { $('search').value = value; $('search').listeners.input({target: $('search')}); };
+"""
+
+    def test_search_dims_non_matches_and_counts(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+type('6897');
+console.log(JSON.stringify({opacities: opacities(), status: statusText(),
+  fields: ['main', 'DONE'].map(q => snapshot.nodes.filter(n => nodeMatches(n, q)).map(n => n.id))}));
+""")
+        self.assertEqual(output['opacities'], {'n1': 1, 'n2': 0.25, 'n3': 0.25})
+        self.assertTrue(output['status'].endswith('· 1 match'), output['status'])
+        self.assertEqual(output['fields'], [['n2'], ['n3']])
+
+    def test_search_unfolds_matching_folded_node(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([mk('a', 'idle', 30, {title: 'Fix PR 6897'}), mk('b', 'idle', 30), mk('c', 'idle', 30)]);
+const state = () => ({nodes: drawnNodes().length, chips: chips().length});
+const before = state();
+$('search').value = '6897'; $('search').listeners.input({target: $('search')});
+const during = Object.assign(state(), {opacity: drawnNodes()[0].style.opacity});
+const unfoldedKept = unfolded.size;
+$('search').value = ''; $('search').listeners.input({target: $('search')});
+console.log(JSON.stringify({before, during, after: state(), unfoldedKept}));
+""")
+        self.assertEqual(output['before'], {'nodes': 0, 'chips': 1})
+        self.assertEqual(output['during'], {'nodes': 1, 'opacity': 1, 'chips': 1})
+        self.assertEqual(output['after'], {'nodes': 0, 'chips': 1})
+
+    def test_slash_focuses_and_escape_clears(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+document.dispatch('keydown', {key: '/'});
+const focused = document.activeElement === $('search');
+const other = new Element('input'); document.activeElement = other;
+let prevented = false;
+document.dispatch('keydown', {key: '/', preventDefault: () => { prevented = true; }});
+const stolen = document.activeElement !== other;
+document.activeElement = null;
+type('6897');
+document.dispatch('keydown', {key: 'Escape'});
+console.log(JSON.stringify({focused, stolen, prevented, query: searchQuery, value: $('search').value,
+  opacities: opacities(), status: statusText()}));
+""")
+        self.assertTrue(output['focused'])
+        self.assertFalse(output['stolen'])
+        self.assertFalse(output['prevented'])
+        self.assertEqual(output['query'], '')
+        self.assertEqual(output['value'], '')
+        self.assertEqual(set(output['opacities'].values()), {1})
+        self.assertNotIn('match', output['status'])
+
+    def test_search_combines_with_state_filter(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+type('o');
+const query = opacities();
+setStateFilter('working');
+const both = opacities();
+console.log(JSON.stringify({query, both, status: statusText()}));
+""")
+        self.assertEqual(output['query'], {'n1': 0.25, 'n2': 1, 'n3': 1})
+        self.assertEqual(output['both'], {'n1': 0.25, 'n2': 0.25, 'n3': 1})
+        self.assertTrue(output['status'].endswith('· 2 match'), output['status'])
 
 
 if __name__ == "__main__":
