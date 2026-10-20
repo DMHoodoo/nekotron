@@ -11,6 +11,17 @@ import tempfile
 CONFIG_PATH = Path.home() / '.config' / 'nekotron' / 'fleet-map.json'
 
 
+def short_name(name: str) -> str:
+    """Summarize an inferred name without pasted context or commit hash tokens."""
+    cleaned = re.sub(r'^\s*<([A-Za-z_][\w:.-]*)\b[^>]*>(?:.*?</\1\s*>)?',
+                     '', name, count=1, flags=re.DOTALL)
+    words = [word for word in cleaned.split()
+             if not re.fullmatch(r'[0-9a-fA-F]{32,}', word)]
+    if not words:
+        return name
+    return ' '.join(words[:5]) + ('…' if len(words) > 5 else '')
+
+
 @dataclass
 class ClusterConfig:
     initiatives: list[tuple[str, list[str]]]

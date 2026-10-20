@@ -15,6 +15,34 @@ from fleetmap import clusters
 
 
 class InitiativeClusters(unittest.TestCase):
+    def test_short_name_takes_five_words_with_ellipsis(self):
+        self.assertEqual(clusters.short_name(
+            'Review PR 6869 under Engineering OS run 20261007'),
+            'Review PR 6869 under Engineering…')
+
+    def test_short_name_skips_pasted_tag_and_hash(self):
+        self.assertEqual(clusters.short_name(
+            '<pasted_content id="4e35">\n'
+            'Continue a review of c5a5627d657b67bb95d28fdf6d794f7d4dff9131 now'),
+            'Continue a review of now')
+
+    def test_short_name_skips_64_hex_orca_id(self):
+        self.assertEqual(clusters.short_name(
+            'Coordinated from '
+            'c5a5627d657b67bb95d28fdf6d794f7d4dff9131d3bbc61e2f4eb7e65e5d42d9 '
+            'for the PR 6869 review'),
+            'Coordinated from for the PR…')
+
+    def test_short_name_strips_closed_tag_and_preserves_empty_result(self):
+        self.assertEqual(clusters.short_name(
+            '<pasted_content>ignore this\ncontext</pasted_content> Continue now'),
+            'Continue now')
+        for name in ('', '<tag>', 'c5a5627d657b67bb95d28fdf6d794f7d4dff9131'):
+            with self.subTest(name=name):
+                self.assertEqual(clusters.short_name(name), name)
+        self.assertEqual(clusters.short_name('  One\t two\nthree four five  '),
+                         'One two three four five')
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory(prefix='fleetmap-clusters-')
         self.addCleanup(tmp.cleanup)

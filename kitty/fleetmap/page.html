@@ -13,6 +13,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: 58px auto mi
 header { display: flex; align-items: center; gap: 20px; padding: 0 22px; border-bottom: 1px solid #303548; }
 h1 { font-size: 18px; margin: 0; font-weight: 650; }
 #status { color: #a0a8be; font-size: 12px; }
+#legend-toggle { margin-left: auto; }
 main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; min-height: 0; }
 #map-scroll { overflow: auto; position: relative; }
 #map { display: block; min-width: 100%; min-height: 100%; }
@@ -53,6 +54,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospac
 .region-label { fill: #e4e7f0; font-size: 15px; font-weight: 650; }
 .cluster-label { fill: #bfc9e0; font-size: 12px; }
 .node-label { fill: #bfc6d9; font-size: 10px; pointer-events: none; }
+.edge-badge { fill: #e4e7f0; stroke: #161924; stroke-width: 4px; paint-order: stroke; font-size: 10px; font-weight: 650; pointer-events: none; }
 .node { cursor: pointer; outline: none; }
 .node .selection { stroke: transparent; }
 .node[aria-pressed="true"] .selection, .node:focus-visible .selection { stroke: #fff; }
@@ -62,13 +64,19 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospac
 .cluster-content { font-size: 12px; padding: 10px; overflow: auto; height: 100%; }
 .cluster-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .cluster-heading button { font-size: 12px; padding: 3px 6px; }
-.cluster-heading .cluster-toggle { font-weight: 650; font-size: 14px; }
-.stepper { display: flex; align-items: center; gap: 5px; margin-top: 6px; }
-.stepper span:first-child { width: 145px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stepper i { width: 8px; height: 8px; border-radius: 50%; border: 1px solid #77839e; }
+.cluster-heading .cluster-toggle, .cluster-name { font-weight: 650; font-size: 14px; }
+.cluster-name { cursor: pointer; }
+.cluster-name:hover { text-decoration: underline; }
+.cluster-name:focus-visible { outline: 2px solid #9dbdff; outline-offset: 2px; }
+.stepper { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.stepper span:first-child { flex-basis: 100%; }
+.stepper i { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; border: 1px solid #77839e; }
 .stepper i.reached { background: #4f8ef7; }
 .stepper i.current { outline: 2px solid #d2e1ff; outline-offset: 2px; }
 .cluster-summary { margin: 6px 0; color: #bfc6d9; }
+.slice-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; margin-top: 6px; }
+.slice-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slice-row .segments { grid-column: 1 / -1; }
 table { border-collapse: collapse; font-size: 11px; margin-top: 12px; width: 100%; }
 .matrix { min-width: 1130px; table-layout: fixed; }
 th, td { text-align: left; border: 1px solid #374058; padding: 8px; vertical-align: top; overflow-wrap: anywhere; }
@@ -93,7 +101,7 @@ input[type=checkbox] { width: auto; }
 </style>
 </head>
 <body>
-<header><h1>Fleet map</h1><span id="status" role="status">Connecting…</span></header>
+<header><h1>Fleet map</h1><span id="status" role="status">Connecting…</span><button id="legend-toggle" type="button" aria-label="Toggle legend" aria-controls="legend" aria-expanded="false">?</button></header>
 <nav id="decisions" aria-label="Decision strip"></nav>
 <main>
   <div id="map-scroll"><svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="Agent sessions grouped by host and cluster"><defs><pattern id="stalled-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#f3d18a" stroke-width="2"/></pattern></defs><g id="regions"></g><g id="edges" pointer-events="none"></g><g id="clusters"></g></svg></div>
@@ -139,7 +147,7 @@ input[type=checkbox] { width: auto; }
     </section>
   </aside>
 </main>
-<footer aria-label="Legend">
+<footer id="legend" aria-label="Legend" hidden>
   <strong>Legend</strong>
   <div id="legend-lines">
     <p><strong>States:</strong> <span class="swatch" style="background:#4f8ef7"></span>Working <span class="swatch" style="background:#4cc38a"></span>Done <span class="swatch" style="background:#f0803c"></span>Needs you (glow) <span class="swatch" style="background:#6b7394"></span>Idle.</p>
@@ -151,6 +159,7 @@ input[type=checkbox] { width: auto; }
     <p><strong>Dotted ring:</strong> Never addressed; 2px marks with 3px gaps.</p>
     <p><strong>Subagents:</strong> Radius 6, joined to a parent by a 20px line when space allows; overflow uses free grid slots with longer parent links.</p>
     <p><strong>Edge kinds:</strong> Solid = message, dashed = dispatch, thin gray = subagent.</p>
+    <p><strong>Traffic:</strong> Select or hover a node to see its message and dispatch edges. Other nodes show an edge count, capped at 9+.</p>
     <p><strong>Edge age:</strong> Full opacity under 10m; fades linearly to 25% at 60m, then stays at 25%.</p>
     <p><strong>Stepper:</strong> Seven dots: Goal, Design, Plan (readiness), Implementing, Review, Delivery, Accepted. Blue through current stage; outlined dot is current. Stage is not verified progress.</p>
     <p><strong>Package segments:</strong> Width S=1, M=2, L=3. Planned gray, assigned violet, running blue, returned teal, verified green, blocked orange. Only verified units count.</p>
@@ -184,18 +193,27 @@ const MIN_REGION = 420, CELL = 70, GAP = 16;
 let layoutSignature = '', layoutModeSignature = '';
 let regionOrder = [];
 let snapshot = {hosts: [], nodes: [], edges: []};
-let nodes = new Map(), selectedId = null, dialogNodeId = null, closeToken = null;
+let nodes = new Map(), selectedId = null, hoveredId = null, dialogNodeId = null, closeToken = null;
 let timer = null, pollSeconds = 3, loading = false, actionBusy = false;
 let gradientId = 0, assignmentChoices = '';
 const stages = ['goal', 'design', 'plan', 'implementing', 'review', 'delivery', 'accepted'];
 const stageLabels = ['Goal', 'Design', 'Plan (readiness)', 'Implementing', 'Review', 'Delivery', 'Accepted'];
 const packageColors = {planned: '#6b7394', assigned: '#8567b4', running: '#4f8ef7', returned: '#277c8b', verified: '#298456', blocked: '#a95b28'};
 const expanded = new Set();
-let selectedContext = null, broadcastCluster = null, closeBatch = [];
+let selectedContext = null, selectedCluster = null, broadcastCluster = null, closeBatch = [];
 let overlayVersion = 0;
 let miniViews = [];
 let decisionSignature = '';
 
+function toggleLegend(open = $('legend').hidden) {
+  $('legend').hidden = !open;
+  $('legend-toggle').setAttribute('aria-expanded', String(open));
+  try { localStorage['fleetmap.legend'] = open ? '1' : '0'; } catch (_) {}
+}
+let legendOpen = false;
+try { legendOpen = localStorage['fleetmap.legend'] === '1'; } catch (_) {}
+toggleLegend(legendOpen);
+$('legend-toggle').addEventListener('click', () => toggleLegend());
 
 function svg(tag, attributes = {}, text) {
   const element = document.createElementNS(NS, tag);
@@ -320,7 +338,7 @@ function layoutFleet(hosts) {
       const cluster = ensureCluster({host: host.name, cluster: JSON.parse(id)[1]});
       const run = clusterRun(cluster), open = expanded.has(id);
       const saved = cluster.geometry;
-      const headerHeight = saved?.headerHeight ?? (125 + (run?.rows.length || 0) * 24);
+      const headerHeight = saved?.headerHeight ?? (125 + (run?.rows.length || 0) * 60);
       const baseWidth = saved?.baseWidth ?? Math.min(available, Math.max(340, Math.ceil(Math.sqrt(items.length)) * CELL + 20));
       const clusterWidth = saved?.width ?? (open ? available : baseWidth);
       if (saved) { x = saved.left; y = saved.top; }
@@ -418,15 +436,20 @@ function makeNode(node, register = true) {
   const ringBackground = svg('circle', {r: 17, fill: 'none', stroke: 'rgba(127,127,127,.25)', 'stroke-width': 3});
   const ring = svg('circle', {r: 17, fill: 'none', 'stroke-width': 3, transform: 'rotate(-90)'});
   const label = svg('text', {y: 36, 'text-anchor': 'middle', class: 'node-label'});
+  const badge = svg('text', {x: small ? 10 : 16, y: small ? -9 : -13, 'text-anchor': 'middle', class: 'edge-badge'});
   // Decorative rings can cross a short parent attachment, but must not steal clicks.
   for (const decoration of [selection, ringBackground, ring, pulse]) decoration.setAttribute('pointer-events', 'none');
-  group.append(defs, title, hit, selection, ringBackground, ring, pulse, body, hatch, label);
+  group.append(defs, title, hit, selection, ringBackground, ring, pulse, body, hatch, label, badge);
   if (small) label.style.display = 'none';
   group.addEventListener('click', () => selectNode(node.id));
   group.addEventListener('keydown', event => {
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectNode(node.id); }
   });
-  const view = {group, title, center, rim, pulse, body, hatch, ring, label};
+  group.addEventListener('mouseenter', () => { hoveredId = node.id; paintFocus(); });
+  group.addEventListener('mouseleave', () => {
+    if (hoveredId === node.id) { hoveredId = null; paintFocus(); }
+  });
+  const view = {group, title, center, rim, pulse, body, hatch, ring, label, badge};
   if (register) nodeViews.set(node.id, view);
   return view;
 }
@@ -441,10 +464,23 @@ function updateNode(node) {
 function paintNode(node, view) {
   view.hatch.style.display = node.stalled ? '' : 'none';
   view.group.setAttribute('aria-pressed', String(selectedId === node.id));
-  const title = node.title || node.id;
+  const edgeCount = snapshot.edges.filter(edge => edge.kind !== 'subagent' &&
+    (edge.src === node.id || edge.dst === node.id)).length;
+  view.badge.textContent = edgeCount > 9 ? '9+' : String(edgeCount);
+  view.badge.style.display = !edgeCount || selectedId === node.id || hoveredId === node.id ? 'none' : '';
+  const title = node.title || node.purpose || node.id;
   view.group.setAttribute('aria-label', `${title}, ${node.state}, ${node.kind}`);
+  view.group.setAttribute('title', title);
   view.title.textContent = `${title}\n${node.purpose || node.doing || ''}`;
-  view.label.textContent = title.length > 11 ? `${title.slice(0, 10)}…` : title;
+  let split = title.lastIndexOf(' ', 11);
+  if (split < 1) split = title.slice(0, 22).indexOf(' ');
+  const lines = title.length > 11 && split > 0
+    ? [title.slice(0, split), title.slice(split + 1).trimStart()] : [title];
+  view.label.replaceChildren(...lines.map((line, index) => {
+    const span = svg('tspan', {x: 0, dy: index ? 12 : 0});
+    span.textContent = line.length > 11 ? `${line.slice(0, 10)}…` : line;
+    return span;
+  }));
   const color = colors[node.state] || colors.idle;
   const hours = (secondsSince(node.it_at) || 0) / 3600;
   const centerOpacity = 1 - .85 * Math.min(1, Math.max(0, (hours - 1) / 47));
@@ -473,18 +509,26 @@ function endpoint(id) {
 function drawEdges() {
   const fragment = document.createDocumentFragment();
   for (const edge of snapshot.edges) {
+    if (edge.kind !== 'subagent' && ![selectedId, hoveredId].some(id =>
+      id !== null && (edge.src === id || edge.dst === id))) continue;
     const src = endpoint(edge.src), dst = endpoint(edge.dst);
     if (!src || !dst) continue;
     const minutes = (secondsSince(edge.newest) ?? 3600) / 60;
     const opacity = 1 - .75 * Math.min(1, Math.max(0, (minutes - 10) / 50));
-    const line = svg('line', {x1: src.x, y1: src.y, x2: dst.x, y2: dst.y, stroke: edge.kind === 'subagent' ? '#9aa0b4' : '#7a9acb', 'stroke-width': edge.kind === 'subagent' ? 1 : 1.5, 'stroke-opacity': opacity});
+    const line = svg('line', {class: edge.kind === 'subagent' ? 'parent-link' : 'edge', x1: src.x, y1: src.y, x2: dst.x, y2: dst.y, stroke: edge.kind === 'subagent' ? '#9aa0b4' : '#7a9acb', 'stroke-width': edge.kind === 'subagent' ? 1 : 1.5, 'stroke-opacity': opacity});
     if (edge.kind === 'dispatch') line.setAttribute('stroke-dasharray', '6 4');
     fragment.append(line);
   }
   $('edges').replaceChildren(fragment);
 }
+function paintFocus() {
+  for (const [id, view] of [...nodeViews, ...miniViews])
+    if (nodes.has(id)) paintNode(nodes.get(id), view);
+  drawEdges();
+}
 function render() {
   nodes = new Map(snapshot.nodes.map(node => [node.id, node]));
+  if (!nodes.has(hoveredId)) hoveredId = null;
   for (const region of regions.values()) region.group.style.display = 'none';
   const hostMap = new Map(snapshot.hosts.map(host => [host.name, host]));
   for (const node of snapshot.nodes) if (!hostMap.has(node.host)) hostMap.set(node.host, {name: node.host});
@@ -533,16 +577,46 @@ function render() {
 function selectNode(id) {
   if (!nodes.has(id)) return;
   selectedId = id;
+  selectedCluster = null;
   selectedContext = null;
   assignmentChoices = '';
   $('action-error').hidden = true;
   $('action-status').textContent = '';
   $('rail').scrollTop = 0;
-  for (const [nodeId, view] of nodeViews) view.group.setAttribute('aria-pressed', String(id === nodeId));
-  for (const [nodeId, view] of miniViews) view.group.setAttribute('aria-pressed', String(id === nodeId));
+  paintFocus();
+  renderRail();
+}
+function selectCluster(id) {
+  if (!clusters.has(id)) return;
+  selectedCluster = id;
+  selectedId = null;
+  selectedContext = null;
+  assignmentChoices = '';
+  $('action-error').hidden = true;
+  $('action-status').textContent = '';
+  $('rail').scrollTop = 0;
+  paintFocus();
   renderRail();
 }
 function renderRail() {
+  const cluster = clusters.get(selectedCluster);
+  if (cluster) {
+    const info = clusterInfo(cluster), run = clusterRun(cluster);
+    $('empty').hidden = true;
+    $('details').hidden = true;
+    $('context-rail').hidden = false;
+    $('context-title').textContent = info.full_name || info.name || cluster.name;
+    const details = $('context-details'); details.replaceChildren();
+    detailLine(details, 'Host', cluster.host);
+    if (run) details.append(button('Open run plan', () => runAction(async () => {
+      await request('/api/open-plan', {run: run.run});
+    })));
+    if (info.waiting || info.stalled)
+      details.append(html('p', `waiting on you: ${info.waiting || 0} · ${info.stalled || 0} stalled`, 'cluster-summary'));
+    renderFallback(details, info);
+    details.append(button('Send to all', () => openBroadcast(cluster.name)));
+    return;
+  }
   renderContext();
   const node = nodes.get(selectedId);
   $('empty').hidden = Boolean(node) || Boolean(selectedContext);
@@ -712,14 +786,15 @@ function miniNode(id) {
   miniViews.push([id, view]); return wrapper;
 }
 function showContext(context, nodeId = null) {
-  selectedContext = context; selectedId = nodeId; assignmentChoices = '';
+  selectedCluster = null; selectedContext = context; selectedId = nodeId; assignmentChoices = '';
   $('rail').scrollTop = 0; renderRail();
-  for (const [id, view] of [...nodeViews, ...miniViews]) view.group.setAttribute('aria-pressed', String(id === nodeId));
+  paintFocus();
 }
 function openRun(runId) {
   const run = snapshot.runs?.[runId]; if (!run) return;
   const info = snapshot.clusters?.[run.title]; if (!info) return;
   const id = JSON.stringify([info.matrix_host, run.title]);
+  selectedCluster = null;
   expanded.add(id); selectedContext = {run: runId}; selectedId = run.chief_node;
   render(); clusters.get(id)?.group.scrollIntoView({block: 'nearest', inline: 'nearest'});
   $('rail').scrollTop = 0;
@@ -753,29 +828,43 @@ function renderCluster(cluster) {
   const priorViews = miniViews; miniViews = [];
   panel.replaceChildren();
   const heading = html('div', undefined, 'cluster-heading');
-  const toggle = button(`${open ? '▾' : '▸'} ${cluster.name}`, () => {
+  const toggle = button(open ? '▾' : '▸', () => {
     if (elsewhere) { openRun(run.run); return; }
     if (expanded.has(cluster.id)) expanded.delete(cluster.id); else expanded.add(cluster.id);
-    selectedContext = {cluster: cluster.name, run: run?.run}; selectedId = null;
     render();
   }, 'cluster-toggle');
+  toggle.setAttribute('aria-label', `${open ? 'Collapse' : 'Expand'} ${info.short_name || cluster.name}`);
   toggle.setAttribute('aria-expanded', String(open));
-  heading.append(toggle, button('Send to all', () => openBroadcast(cluster.name)));
-  if (run) heading.append(button('Open run plan', () => runAction(async () => {
-    await request('/api/open-plan', {run: run.run});
-    showContext({run: run.run});
-  })));
+  const name = html('span', info.short_name || cluster.name, 'cluster-name');
+  name.setAttribute('title', info.full_name || info.name || cluster.name);
+  name.setAttribute('role', 'button');
+  name.setAttribute('tabindex', '0');
+  name.addEventListener('click', () => selectCluster(cluster.id));
+  name.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault(); selectCluster(cluster.id);
+    }
+  });
+  heading.append(toggle, name);
   panel.append(heading);
-  panel.append(html('p', `waiting on you: ${info.waiting || 0} · ${info.stalled || 0} stalled`, 'cluster-summary'));
+  if (info.waiting || info.stalled)
+    panel.append(html('p', `waiting on you: ${info.waiting || 0} · ${info.stalled || 0} stalled`, 'cluster-summary'));
   renderFallback(panel, info);
   if (run) {
-    for (const row of run.rows) panel.append(stepper(row));
-    const proofs = html('div', `Proofs: ${run.proofs.map(proof => `${proof.id} ${proof.status}`).join(' · ') || '—'}`, 'cluster-summary');
-    panel.append(proofs);
+    panel.append(html('p', run.now, 'cluster-now'));
+    if (!open || elsewhere) {
+      for (const row of run.rows) {
+        const line = html('div', undefined, 'slice-row'), cell = row.cells.implementing;
+        const name = html('span', row.name); name.title = row.name;
+        line.append(name, html('span', `verified ${cell.verified_units} of ${cell.total_units} units`), segmentBar(run, row));
+        panel.append(line);
+      }
+    }
     if (elsewhere) panel.append(button(`matrix on ${info.matrix_host}`, () => openRun(run.run), 'link'));
     else if (open) {
       const chief = html('div', 'Chief: '); chief.append(miniNode(run.chief_node)); panel.append(chief);
       panel.append(matrixTable(run));
+      panel.append(html('p', `Proofs: ${run.proofs.map(proof => `${proof.id} ${proof.status}`).join(' · ') || '—'}`, 'matrix-proofs'));
     }
   } else {
     if (open) panel.append(ladderTable(cluster));
@@ -790,6 +879,16 @@ function gateContent(run, row, stage, gate) {
   if (gate.stale?.moved) fragment.append(button('evidence stale', () => showContext({run: run.run, row: row.id, gate: stage}), 'link stale'));
   return fragment;
 }
+function segmentBar(run, row) {
+  const segments = html('div', undefined, 'segments');
+  for (const segment of row.cells.implementing.segments) {
+    const part = button(segment.id, () => showContext({run: run.run, package: segment.id}, segment.node));
+    part.style.flex = `${segment.size} 1 0`; part.style.background = packageColors[segment.state];
+    part.title = `${segment.id}: ${segment.state}, ${['', 'S', 'M', 'L'][segment.size]} (${segment.size} units)`;
+    part.setAttribute('aria-label', part.title); segments.append(part);
+  }
+  return segments;
+}
 function matrixTable(run) {
   const table = html('table', undefined, 'matrix'); table.setAttribute('aria-label', `${run.title} gate matrix`);
   const head = html('thead'), labels = html('tr');
@@ -797,19 +896,12 @@ function matrixTable(run) {
   head.append(labels); table.append(head);
   const body = html('tbody');
   for (const row of run.rows) {
-    const tr = html('tr'); tr.append(html('th', row.name));
+    const tr = html('tr'), slice = html('th'); slice.append(stepper(row)); tr.append(slice);
     for (const stage of stages) {
       const cell = row.cells[stage], td = html('td');
       if (stage === 'implementing') {
         td.append(html('div', `${cell.verified_units}/${cell.total_units} verified units`));
-        const segments = html('div', undefined, 'segments');
-        for (const segment of cell.segments) {
-          const part = button(segment.id, () => showContext({run: run.run, package: segment.id}, segment.node));
-          part.style.flex = `${segment.size} 1 0`; part.style.background = packageColors[segment.state];
-          part.title = `${segment.id}: ${segment.state}, ${['', 'S', 'M', 'L'][segment.size]} (${segment.size} units)`;
-          part.setAttribute('aria-label', part.title); segments.append(part);
-        }
-        td.append(segments);
+        td.append(segmentBar(run, row));
       } else if (stage === 'review') {
         for (const chip of cell.chips) {
           const badge = html('div', undefined, 'chip'); badge.append(html('div', chip.id), gateContent(run, row, chip.id, chip)); td.append(badge);

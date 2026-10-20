@@ -9,7 +9,7 @@ import threading
 import time
 
 import fleet_tmux
-from .clusters import CONFIG_PATH, cluster_for, load, stage_for
+from .clusters import CONFIG_PATH, cluster_for, load, short_name, stage_for
 from .edges import Edge, Resolver, build_edges
 from .ladder import Ladder, never_prompted
 from .matrix import build_matrix, derive_stage
@@ -246,11 +246,20 @@ class Collector:
         projections = [p for p in projections if p.run in orca_runs]
         by_run = {p.run: p for p in projections}
         matrices, bindings, clusters = {}, {}, {}
+        initiative_names = ({name for name, _ in config.initiatives}
+                            | set(config.assign.values())
+                            | {project['name'] for project in config.projects}
+                            | {p.title for p in projections})
         with self._slow_lock:
             slow = self._slow
 
-        def cluster_record(name):
-            return clusters.setdefault(name, dict(name=name, run=None, matrix_host=None,
+        def cluster_record(name, full_name=None):
+            # Keep the legacy grouping key separate from the untruncated display source.
+            full_name = name if full_name is None else full_name
+            return clusters.setdefault(name, dict(name=name, full_name=full_name,
+                                                  short_name=(name if name in initiative_names
+                                                              else short_name(full_name)),
+                                                  run=None, matrix_host=None,
                                                   waiting=0, stalled=0, notes=[], fallbacks=[]))
 
         for p in projections:
@@ -292,7 +301,7 @@ class Collector:
                 name = cluster_for('', run_objective=run['objective'], title='', purpose=None,
                                    worktree='', branch='', config=config)
                 reason = rejected.get(run_id + '.json', 'projection v1, Chief must re-render')
-                record = cluster_record(name)
+                record = cluster_record(name, full_name=run['objective'])
                 record['notes'].append(reason)
                 record['fallbacks'].append(dict(run=run_id, now=run['objective'], note=reason))
                 if record['run'] not in matrices:

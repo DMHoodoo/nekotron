@@ -91,6 +91,18 @@ class GateMatrix(unittest.TestCase):
                                    'at': '2026-10-19', 'ref': 'tests.md', 'stale': None})
         self.assertEqual(chips[3]['verdict'], 'pass')
 
+    def test_implementing_cell_reports_total_units(self):
+        matrix = self.build(
+            packages=[package('P00', 'S'), package('P01', 'M', 'verified'),
+                      package('P02', 'L')],
+            slices=[slice_row('1', packages=['P00', 'P01', 'P02']), slice_row('2')])
+        implementing = matrix['rows'][0]['cells']['implementing']
+        self.assertEqual(implementing['verified_units'], 2)
+        self.assertEqual(implementing['total_units'], 6)
+        empty = matrix['rows'][1]['cells']['implementing']
+        self.assertEqual(empty['verified_units'], 0)
+        self.assertEqual(empty['total_units'], 0)
+
     def test_verified_units_only_count_verified(self):
         row = self.build(packages=[package('P00', 'S', 'returned'),
                                    package('P01', 'M', 'verified')],
