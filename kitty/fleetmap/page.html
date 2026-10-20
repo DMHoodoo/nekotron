@@ -87,6 +87,7 @@ th { color: #bfc9e0; }
 .live-node { display: inline-flex; flex-direction: column; align-items: center; width: 66px; vertical-align: top; }
 .live-node span { font-size: 10px; text-align: center; overflow-wrap: anywhere; }
 input[type=checkbox] { width: auto; }
+#overlay-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 #context-details { white-space: pre-wrap; overflow-wrap: anywhere; }
 #context-rail { margin-bottom: 20px; }
 </style>
@@ -124,9 +125,9 @@ input[type=checkbox] { width: auto; }
       </div>
       <p id="pin-note" class="muted"></p>
       <form id="promote-form">
-        <h2>Make a slice</h2>
-        <label for="project-name">Project</label><input id="project-name" required maxlength="200">
-        <label for="slice-name">Slice</label><input id="slice-name" required maxlength="200">
+        <h2 id="promotion-title">Make a slice</h2>
+        <div id="slice-identity"><label for="project-name">Project</label><input id="project-name" required maxlength="200">
+        <label for="slice-name">Slice</label><input id="slice-name" required maxlength="200"></div>
         <label for="slice-stage">Stage</label><select id="slice-stage"><option value="goal">Goal</option><option value="design">Design</option><option value="plan">Plan (readiness)</option><option value="implementing">Implementing</option><option value="review">Review</option><option value="delivery">Delivery</option><option value="accepted">Accepted</option></select>
         <button type="submit">Save slice / stage</button>
       </form>
@@ -191,6 +192,7 @@ const stageLabels = ['Goal', 'Design', 'Plan (readiness)', 'Implementing', 'Revi
 const packageColors = {planned: '#6b7394', assigned: '#8567b4', running: '#4f8ef7', returned: '#277c8b', verified: '#298456', blocked: '#a95b28'};
 const expanded = new Set();
 let selectedContext = null, broadcastCluster = null, closeBatch = [];
+let overlayVersion = 0;
 let miniViews = [];
 let decisionSignature = '';
 
@@ -521,11 +523,18 @@ function renderRail() {
   setText('node-title', node.title || node.id);
   $('pin-note').textContent = node.pin_overridden ? `Pin overridden: ${node.pin_overridden}. The run projection controls this session's cluster and stage.` : node.stage ? `Stage: ${node.stage}${node.run ? ' · run projection' : ' · hand-set'}` : '';
   $('promote-form').hidden = Boolean(snapshot.runs?.[node.run]);
-  if ($('promote-form').dataset.node !== node.id) {
-    $('project-name').value = node.stage ? node.cluster : '';
-    $('slice-name').value = node.title || '';
+  const editingStage = Boolean(node.stage);
+  $('slice-identity').hidden = editingStage;
+  $('project-name').disabled = editingStage;
+  $('slice-name').disabled = editingStage;
+  $('promotion-title').textContent = editingStage ? 'Edit current slice stage' : 'Make a slice';
+  $('promote-form').dataset.mode = editingStage ? 'stage' : 'promote';
+  const promotionIdentity = JSON.stringify([node.id, editingStage]);
+  if ($('promote-form').dataset.node !== promotionIdentity) {
+    $('project-name').value = '';
+    $('slice-name').value = editingStage ? '' : node.title || '';
     $('slice-stage').value = node.stage || 'goal';
-    $('promote-form').dataset.node = node.id;
+    $('promote-form').dataset.node = promotionIdentity;
   }
   setText('node-kind', `${node.kind === 'terminal' ? 'Terminal only' : node.kind === 'subagent' ? 'Subagent' : 'Claude session'} · ${node.state === 'attention' ? 'Needs you' : node.state} · ${node.cluster || 'Unsorted'}${node.subagents_total > 0 ? ` · ${node.subagents_total} subagents, ${node.subagents_shown} shown` : ''}`);
   for (const field of ['purpose', 'doing', 'repo', 'worktree', 'branch', 'model']) setText(field, node[field]);
@@ -570,6 +579,7 @@ function renderRail() {
   }
 }
 function openOverlay(title, nodeId) {
+  overlayVersion++;
   dialogNodeId = nodeId;
   $('overlay-title').textContent = title;
   $('overlay-text').textContent = '';
@@ -704,7 +714,7 @@ function stepper(row) {
 function renderCluster(cluster) {
   const panel = cluster.panel, info = clusterInfo(cluster), run = clusterRun(cluster);
   const open = expanded.has(cluster.id), elsewhere = run && info.matrix_host !== cluster.host;
-  const signature = JSON.stringify([info, run, open, clusterItems(cluster).map(node => [node.id, node.title, node.stage, node.ladder, node.you_at, node.purpose])]);
+  const signature = JSON.stringify([info, run, open, clusterItems(cluster).map(node => [node.id, node.title, node.stage, node.ladder, node.never_addressed, node.terminal, node.tmux, node.kitty_window])]);
   if (cluster.renderSignature === signature) return;
   cluster.renderSignature = signature;
   const priorViews = miniViews; miniViews = [];
@@ -778,7 +788,7 @@ function matrixTable(run) {
   }
   table.append(body); return table;
 }
-function isNeverPrompted(node) { return node.kind === 'claude' && node.you_at == null && !node.purpose; }
+function isNeverPrompted(node) { return node.kind === 'claude' && node.never_addressed === true; }
 function ladderTable(cluster) {
   const table = html('table'); table.setAttribute('aria-label', `${cluster.name} ladder`);
   const head = html('thead'), labels = html('tr');
@@ -808,10 +818,7 @@ function ladderTable(cluster) {
   if (cluster.name === 'Unsorted' && never.length) {
     const tr = html('tr'), td = html('td'); td.colSpan = 5;
     td.append(button(`never prompted, close all ${never.length}`, () => {
-      closeBatch = never.map(node => ({id: node.id, title: node.title || node.id, host: node.host}));
-      openOverlay(`Close all ${closeBatch.length} never-prompted sessions?`, null);
-      $('overlay-text').textContent = closeBatch.map(node => `${node.title} · ${node.host}`).join('\n') + '\nEach session will close; transcripts remain resumable.';
-      $('confirm-batch').hidden = false;
+      if (!actionBusy) prepareBatchClose(never);
     }, 'danger')); tr.append(td); body.append(tr);
   }
   table.append(body); return table;
@@ -878,22 +885,48 @@ $('broadcast-form').addEventListener('submit', event => {
     $('screen').textContent = JSON.stringify(result.results, null, 2); $('cancel-overlay').textContent = 'Done';
   });
 });
+async function prepareBatchClose(targets) {
+  closeBatch = [];
+  openOverlay(`Close all ${targets.length} never-prompted sessions?`, null);
+  const version = overlayVersion;
+  $('overlay-text').textContent = 'Loading every close destination…';
+  const descriptions = await Promise.all(targets.map(async node => {
+    // Keep full handles: the router's prose may abbreviate an Orca handle.
+    const destinations = [['terminal', node.terminal], ['tmux session', node.tmux], ['kitty window', node.kitty_window]]
+      .filter(([, target]) => target != null && target !== '').map(([kind, target]) => `${kind}: ${target}`).join(' · ');
+    const target = {id: node.id, label: `${node.title || node.id} · ${node.host} · ${destinations || 'destination unknown'}`};
+    try {
+      const result = await request(`/api/confirm?node=${encodeURIComponent(node.id)}`);
+      if (typeof result.text !== 'string' || !result.text.trim() || !destinations) throw new Error('Missing destination description');
+      return {...target, description: result.text};
+    } catch (error) { return {...target, error: `Confirmation unavailable: ${error.message}`}; }
+  }));
+  if (!$('overlay').open || overlayVersion !== version) return;
+  closeBatch = descriptions;
+  $('overlay-text').textContent = descriptions.map(node => `${node.label}\n${node.description || node.error}`).join('\n\n');
+  const ready = closeBatch.length > 0 && closeBatch.every(node => node.description);
+  $('confirm-batch').hidden = !ready;
+  if (!ready) $('overlay-text').textContent += '\n\nNo sessions will close until every destination is available. Cancel and retry.';
+}
 $('confirm-batch').addEventListener('click', () => {
   const batch = [...closeBatch];
+  if (!batch.length || !batch.every(node => node.description)) return;
   runAction(async () => {
     $('confirm-batch').hidden = true; $('screen').hidden = false; $('screen').textContent = '';
     for (const node of batch) {
-      try { await request('/api/action', {node: node.id, action: 'close'}); $('screen').textContent += `${node.title} · ${node.host}: closed\n`; }
-      catch (error) { $('screen').textContent += `${node.title} · ${node.host}: ${error.message}\n`; }
+      try { await request('/api/action', {node: node.id, action: 'close'}); $('screen').textContent += `${node.label}: closed\n`; }
+      catch (error) { $('screen').textContent += `${node.label}: ${error.message}\n`; }
     }
     $('cancel-overlay').textContent = 'Done'; await refresh();
   });
 });
 $('promote-form').addEventListener('submit', event => {
   event.preventDefault();
-  const body = {node: selectedId, project: $('project-name').value.trim(), slice: $('slice-name').value.trim(), stage: $('slice-stage').value};
+  const editingStage = $('promote-form').dataset.mode === 'stage';
+  const body = {node: selectedId, stage: $('slice-stage').value};
+  if (!editingStage) Object.assign(body, {project: $('project-name').value.trim(), slice: $('slice-name').value.trim()});
   runAction(async () => {
-    await request('/api/promote', body);
+    await request(editingStage ? '/api/stage' : '/api/promote', body);
     $('action-status').textContent = 'Slice and stage saved. The next snapshot will show the assignment.';
   });
 });

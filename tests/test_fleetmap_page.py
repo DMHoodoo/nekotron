@@ -21,6 +21,25 @@ class FleetMapPage(unittest.TestCase):
         self.assertIn("regionOrder.map(name => hostMap.get(name))", html)
         self.assertNotIn("a.name.localeCompare(b.name)", html)
 
+    def test_stage_edits_use_membership_route_without_slice_name(self):
+        html = (ROOT / "kitty/fleetmap/page.html").read_text()
+        self.assertIn("'/api/stage'", html)
+        self.assertIn("const body = {node: selectedId, stage:", html)
+        self.assertIn("$('slice-name').disabled = editingStage", html)
+
+    def test_close_all_uses_snapshot_human_prompt_flag(self):
+        html = (ROOT / "kitty/fleetmap/page.html").read_text()
+        self.assertIn("node.never_addressed === true", html)
+        self.assertNotIn("node.you_at == null && !node.purpose", html)
+
+    def test_batch_confirmation_loads_descriptions_and_full_targets(self):
+        html = (ROOT / "kitty/fleetmap/page.html").read_text()
+        self.assertIn("async function prepareBatchClose", html)
+        self.assertIn("request(`/api/confirm?node=${encodeURIComponent(node.id)}`)", html)
+        for value in ("node.terminal", "node.tmux", "node.kitty_window",
+                      "Confirmation unavailable", "closeBatch.every(node => node.description)"):
+            self.assertIn(value, html)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -131,6 +131,17 @@ def _project_slice(node_id, config):
     return None
 
 
+def update_stage(node_id: str, stage: str, path=CONFIG_PATH):
+    """Change the existing slice's stage without creating or moving membership."""
+    data = _read_config(path)
+    config = ClusterConfig([], {}, projects=data.get('projects', []))
+    membership = _project_slice(node_id, config)
+    if membership is None:
+        raise ValueError('Session is no longer in a project slice')
+    membership[1]['stage'] = stage
+    _write_config(data, path)
+
+
 def stage_for(node_id: str, config: ClusterConfig) -> str | None:
     """Return a hand-set stage; callers use a run projection's stage first."""
     membership = _project_slice(node_id, config)

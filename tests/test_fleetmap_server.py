@@ -214,6 +214,33 @@ class FleetMapHTTP(unittest.TestCase):
         self.assertEqual(config.assign[NODE['id']], 'Commissions')
         self.assertIsNone(stage_for(NODE['id'], config))
 
+    def test_stage_edit_preserves_multi_session_slice_after_revisit(self):
+        other = dict(NODE, id='local:sid:s2', title='Partner')
+        self.collector.value['nodes'] = [dict(NODE, title='Audit'), other]
+        self.wait_for_snapshot()
+        for node in (NODE, other):
+            self.assertTrue(self.json_request('/api/promote', body={
+                'node': node['id'], 'project': 'Core', 'slice': 'Root cause',
+                'stage': 'design'})['ok'])
+        # Revisit via snapshots, then update only stage using the selected node.
+        self.json_request('/api/state')
+        self.json_request('/api/state')
+        before = json.loads(self.collector.config_path.read_text())
+        self.assertEqual(self.json_request('/api/stage', body={
+            'node': NODE['id'], 'stage': 'review'}), {'ok': True})
+        after = json.loads(self.collector.config_path.read_text())
+        before['projects'][0]['slices'][0]['stage'] = 'review'
+        self.assertEqual(after, before)
+        self.assertEqual(stage_for(other['id'], load(self.collector.config_path)), 'review')
+
+    def test_stage_edit_never_creates_missing_membership(self):
+        self.wait_for_snapshot()
+        self.assertFalse(self.json_request('/api/stage', body={
+            'node': NODE['id'], 'stage': 'review'})['ok'])
+        self.assertFalse(self.collector.config_path.exists())
+        self.assertFalse(self.json_request('/api/stage', body={
+            'node': NODE['id'], 'stage': 'invalid'})['ok'])
+
     def test_promote_move_and_assign_share_one_write_lock(self):
         other = dict(NODE, id='local:sid:s2')
         self.collector.value['nodes'] = [NODE, other]

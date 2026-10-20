@@ -12,7 +12,7 @@ import time
 from urllib.parse import parse_qs, urlsplit
 
 from .actions import Actions
-from .clusters import CONFIG_PATH, move, promote, save_assign
+from .clusters import CONFIG_PATH, move, promote, save_assign, update_stage
 from .model import Collector
 from .orca import OrcaClient
 from .projection import STAGES
@@ -97,7 +97,7 @@ class _Handler(BaseHTTPRequestHandler):
         # Authentication precedes body reads and all side effects.
         fleet = self.server.fleet
         if self.route.path not in ('/api/action', '/api/assign', '/api/promote',
-                                   '/api/move', '/api/broadcast', '/api/open-plan'):
+                                   '/api/move', '/api/stage', '/api/broadcast', '/api/open-plan'):
             self._json({'ok': False, 'error': 'Not found'}, status=404)
             return
         try:
@@ -115,9 +115,10 @@ class _Handler(BaseHTTPRequestHandler):
                     args.append(text)
                 output = getattr(fleet.actions, action)(*args)
                 result = {'ok': True, 'output': output or ''}
-            elif self.route.path in ('/api/promote', '/api/move'):
+            elif self.route.path in ('/api/promote', '/api/move', '/api/stage'):
                 node = self._node(body.get('node'))
-                fields = ('project', 'slice', 'stage') if self.route.path == '/api/promote' else ('cluster',)
+                fields = {'/api/promote': ('project', 'slice', 'stage'),
+                          '/api/move': ('cluster',), '/api/stage': ('stage',)}[self.route.path]
                 for field in fields:
                     if not isinstance(body.get(field), str) or not body[field].strip():
                         raise ValueError(f'{field} must be a nonempty string')
@@ -127,6 +128,10 @@ class _Handler(BaseHTTPRequestHandler):
                     if self.route.path == '/api/promote':
                         promote(node['id'], body['project'], body['slice'], body['stage'],
                                 path=fleet.config_path)
+                    elif self.route.path == '/api/stage':
+                        if node.get('run') in fleet._snapshot_copy().get('runs', {}):
+                            raise ValueError('Stage is controlled by a run projection')
+                        update_stage(node['id'], body['stage'], path=fleet.config_path)
                     else:
                         move(node['id'], body['cluster'], path=fleet.config_path)
                 result = {'ok': True}
