@@ -103,7 +103,7 @@ class SnapshotAssembler(unittest.TestCase):
             'id', 'host', 'kind', 'parent', 'title', 'purpose', 'doing', 'last_said',
             'state', 'you_at', 'it_at', 'never_addressed', 'cluster', 'repo',
             'worktree', 'branch', 'hosting', 'model', 'ctx_pct', 'cost', 'moves',
-            'terminal', 'tmux', 'kitty_window'})
+            'terminal', 'tmux', 'kitty_window', 'subagents_total', 'subagents_shown'})
         self.assertEqual((node['title'], node['purpose'], node['doing'], node['last_said']),
                          ('Handoff scheduling run', 'Review PR 6869 under run 20261007',
                           'SendMessage: PR Review', 'Review complete. The checks passed.'))
@@ -111,6 +111,7 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertEqual((node['ctx_pct'], node['cost'], node['repo']), (42, 1.25, 'project'))
         self.assertEqual((node['host'], node['kind'], node['hosting'], node['terminal']),
                          ('local', 'claude', 'orca', 'term_a'))
+        self.assertEqual((node['subagents_total'], node['subagents_shown']), (0, 0))
         self.assertEqual(node['moves'][0], [NOW - 120, 'said: Review complete. The checks passed.'])
         self.assertEqual(json.loads(json.dumps(snap)), snap)
 
@@ -238,8 +239,14 @@ class SnapshotAssembler(unittest.TestCase):
         agent_path = self.base / 'agent.jsonl'
         shutil.copyfile(FIX, agent_path)
         self.local[0].subagents = [Subagent('a1', str(agent_path), NOW - 119),
-                                   Subagent('a2', str(agent_path), NOW - 120)]
+                                   Subagent('a2', str(agent_path), NOW - 120),
+                                   Subagent('a3', str(agent_path), NOW - 7200)]
         snap = self.collector().snapshot()
+        self.assertEqual([n['id'] for n in snap['nodes'] if n['kind'] == 'subagent'],
+                         ['local:agent:a1', 'local:agent:a2'])
+        self.assertEqual(len([e for e in snap['edges'] if e['kind'] == 'subagent']), 2)
+        parent = self.node(snap)
+        self.assertEqual((parent['subagents_total'], parent['subagents_shown']), (3, 2))
         for agent_id, state, mtime in (('a1', 'working', NOW - 119), ('a2', 'done', NOW - 120)):
             node = self.node(snap, 'local:agent:' + agent_id)
             self.assertEqual((node['kind'], node['parent'], node['state']),

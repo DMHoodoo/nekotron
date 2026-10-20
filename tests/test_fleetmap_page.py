@@ -13,7 +13,7 @@ class FleetMapPage(unittest.TestCase):
         html = (ROOT / "kitty/fleetmap/page.html").read_text()
         for value in ["/api/state", "/api/action", "/api/assign", "/api/confirm",
                       "X-Fleet-Key", "visibilitychange", "#4f8ef7", "#4cc38a",
-                      "#f0803c", "#6b7394", "Legend"]:
+                      "#f0803c", "#6b7394", "Legend", "subagents_shown"]:
             self.assertIn(value, html)
         self.assertNotIn("<script src=", html)
 

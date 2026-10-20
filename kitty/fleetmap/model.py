@@ -15,6 +15,9 @@ from .registry import list_local_sessions
 from .transcript import TranscriptFacts, read_transcript
 
 
+SUBAGENT_WINDOW_S = 3600
+
+
 def _match_terminals(sessions, terminals):
     """Reserve exact panes before applying a one-to-one cwd fallback."""
     matched = {}
@@ -208,8 +211,12 @@ class Collector:
             unaddressed_unbound = (facts.you_at is None and node_id not in config.assign
                                   and not objectives.get(handle))
             node['cluster'] = 'Unsorted' if unaddressed_unbound else cluster(node)
+            node.update(subagents_total=len(session.subagents), subagents_shown=0)
             nodes.append(node)
             for agent in session.subagents:
+                if now - agent.mtime > SUBAGENT_WINDOW_S:
+                    continue
+                node['subagents_shown'] += 1
                 child_id = f'local:agent:{agent.agent_id}'
                 child_facts = self._read(child_id, agent.transcript, dispatched=True)
                 facts_by_node[child_id] = child_facts

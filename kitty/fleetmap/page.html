@@ -372,7 +372,7 @@ function renderRail() {
     return;
   }
   setText('node-title', node.title || node.id);
-  setText('node-kind', `${node.kind === 'terminal' ? 'Terminal only' : node.kind === 'subagent' ? 'Subagent' : 'Claude session'} · ${node.state === 'attention' ? 'Needs you' : node.state} · ${node.cluster || 'Unsorted'}`);
+  setText('node-kind', `${node.kind === 'terminal' ? 'Terminal only' : node.kind === 'subagent' ? 'Subagent' : 'Claude session'} · ${node.state === 'attention' ? 'Needs you' : node.state} · ${node.cluster || 'Unsorted'}${node.subagents_total > 0 ? ` · ${node.subagents_total} subagents, ${node.subagents_shown} shown` : ''}`);
   for (const field of ['purpose', 'doing', 'repo', 'worktree', 'branch', 'model']) setText(field, node[field]);
   setText('you-age', node.never_addressed ? 'Never addressed' : node.you_at == null ? 'Unknown' : `${age(node.you_at)} ago`);
   setText('it-age', node.it_at == null ? 'Unknown' : `${age(node.it_at)} ago`);
