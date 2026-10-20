@@ -24,28 +24,16 @@ SUBAGENT_WINDOW_S = 3600
 
 
 def _match_terminals(sessions, terminals):
-    """Reserve exact panes before applying a one-to-one cwd fallback."""
+    """Only a unique process pane establishes actionable terminal ownership."""
     matched = {}
-    used = set()
     for session in sessions:
-        if session.orca_pane is None:
+        pane = session.orca_pane
+        if pane is None or sum(s.orca_pane == pane for s in sessions) != 1:
             continue
-        for terminal in terminals:
-            handle = terminal['handle']
-            if (handle not in used and session.orca_pane ==
-                    (terminal.get('tabId'), terminal.get('leafId'))):
-                matched[session.session_id] = terminal
-                used.add(handle)
-                break
-    for session in sessions:
-        if session.session_id in matched or not session.cwd:
-            continue
-        for terminal in terminals:
-            handle = terminal['handle']
-            if handle not in used and session.cwd == terminal.get('worktreePath'):
-                matched[session.session_id] = terminal
-                used.add(handle)
-                break
+        candidates = [terminal for terminal in terminals
+                      if pane == (terminal.get('tabId'), terminal.get('leafId'))]
+        if len(candidates) == 1:
+            matched[session.session_id] = candidates[0]
     return matched
 
 
@@ -399,7 +387,7 @@ class Collector:
             pane_matched = bool(terminal and session.orca_pane is not None and
                                 session.orca_pane == (terminal.get('tabId'), terminal.get('leafId')))
             hosting = ('orca' if pane_matched else 'tmux' if tmux_name else
-                       'kitty' if session.kitty_key else 'orca' if terminal else 'unknown')
+                       'kitty' if session.kitty_key else 'unknown')
             node.update(title=facts.title or session.name, worktree=root or worktree,
                         branch=terminal.get('branch') or branch,
                         repo=Path(root or session.cwd).name, hosting=hosting,
@@ -451,7 +439,9 @@ class Collector:
         resolver = Resolver(sessions, {h: r['terminals'] for h, r in data.items()},
                             {h: r['workers'] for h, r in data.items()},
                             {h: r['runs'] for h, r in data.items()})
-        # Resolver knows exact panes; teach it the assembler's cwd fallback too.
+        # Apply the same verified, unambiguous ownership to edge resolution.
+        resolver.terminals['local'] = {t['handle']: f'local:term:{t["handle"]}'
+                                       for t in data.get('local', {}).get('terminals', [])}
         for session_id, terminal in local_matches.items():
             resolver.terminals['local'][terminal['handle']] = f'local:sid:{session_id}'
         inbox = {}

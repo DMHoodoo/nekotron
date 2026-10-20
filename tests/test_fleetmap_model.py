@@ -538,8 +538,8 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertEqual(self.node(collector.snapshot())['kitty_pid'], 456)
         self.local[0] = replace(self.local[0], kitty_key=None)
         snap = collector.snapshot()
-        self.assertEqual(self.node(snap)['hosting'], 'orca')
-        self.assertEqual(len(snap['nodes']), 1)
+        self.assertEqual(self.node(snap)['hosting'], 'unknown')
+        self.assertEqual(len(snap['nodes']), 2)
         self.orca.put('terminal list', 'terminals', [])
         self.assertEqual(self.node(collector.snapshot())['hosting'], 'unknown')
 
@@ -567,14 +567,35 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertEqual(first['edges'], expected)
         self.assertEqual(second['edges'], expected)
 
-    def test_cwd_matched_terminal_edges_target_claude_node(self):
+    def test_same_cwd_terminal_edges_do_not_target_unverified_claude_node(self):
         self.local[0] = replace(self.local[0], orca_pane=None)
         self.orca.put('terminal list', 'terminals', [terminal(), terminal('term_b')])
         self.orca.put('orchestration inbox', 'messages',
                       [{'id': 'm1', 'from_handle': 'term_b', 'to_handle': 'term_a', 'created_at': 100}])
         self.assertEqual(self.collector().snapshot()['edges'],
-                         [{'src': 'local:term:term_b', 'dst': 'local:sid:s1',
+                         [{'src': 'local:term:term_b', 'dst': 'local:term:term_a',
                            'count': 1, 'newest': 100.0, 'kind': 'dispatch'}])
+
+    def test_same_cwd_independent_sessions_do_not_consume_orca_terminals(self):
+        self.local[0] = replace(self.local[0], orca_pane=None, kitty_key='111-7')
+        self.local.extend([replace(self.local[0], session_id='s2', kitty_key=None),
+                           replace(self.local[0], session_id='s3', kitty_key=None)])
+        self.orca.put('terminal list', 'terminals', [terminal(), terminal('term_codex')])
+        snap = self.collector().snapshot()
+        self.assertEqual(len(snap['nodes']), 5)
+        self.assertEqual([n['hosting'] for n in snap['nodes'][:3]], ['kitty', 'unknown', 'unknown'])
+        self.assertTrue(all(n['terminal'] is None for n in snap['nodes'][:3]))
+
+    def test_disappeared_or_ambiguous_pane_has_no_action_target(self):
+        for pane in (('old-tab', 'old-leaf'), ('tab', 'term_a')):
+            with self.subTest(pane=pane):
+                self.local[0] = replace(self.local[0], orca_pane=pane)
+                self.orca.put('terminal list', 'terminals',
+                              [terminal(), dict(terminal('other'), leafId='term_a')])
+                snap = self.collector().snapshot()
+                self.assertIsNone(self.node(snap)['terminal'])
+                self.assertEqual(self.node(snap)['hosting'], 'unknown')
+                self.assertEqual(len(snap['nodes']), 3)
 
     def test_git_root_and_branch_for_session_without_orca(self):
         repo = self.base / 'project-root'
