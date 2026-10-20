@@ -1198,6 +1198,16 @@ console.log(JSON.stringify({lines: hoverText(full, now).split('\\n'), legacy: ho
                                            'You: 2h · It: 5m', 'glow-core · fix/it'])
         self.assertEqual(output['legacy'], 'wt-dir · fix/it')
 
+    def test_rail_repo_row_shows_the_repository_name(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([mk('a', 'working', 1, {repository: 'glow-core', repo: 'lookdown'}), mk('b', 'working', 1, {repo: 'wt'})]);
+selectNode('a');
+const first = $('repo').textContent;
+selectNode('b');
+console.log(JSON.stringify([first, $('repo').textContent]));
+""")
+        self.assertEqual(output, ['glow-core', 'wt'])
+
     def test_hover_omits_missing_lines_and_never_shows_prompt(self):
         output = run_page_js(self.SEARCH_FIXTURE + """
 const now = 1000000;

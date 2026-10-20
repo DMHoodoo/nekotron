@@ -896,7 +896,8 @@ function renderRail() {
     $('promote-form').dataset.node = promotionIdentity;
   }
   setText('node-kind', `${node.kind === 'terminal' ? 'Terminal only' : node.kind === 'subagent' ? 'Subagent' : 'Claude session'} · ${node.cluster || 'Unsorted'}${node.subagents_total > 0 ? ` · ${node.subagents_total} subagents, ${node.subagents_shown} shown` : ''}`);
-  for (const field of ['purpose', 'doing', 'repo', 'worktree', 'branch', 'model']) setText(field, node[field]);
+  for (const field of ['purpose', 'doing', 'worktree', 'branch', 'model']) setText(field, node[field]);
+  setText('repo', node.repository || node.repo);
   setText('said', node.last_said);
   setText('you-age', node.never_addressed ? 'Never addressed' : node.you_at == null ? 'Unknown' : `${age(node.you_at)} ago`);
   setText('it-age', node.it_at == null ? 'Unknown' : `${age(node.it_at)} ago`);
