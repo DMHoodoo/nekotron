@@ -90,3 +90,19 @@
 - [ ] **Step 3: Implement** per Decisions 26 and 27; subagent parent links unchanged.
 - [ ] **Step 4: Run** both complete suites; expect pass.
 - [ ] **Step 5: Commit** `feat(declutter): legend behind a toggle; edges and badges on focus`.
+
+### Task 28: Fallback cluster content reserves its height
+
+**Files:**
+- Modify: `kitty/fleetmap/page.html` (`layoutFleet`, `renderCluster`, `renderFallback`)
+- Test: `tests/test_fleetmap_page.py`
+
+**Interfaces:**
+- Consumes: the collapsed cluster panel from Task 24 and the fallback records from Decision 24's `fallbacks`.
+- Produces: the node grid of a cluster starts below the panel's rendered content, whatever that content's height; a Now line longer than the cluster width wraps inside the panel and never overflows it.
+
+- [ ] **Step 1: Failing page tests**: `test_fallback_now_line_wraps_inside_panel` (a fallback cluster whose `now` is 200 characters has a panel whose text content is fully inside the panel element and no element with `overflow` outside it), `test_node_grid_starts_below_cluster_content` (with a three-line Now and a projection note, the first node's `y` is greater than the panel content's bottom; with an empty panel, the grid starts where it starts today).
+- [ ] **Step 2: Run**; expect FAIL.
+- [ ] **Step 3: Implement**: measure the panel content height after rendering (or compute it from the rendered line count) and feed it to `layoutFleet` as the cluster's content offset; wrap long lines with `overflow-wrap: anywhere` in the panel.
+- [ ] **Step 4: Run** both complete suites; expect pass, including the position stability tests.
+- [ ] **Step 5: Commit** `feat(declutter): node grid starts below cluster content`.
