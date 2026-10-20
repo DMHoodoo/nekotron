@@ -99,7 +99,11 @@ class Collector:
         self._activity = {}
         self._slow_lock = threading.Lock()
         self._slow_input = None
-        self._slow = {'ladders': {}, 'memory': {}, 'stale': {}}
+        self._slow = {'ladders': {}, 'memory': {}, 'stale': {}, 'hosts': {},
+                      'environments': [], 'environment_error': None, 'git': {}, 'tmux': {}}
+        self._local_input = ([], set(), [])
+        self._host_threads = {}
+        self._screens = {}
 
     @staticmethod
     def _gates(projection):
@@ -113,8 +117,89 @@ class Collector:
                 key = (projection.run, projection.mtime, row['id'], gate_id)
                 yield key, gate, branch
 
+    def _refresh_host(self, host, sessions):
+        """One bounded probe pass per host; publish independently of other hosts."""
+        with self._slow_lock:
+            cached = dict(self._slow['hosts'])
+        run_ids = {run['id'] for entry in cached.values()
+                   for run in entry.get('data', {}).get('runs', [])}
+        try:
+            with self.orca.poll_budget(5):
+                records = self._poll_host(host, sessions)
+                env = None if host == 'local' else host
+                if host == 'local':
+                    try:
+                        self.orca.remaining_timeout()
+                        environments = self.orca.environments()
+                        error = None
+                    except OrcaError as exc:
+                        environments, error = None, f'environments: {exc}'
+                    with self._slow_lock:
+                        if environments is not None:
+                            self._slow['environments'] = environments
+                        self._slow['environment_error'] = error
+                run_ids.update(run['id'] for run in records['runs'])
+                for run_id in sorted(run_ids):
+                    try:
+                        self.orca.remaining_timeout()
+                        records['workers'].extend(self.orca.workers(env=env, run_id=run_id))
+                    except OrcaError as error:
+                        records['degraded'].append(f'workers: {error}')
+                data = {name: entry['data'] for name, entry in cached.items() if 'data' in entry}
+                data[host] = records
+                workers = {w.get('agentTerminalHandle') for r in data.values() for w in r['workers']}
+                self._poll_screens(host, records, workers)
+            entry = dict(reachable=True, data=records)
+        except Exception as error:
+            entry = dict(reachable=False, error=str(error), degraded=[f'terminals: {error}'])
+        with self._slow_lock:
+            self._slow['hosts'] = dict(self._slow['hosts'], **{host: entry})
+
+    def _start_hosts(self, names, sessions):
+        started = []
+        for name in dict.fromkeys(names):
+            previous = self._host_threads.get(name)
+            if previous is not None and previous.is_alive():
+                continue
+            thread = threading.Thread(target=self._refresh_host, args=(name, sessions),
+                                      name='fleetmap-host-' + name, daemon=True)
+            self._host_threads[name] = thread
+            thread.start()
+            started.append(thread)
+        return started
+
+    def refresh_sources(self):
+        """Refresh host and checkout caches on the slow thread."""
+        with self._slow_lock:
+            sessions, paths, configured = self._local_input
+            environments = list(self._slow['environments'])
+            git = dict(self._slow['git'])
+        names = list(dict.fromkeys(['local'] + environments + configured))
+        deadline = time.monotonic() + 5
+        threads = self._start_hosts(names, sessions)
+        for thread in threads:
+            thread.join(max(0, deadline - time.monotonic()))
+        # Newly discovered saved environments get their own budget on this pass.
+        with self._slow_lock:
+            discovered = [name for name in self._slow['environments'] if name not in names]
+        deadline = time.monotonic() + 5
+        for thread in self._start_hosts(discovered, sessions):
+            thread.join(max(0, deadline - time.monotonic()))
+        # Oldest entries first prevents large fleets from starving later checkouts.
+        deadline = time.monotonic() + 5
+        for path in sorted(paths, key=lambda path: git.get(path, (0,))[0]):
+            now = time.monotonic()
+            if now >= deadline:
+                break
+            if path not in git or now - git[path][0] >= 60:
+                git[path] = (now, _git_metadata(path))
+        tmux = self.tmux_sessions() if sessions else {}
+        with self._slow_lock:
+            self._slow.update(git=git, tmux=tmux)
+
     def refresh_slow(self):
-        """Run only on the probe thread; publish a complete cache without I/O locks."""
+        """All Orca, screen, tmux and git probes live outside snapshot publication."""
+        self.refresh_sources()
         with self._slow_lock:
             inputs = self._slow_input
         if inputs is None:
@@ -129,7 +214,7 @@ class Collector:
             for key, gate, branch in self._gates(projection):
                 result['stale'][key] = self.stale.check(projection, gate, branch)
         with self._slow_lock:
-            self._slow = result
+            self._slow.update(result)
 
     def _read(self, node_id, path, *, dispatched=False):
         source = (path, dispatched)
@@ -293,6 +378,7 @@ class Collector:
 
         def optional(source, call, fallback, **kwargs):
             try:
+                self.orca.remaining_timeout()
                 return call(env=env, **kwargs)
             except OrcaError as error:
                 records['degraded'].append(f'{source}: {error}')
@@ -309,69 +395,58 @@ class Collector:
         records['screens'] = {}
         return records
 
-    def _poll_screens(self, data):
-        workers = {w.get('agentTerminalHandle') for records in data.values()
-                   for w in records['workers']}
-        for host, records in data.items():
-            used = {t['handle'] for t in records['matches'].values()}
-            for terminal in records['terminals']:
-                handle = terminal['handle']
-                if handle in used or not (terminal.get('agentIdentity') or handle in workers):
-                    continue
+    def _poll_screens(self, host, records, workers):
+        used = {t['handle'] for t in records['matches'].values()}
+        candidates = [t for t in records['terminals'] if t['handle'] not in used
+                      and (t.get('agentIdentity') or t['handle'] in workers)]
+        candidates.sort(key=lambda t: self._screens.get((host, t['handle']), (0, ''))[0])
+        for terminal in candidates:
+            handle = terminal['handle']
+            key = (host, handle)
+            stamp, screen = self._screens.get(key, (0, ''))
+            now = time.monotonic()
+            if now - stamp >= 30:
                 try:
+                    self.orca.remaining_timeout()
                     screen = self.orca.screen(handle, env=None if host == 'local' else host)
                 except OrcaError as error:
                     records['degraded'].append(f'screen: {error}')
-                    screen = ''
-                records['screens'][handle] = screen
+                else:
+                    self._screens[key] = (now, screen)
+            records['screens'][handle] = screen
 
     def snapshot(self) -> dict:
         now = time.time()
         config = load(self.config_path)
-        hosts = [dict(name='local', label='This Mac', reachable=True)]
-        data = {}
-        try:
-            environments = self.orca.environments()
-        except OrcaError as error:
-            hosts[0]['degraded'] = [f'environments: {error}']
-            environments = []
-        for name in dict.fromkeys(environments):
-            if name != 'local':
-                hosts.append(dict(name=name, label=name, reachable=True))
         sessions = self.sessions()
-        for host in hosts:
-            try:
-                data[host['name']] = self._poll_host(host['name'], sessions)
-            except OrcaError as error:
-                host.update(reachable=False, error=str(error))
-                host.setdefault('degraded', []).append(f'terminals: {error}')
-        # Unscoped worker-list inherits the launcher's run. A run and its
-        # dispatch records can live on different runtimes, so query every known
-        # run on each reachable host before resolving package dispatch IDs.
-        run_ids = dict.fromkeys(run['id'] for records in data.values() for run in records['runs'])
-        for name, records in data.items():
-            for run_id in run_ids:
-                try:
-                    records['workers'].extend(self.orca.workers(
-                        env=None if name == 'local' else name, run_id=run_id))
-                except OrcaError as error:
-                    records['degraded'].append(f'workers: {error}')
-        self._poll_screens(data)
-        for host in hosts:
-            degraded = data.get(host['name'], {}).get('degraded', [])
-            if degraded:
-                host.setdefault('degraded', []).extend(degraded)
-        tmux = self.tmux_sessions() if sessions else {}
+        with self._slow_lock:
+            slow = dict(self._slow)
+        names = list(dict.fromkeys(['local'] + slow['environments'] + list(config.hosts)))
+        hosts, data = [], {}
+        for name in names:
+            entry = slow['hosts'].get(name, {})
+            host = dict(name=name, label='This Mac' if name == 'local' else name,
+                        reachable=entry.get('reachable', False))
+            if 'data' in entry:
+                data[name] = entry['data']
+                if entry['data']['degraded']:
+                    host['degraded'] = list(entry['data']['degraded'])
+            else:
+                host['degraded'] = entry.get('degraded', ['Orca poll pending'])
+                if 'error' in entry:
+                    host['error'] = entry['error']
+            if name == 'local' and slow['environment_error']:
+                host.setdefault('degraded', []).append(slow['environment_error'])
+            hosts.append(host)
+        tmux = slow['tmux']
         workers = {worker.get('agentTerminalHandle') for records in data.values()
                    for worker in records['workers'] if worker.get('agentTerminalHandle')}
         nodes, subagent_edges, facts_by_node = [], [], {}
-        local_matches = data.get('local', {}).get('matches', {})
-        git_by_path = {}
+        local_matches = _match_terminals(sessions, data.get('local', {}).get('terminals', []))
+        git_by_path = slow['git']
 
         def local_git(path):
-            if path not in git_by_path:
-                git_by_path[path] = _git_metadata(path)
-            return git_by_path[path]
+            return git_by_path.get(path, (0, ('', '')))[1]
 
         for session in sessions:
             terminal = local_matches.get(session.session_id, {})
@@ -418,7 +493,8 @@ class Collector:
         for host, records in data.items():
             for terminal in records['terminals']:
                 handle = terminal['handle']
-                if handle not in records['screens']:
+                if (handle not in records['screens'] or (host == 'local' and
+                        any(t['handle'] == handle for t in local_matches.values()))):
                     continue
                 prefix = 'local' if host == 'local' else f'env:{host}'
                 node = _node(f'{prefix}:term:{handle}', host, 'terminal')
@@ -456,6 +532,10 @@ class Collector:
         edges = build_edges(resolver, facts_by_node, inbox, self.first_seen) + subagent_edges
         visible = {node['id'] for node in nodes}
         additions = self._enrich(nodes, hosts, data, resolver, config, now)
+        with self._slow_lock:
+            self._local_input = (list(sessions),
+                                 {n['worktree'] for n in nodes if n['host'] == 'local' and n['worktree']}
+                                 | {s.cwd for s in sessions if s.cwd}, list(config.hosts))
         return dict(generated_at=now, hosts=hosts, nodes=nodes,
                     edges=[asdict(edge) for edge in edges
                            if edge.src in visible and edge.dst in visible], **additions)

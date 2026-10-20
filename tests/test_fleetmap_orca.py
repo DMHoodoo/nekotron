@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -50,6 +51,17 @@ class OrcaCLI(unittest.TestCase):
 
     def client(self, result):
         return OrcaClient(binary=self.fake_orca(json.dumps({'ok': True, 'result': result})))
+
+    def test_host_budget_bounds_paginated_commands_cumulatively(self):
+        binary = self.tool('orca', sleep=0.15, stdout=json.dumps({
+            'ok': True, 'result': {'workers': [], 'page': {'nextCursor': 'more'}}}).encode())
+        client = OrcaClient(binary=binary, timeout=5)
+        started = time.monotonic()
+        with client.poll_budget(0.25):
+            with self.assertRaisesRegex(OrcaError, 'timeout|budget'):
+                client.workers()
+        self.assertLess(time.monotonic() - started, 0.6)
+        self.assertEqual(client.remaining_timeout(), 5)
 
     def test_call_adds_environment_and_json_flags(self):
         c = OrcaClient(binary=self.fake_orca('{"ok":true,"result":{"terminals":[]}}'))

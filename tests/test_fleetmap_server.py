@@ -89,7 +89,8 @@ class FleetMapHTTP(unittest.TestCase):
         self.start_server()
 
     def tearDown(self):
-        self.collector.block.set()
+        if hasattr(self.collector, 'block'):
+            self.collector.block.set()
         for instance, thread in self.running:
             instance.stop()
             thread.join(2)
@@ -369,6 +370,66 @@ class FleetMapHTTP(unittest.TestCase):
         self.wait_for_snapshot(456)
         self.assertFalse(release.is_set())
         release.set()
+
+    def test_local_transcript_publishes_on_cadence_during_twenty_slow_screens(self):
+        from fleetmap.model import Collector
+        from fleetmap.registry import LocalSession
+        from tests.test_fleetmap_model import FakeOrca, terminal
+        self.instance.stop()
+        transcript = self.base / 'live.jsonl'
+        transcript.write_text(json.dumps({'type': 'user', 'timestamp': '2026-10-19T10:00:00Z',
+                                          'message': {'content': 'Original purpose'}}) + '\n')
+        session = LocalSession(123, 's1', 'Live', '/work/project', 'busy', 0, 0,
+                               str(transcript), ('tab', 'term_a'), None, None, None, None, [])
+        orca = FakeOrca()
+        orca.put('terminal list', 'terminals', [terminal()] +
+                 [terminal('term_screen_' + str(i)) for i in range(20)])
+        entered, finished, blocked_host = threading.Event(), threading.Event(), threading.Event()
+        host_entered = threading.Event()
+        (self.base / 'config.json').write_text(json.dumps({'hosts': {'laptop2': {}}}))
+        self.addCleanup(blocked_host.set)
+        reads = []
+        original_terminals = orca.terminals
+        def terminals(env=None):
+            if env == 'laptop2':
+                host_entered.set()
+                blocked_host.wait(5)
+            return original_terminals(env)
+        def screen(handle, env=None):
+            entered.set()
+            time.sleep(0.2)
+            reads.append(handle)
+            if len(reads) == 20:
+                finished.set()
+            return 'cached screen'
+        orca.screen, orca.terminals = screen, terminals
+        self.collector = Collector(orca, config_path=self.base / 'config.json',
+                                   sessions=lambda: [session], tmux_sessions=lambda: {},
+                                   projection_dir=self.base / 'progress')
+        self.collector.ladder.rung = lambda *args: None
+        self.collector.memory.probe = lambda *args: None
+        started = time.monotonic()
+        self.start_server()  # Production three-second cadence.
+        self.assertTrue(entered.wait(1))
+        self.assertTrue(host_entered.wait(1))
+        first = self.json_request('/api/state')
+        self.assertEqual(first['nodes'][0]['purpose'], 'Original purpose')
+        with transcript.open('a') as output:
+            output.write(json.dumps({'type': 'assistant', 'timestamp': '2026-10-19T10:01:00Z',
+                                     'message': {'content': 'Fresh local facts'}}) + '\n')
+        deadline = started + 4.1
+        while time.monotonic() < deadline:
+            second = self.json_request('/api/state')
+            if second['nodes'][0]['last_said'] == 'Fresh local facts':
+                break
+            time.sleep(0.03)
+        self.assertEqual(second['nodes'][0]['last_said'], 'Fresh local facts')
+        self.assertGreater(second['generated_at'], first['generated_at'])
+        self.assertLess(time.monotonic() - started, 4.1)
+        self.assertLess(len(reads), 20, 'Screen work must still be in flight at publication')
+        self.assertFalse(blocked_host.is_set())
+        self.assertTrue(finished.wait(2))
+        blocked_host.set()
 
     def test_assign_writes_config(self):
         self.collector.config_path.write_text(json.dumps({'future': 42, 'assign': {'other': 'Keep'}}))

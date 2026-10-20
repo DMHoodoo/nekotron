@@ -224,6 +224,7 @@ class FleetMapServer:
 
     def _refresh(self):
         while not self._stopped.is_set():
+            deadline = time.monotonic() + self.poll_seconds
             try:
                 snapshot = self.collector.snapshot()
             except Exception:
@@ -233,7 +234,7 @@ class FleetMapServer:
                 with self._lock:
                     self._snapshot = snapshot
                 self._snapshot_ready.set()
-            if self._stopped.wait(self.poll_seconds):
+            if self._stopped.wait(max(0, deadline - time.monotonic())):
                 return
 
     def _refresh_slow(self):
@@ -244,7 +245,7 @@ class FleetMapServer:
         if refresh is None:
             return
         while not self._stopped.is_set():
-            deadline = time.monotonic() + 30
+            deadline = time.monotonic() + self.poll_seconds
             try:
                 refresh()
             except Exception:

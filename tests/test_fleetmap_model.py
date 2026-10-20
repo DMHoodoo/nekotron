@@ -15,6 +15,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'kitty'))
 from fleetmap.model import Collector
+from fleetmap.clusters import load
 from fleetmap.orca import OrcaClient, OrcaError
 from fleetmap.registry import LocalSession, Subagent
 from fleetmap.transcript import read_transcript
@@ -56,6 +57,16 @@ class FakeOrca(OrcaClient):
         self.responses[env, tuple(command.split())] = {key: records}
 
 
+class PrimedCollector(Collector):
+    """Fixture driver explicitly refreshes slow sources before asserting joined facts."""
+    def snapshot(self):
+        sessions = self.sessions()
+        self._local_input = (sessions, {s.cwd for s in sessions}, list(load(self.config_path).hosts))
+        self.refresh_sources()
+        self.refresh_sources()  # Cross-runtime run bindings can arrive on the next poll.
+        return super().snapshot()
+
+
 class SnapshotAssembler(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory(prefix='fleetmap-model-')
@@ -78,7 +89,7 @@ class SnapshotAssembler(unittest.TestCase):
 
     def collector(self, orca_errors=None):
         self.orca.errors.update(orca_errors or {})
-        return Collector(self.orca, config_path=self.config,
+        return PrimedCollector(self.orca, config_path=self.config,
                          sessions=lambda: self.local, tmux_sessions=lambda: self.tmux,
                          projection_dir=self.base / "progress")
 
@@ -95,6 +106,41 @@ class SnapshotAssembler(unittest.TestCase):
         self.orca.put('orchestration run-list', 'runs',
                       [{'id': value.run, 'objective': 'Legacy objective',
                         'coordinator_handle': value.chiefTerminal}])
+
+    def test_snapshot_never_calls_orca_git_or_tmux(self):
+        collector = Collector(self.orca, config_path=self.config, sessions=lambda: self.local,
+                              tmux_sessions=lambda: self.fail('foreground tmux probe'),
+                              projection_dir=self.base / 'progress')
+        with patch.object(self.orca, 'call', side_effect=AssertionError('foreground Orca')), \
+                patch('fleetmap.model._git_metadata', side_effect=AssertionError('foreground git')):
+            first = collector.snapshot()
+            with self.transcript.open('a') as output:
+                output.write(json.dumps({'type': 'assistant', 'timestamp': '2026-10-19T10:20:00Z', 'message': {'content': 'New local text'}}) + '\n')
+            second = collector.snapshot()
+        self.assertNotEqual(self.node(first)['last_said'], self.node(second)['last_said'])
+        self.assertEqual(self.node(second)['last_said'], 'New local text')
+
+    def test_screen_and_git_cache_ttls(self):
+        self.local.clear()
+        self.orca.put('terminal list', 'terminals', [terminal()])
+        collector = Collector(self.orca, config_path=self.config, sessions=lambda: [],
+                              tmux_sessions=lambda: {}, projection_dir=self.base / 'progress')
+        collector._local_input = ([], {'/work/project'}, [])
+        with patch.object(self.orca, 'screen', return_value='screen') as screen, \
+                patch('fleetmap.model._git_metadata', return_value=('/work/project', 'main')) as git:
+            collector.refresh_sources()
+            collector.refresh_sources()
+            self.assertEqual(screen.call_count, 1)
+            self.assertEqual(git.call_count, 1)
+            stamp, value = collector._screens[('local', 'term_a')]
+            collector._screens[('local', 'term_a')] = (stamp - 31, value)
+            collector.refresh_sources()
+            self.assertEqual(screen.call_count, 2)
+            self.assertEqual(git.call_count, 1)
+            stamp, value = collector._slow['git']['/work/project']
+            collector._slow['git']['/work/project'] = (stamp - 61, value)
+            collector.refresh_sources()
+            self.assertEqual(git.call_count, 2)
 
     def test_projection_joins_remote_chief_and_local_worker_over_pin(self):
         self.config.write_text(json.dumps({'assign': {'s1': 'Pinned'}, 'projects': [

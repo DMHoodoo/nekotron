@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 """The fleet map's subprocess boundary for local and remote Orca runtimes."""
+from contextlib import contextmanager
+import threading
+import time
 import json
 import shutil
 import subprocess
@@ -15,11 +18,27 @@ class OrcaClient:
         self.binary = (binary if binary is not None else
                        shutil.which('orca') or '/Applications/Orca.app/Contents/Resources/bin/orca')
         self.timeout = timeout
+        self._poll_context = threading.local()
+
+    @contextmanager
+    def poll_budget(self, seconds):
+        self._poll_context.deadline = time.monotonic() + seconds
+        try:
+            yield
+        finally:
+            self._poll_context.deadline = None
+
+    def remaining_timeout(self):
+        deadline = getattr(self._poll_context, 'deadline', None)
+        remaining = self.timeout if deadline is None else min(self.timeout, deadline - time.monotonic())
+        if remaining <= 0:
+            raise OrcaError('host poll budget exhausted')
+        return remaining
 
     def _run(self, args: list[str]) -> str:
         try:
             process = subprocess.run([self.binary, *args], capture_output=True,
-                                     timeout=self.timeout)
+                                     timeout=self.remaining_timeout())
         except subprocess.TimeoutExpired as error:
             raise OrcaError('timeout') from error
         except OSError as error:
