@@ -93,9 +93,11 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospac
 .decision-card { border: 1px solid #303548; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
 .cluster-content { font-size: 12px; padding: 10px; overflow: auto; overflow-wrap: anywhere; height: 100%; box-sizing: border-box; }
 .cluster-content p { margin: 6px 0; }
-.cluster-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cluster-heading { display: flex; align-items: flex-start; gap: 10px; }
 .cluster-heading button { font-size: 12px; padding: 3px 6px; }
-.cluster-heading .cluster-toggle, .cluster-name { font-weight: 650; font-size: 14px; }
+.cluster-heading .cluster-toggle, .cluster-heading .cluster-name { font-weight: 650; font-size: 14px; }
+.cluster-heading .cluster-toggle { flex: none; }
+.cluster-name { flex: 1 1 0; min-width: 0; padding-top: 3px; }
 .cluster-name { cursor: pointer; }
 .cluster-name:hover { text-decoration: underline; }
 .cluster-name:focus-visible { outline: 2px solid #9dbdff; outline-offset: 2px; }
@@ -350,10 +352,9 @@ function panelContentHeight(panel, width) {
   for (const child of panel.children || []) {
     const className = String(child.className || '');
     if (className.includes('cluster-heading')) {
-      // The 14px bold name wraps onto its own lines when it cannot sit beside the 26px toggle.
-      const name = nodeText((child.children || [])[1] || ''), available = width - 20;
-      const nameWidth = name.length * 8.5;
-      total += nameWidth + 10 + 26 <= available ? 32 : 32 + Math.ceil(nameWidth / available) * 20;
+      // The 14px bold name wraps beside the 26px toggle, never beneath it.
+      const name = nodeText((child.children || [])[1] || ''), available = width - 20 - 26 - 10;
+      total += Math.max(32, Math.ceil(name.length * 8.5 / available) * 20 + 12);
       continue;
     }
     // A slice row is one ellipsized line, a 6px margin and the 26px segment bar with 5px margins.
@@ -439,7 +440,7 @@ function layoutFleet(hosts) {
     region.badge.setAttribute('transform', `translate(${regionX + regionWidth - 124} 0)`);
     const groups = [...members.entries()].filter(([id]) => JSON.parse(id)[0] === host.name)
       .sort(([a], [b]) => a.localeCompare(b));
-    let x = 0, y = 82, rowHeight = 0;
+    let x = 0, y = 82;
     for (const [id, items] of groups) {
       const cluster = ensureCluster({host: host.name, cluster: JSON.parse(id)[1]});
       const run = clusterRun(cluster), open = expanded.has(id);
@@ -449,14 +450,21 @@ function layoutFleet(hosts) {
       const info = clusterInfo(cluster);
       if (items.length || (info.run && info.matrix_host === host.name) || clusterRetired(cluster).length) renderCluster(cluster);
       const contentHeight = open ? 0 : panelContentHeight(cluster.panel, clusterWidth);
-      const baseHeader = saved?.baseHeader ?? (125 + (run?.rows.length || 0) * 60);
-      const headerHeight = Math.max(baseHeader, contentHeight);
+      const headerHeight = contentHeight;
       if (saved) { x = saved.left; y = saved.baseTop; }
-      else if (!repack) {
-        x = 0;
-        y = Math.max(82, ...[...clusters.values()].filter(c => c.host === host.name && c.geometry)
-          .map(c => c.geometry.top + c.geometry.height + GAP));
-      } else if (x && x + clusterWidth > available) { x = 0; y += rowHeight + GAP; rowHeight = 0; }
+      else {
+        // Skyline packing: the box goes where its own width fits highest, whatever the neighbors' heights.
+        const placedBoxes = [...clusters.values()].filter(c => c.id !== id && c.host === host.name && c.geometry)
+          .map(c => c.geometry);
+        let best = null;
+        for (const candidate of [0, ...placedBoxes.map(box => box.left + box.width + GAP)]) {
+          if (candidate && candidate + clusterWidth > available) continue;
+          const top = Math.max(82, ...placedBoxes.filter(box => candidate < box.left + box.width && box.left < candidate + clusterWidth)
+            .map(box => box.top + box.height + GAP));
+          if (!best || top < best.y || (top === best.y && candidate < best.x)) best = {x: candidate, y: top};
+        }
+        ({x, y} = best);
+      }
       const columns = Math.max(1, Math.floor((baseWidth - 20) / CELL));
       // Slots belong to node IDs, so expansion never rearranges untouched grids.
       const chipId = 'fold:' + id, foldedNodes = items.filter(isFolded);
@@ -506,24 +514,26 @@ function layoutFleet(hosts) {
         if (node.kind !== 'subagent' || preserved.has(node.id)) continue;
         const parent = positions.get(node.parent), point = positions.get(node.id);
         if (!parent || parent.cluster !== id) continue;
+        // A parent circle is 22 px and a dot 9 px; keep a 4 px gap from every node and every other dot.
+        const reach = 22 + 9 + 4;
         for (let direction = 0; direction < 8; direction++) {
           const angle = direction * Math.PI / 4;
-          const candidate = {x: parent.x + 20 * Math.cos(angle), y: parent.y + 20 * Math.sin(angle)};
+          const candidate = {x: parent.x + reach * Math.cos(angle), y: parent.y + reach * Math.sin(angle)};
           if (candidate.x < 20 || candidate.x > baseWidth - 40 || candidate.y < 20) continue;
           if (sorted.some(other => {
-            if (other.id === node.id || other.id === node.parent) return false;
+            if (other.id === node.id) return false;
             const occupied = positions.get(other.id);
-            return Math.hypot(occupied.x - candidate.x, occupied.y - candidate.y) < 40;
+            return Math.hypot(occupied.x - candidate.x, occupied.y - candidate.y) <
+              (other.kind === 'subagent' ? 9 : 22) + 9 + 4 - 1e-6;
           })) continue;
           Object.assign(point, candidate); break;
         }
       }
       const bodyHeight = open ? (run ? 75 + run.rows.reduce((sum, row) => sum + Math.max(150, Math.ceil(row.live.length / 2) * 76 + 20), 0) : 85 + items.length * 78)
-        : Math.max(50, ...sorted.map(node => positions.get(node.id).y + 42));
-      const floorHeight = Math.max(saved?.floorHeight || 0, baseHeader + bodyHeight + 20);
-      const clusterHeight = Math.max(floorHeight, headerHeight + bodyHeight + 20);
-      cluster.geometry = {left: x, top: y, baseTop: y, width: clusterWidth, baseWidth, baseHeader,
-        headerHeight, floorHeight, height: clusterHeight};
+        : sorted.length ? Math.max(...sorted.map(node => positions.get(node.id).y + 42)) : 0;
+      const clusterHeight = headerHeight + bodyHeight + 20;
+      cluster.geometry = {left: x, top: y, baseTop: y, width: clusterWidth, baseWidth,
+        headerHeight, height: clusterHeight};
       Object.assign(cluster, {x: regionX + 28 + x, headerHeight});
       cluster.background.setAttribute('width', clusterWidth);
       cluster.background.setAttribute('height', clusterHeight);
@@ -531,7 +541,6 @@ function layoutFleet(hosts) {
       cluster.content.setAttribute('height', open ? clusterHeight : headerHeight);
       cluster.grid.setAttribute('transform', `translate(10 ${headerHeight})`);
       cluster.grid.style.display = open ? 'none' : '';
-      x += clusterWidth + GAP; rowHeight = Math.max(rowHeight, clusterHeight);
     }
     // A cluster whose content grew pushes the clusters below it down; shrinking restores them.
     const placed = [];
@@ -691,7 +700,18 @@ function setSearchQuery(value) {
 $('rail-close').addEventListener('click', closeRail);
 $('rail-backdrop').addEventListener('click', closeRail);
 $('search').addEventListener('input', event => setSearchQuery(event.target.value));
+const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+function trapRailFocus(event) {
+  const items = [...$('rail').querySelectorAll(FOCUSABLE)]
+    .filter(item => !item.disabled && !(item.closest && item.closest('[hidden]')));
+  if (!items.length) { event.preventDefault(); $('rail-close').focus(); return; }
+  const first = items[0], last = items[items.length - 1], active = document.activeElement;
+  const inside = $('rail').contains(active);
+  if (event.shiftKey && (active === first || !inside)) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && (active === last || !inside)) { event.preventDefault(); first.focus(); }
+}
 document.addEventListener('keydown', event => {
+  if (event.key === 'Tab' && railOpen && viewportWidth() < 1000 && !$('overlay').open) trapRailFocus(event);
   const active = document.activeElement, tag = String(active?.tagName || '').toLowerCase();
   if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey &&
       !['input', 'textarea', 'select'].includes(tag) && !active?.isContentEditable) {
@@ -833,6 +853,8 @@ function viewportWidth() { return typeof window !== 'undefined' && window.innerW
 function applyRail() {
   const overlay = viewportWidth() < 1000;
   $('rail').hidden = !railOpen;
+  $('rail').setAttribute('role', overlay ? 'dialog' : 'complementary');
+  $('rail').setAttribute('aria-modal', String(overlay));
   $('rail-backdrop').hidden = !(railOpen && overlay);
   $('main').className = (railOpen ? 'rail-open' : '') + (overlay ? ' rail-overlay' : '');
   if (railOpen === railWasOpen) return;
@@ -853,6 +875,12 @@ function revealSelection() {
   if (element?.scrollIntoView) element.scrollIntoView({block: 'nearest', inline: 'nearest'});
 }
 function onMapResize() { render(); revealSelection(); }
+let resizeFrame = false;
+function scheduleMapResize() {
+  if (resizeFrame) return;
+  resizeFrame = true;
+  requestAnimationFrame(() => { resizeFrame = false; onMapResize(); });
+}
 function openRail() { railOpen = true; applyRail(); }
 function closeRail() {
   if (railOpen) noteRailToggle(selectedId ? {node: selectedId} : selectedCluster ? {cluster: selectedCluster} : null);
@@ -1500,7 +1528,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') refresh();
   else setStatusMessage('Paused while hidden');
 });
-new ResizeObserver(onMapResize).observe($('map-scroll'));
+new ResizeObserver(scheduleMapResize).observe($('map-scroll'));
 startPolling();
 refresh();
 </script>

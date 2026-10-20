@@ -177,7 +177,7 @@ const longer = {header: cluster().headerHeight, y: endpoint('worker').y,
   height: Number(cluster().content.attributes.height)};
 console.log(JSON.stringify({empty, three, again, longer, stable}));
 """)
-        self.assertEqual(output['empty']['header'], 125)
+        self.assertEqual(output['empty']['header'], 64)
         # Heading 32 + run 30 + three-line Now 66 + projection 30 + 20 padding.
         self.assertGreaterEqual(output['three']['header'], 178)
         self.assertGreater(output['three']['y'], output['empty']['y'])
@@ -277,8 +277,8 @@ snapshot.clusters.Fallback.short_name = 'Audit';
 render();
 console.log(JSON.stringify({plain, long, short: Number(cluster().content.attributes.height)}));
 """)
-        # The name (51 characters, 433px) takes two lines of the 320px content width.
-        self.assertGreaterEqual(output['long'] - output['short'], 2 * 20)
+        # The name (51 characters, 433px) takes two lines beside the caret.
+        self.assertGreaterEqual(output['long'] - output['short'], 20)
 
     def test_removed_hovered_node_clears_hovered_id(self):
         output = run_page_js(EDGE_FIXTURE + """
@@ -1648,6 +1648,103 @@ console.log(JSON.stringify({inside, restored}));
 """)
         self.assertTrue(output['inside'])
         self.assertTrue(output['restored'])
+
+    BOX_FIXTURE = """
+const makeNodes = (cluster, count, prefix = cluster) => Array.from({length: count}, (_, i) =>
+  ({id: prefix + i, title: prefix + i, state: 'working', kind: 'claude', host: 'local', cluster}));
+const box = name => { const c = [...clusters.values()].find(c => c.name === name);
+  return {top: c.geometry.top, height: c.geometry.height, left: c.geometry.left,
+    bottom: c.geometry.top + c.geometry.height}; };
+$('map-scroll').clientWidth = 1200;
+"""
+
+    def test_cluster_height_fits_one_node_row(self):
+        output = run_page_js(self.BOX_FIXTURE + """
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes: makeNodes('Solo', 4)};
+render();
+console.log(JSON.stringify({height: box('Solo').height, header: [...clusters.values()][0].headerHeight}));
+""")
+        # Heading 32 + panel padding 32 + one node row 70 + 20 padding.
+        self.assertLessEqual(output['height'], 32 + 32 + 70 + 20)
+        self.assertLessEqual(output['header'], 64)
+
+    def test_clusters_pack_by_actual_height(self):
+        output = run_page_js(self.BOX_FIXTURE + """
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes:
+  [...makeNodes('A', 16), ...makeNodes('B', 1), ...makeNodes('C', 1), ...makeNodes('D', 1)]};
+render();
+console.log(JSON.stringify({A: box('A'), B: box('B'), C: box('C'), D: box('D')}));
+""")
+        self.assertEqual(output['B']['top'], output['A']['top'])
+        self.assertGreater(output['A']['height'], output['B']['height'] * 2)
+        # D starts beneath the short box, not beneath the tall one.
+        self.assertEqual(output['D']['top'], output['B']['bottom'] + 16)
+        self.assertLess(output['D']['top'], output['A']['bottom'])
+
+    def test_long_name_wraps_beside_caret(self):
+        page = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        heading = re.search(r'\.cluster-heading \{([^}]*)\}', page).group(1)
+        self.assertIn('align-items: flex-start', heading)
+        self.assertNotIn('wrap', heading.replace('nowrap', ''))
+        name = re.search(r'^\.cluster-name \{([^}]*)\}', page, re.MULTILINE).group(1)
+        self.assertIn('min-width: 0', name)
+        self.assertIn('flex: 1 1 0', name)
+        toggle = re.search(r'^\.cluster-heading \.cluster-toggle \{([^}]*)\}', page, re.MULTILINE).group(1)
+        self.assertIn('flex: none', toggle)
+
+    def test_subagent_dots_never_overlap_sibling_nodes(self):
+        output = run_page_js(self.BOX_FIXTURE + """
+const parents = makeNodes('Crew', 6, 'p');
+const dots = parents.slice(0, 4).flatMap(p => [0, 1].map(i =>
+  ({id: p.id + 'sub' + i, title: 'sub', state: 'working', kind: 'subagent', host: 'local',
+    cluster: 'Crew', parent: p.id})));
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes: [...parents, ...dots]};
+render();
+const all = snapshot.nodes.map(n => ({id: n.id, kind: n.kind, parent: n.parent, ...endpoint(n.id)}));
+const radius = n => n.kind === 'subagent' ? 9 : 22;
+const gaps = [];
+for (const a of all) for (const b of all) if (a.id < b.id)
+  gaps.push([a.id, b.id, Math.hypot(a.x - b.x, a.y - b.y) - radius(a) - radius(b)]);
+console.log(JSON.stringify({gaps}));
+""")
+        self.assertTrue(output['gaps'])
+        for a, b, gap in output['gaps']:
+            self.assertGreaterEqual(gap, 4 - 1e-6, (a, b))
+
+    def test_overlay_rail_traps_focus(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + """
+var window = {innerWidth: 768};
+selectNode('a');
+const first = new Element('button'), last = new Element('button'), outside = new Element('button');
+$('rail').querySelectorAll = () => [first, last];
+$('rail').contains = el => el === first || el === last;
+const press = (active, shiftKey) => { active.focus();
+  const event = {key: 'Tab', shiftKey, prevented: false, preventDefault() { this.prevented = true; }};
+  document.dispatch('keydown', event); return [document.activeElement === first ? 'first' :
+    document.activeElement === last ? 'last' : 'other', event.prevented]; };
+console.log(JSON.stringify({
+  role: $('rail').attributes.role, modal: $('rail').attributes['aria-modal'],
+  forward: press(last, false), backward: press(first, true), escaped: press(outside, false),
+  middle: press(first, false)}));
+""")
+        self.assertEqual(output['role'], 'dialog')
+        self.assertEqual(output['modal'], 'true')
+        self.assertEqual(output['forward'], ['first', True])
+        self.assertEqual(output['backward'], ['last', True])
+        self.assertEqual(output['escaped'], ['first', True])
+        self.assertEqual(output['middle'][1], False)
+
+    def test_resize_relayout_waits_for_the_next_animation_frame(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + """
+const frames = []; var requestAnimationFrame = callback => frames.push(callback);
+let renders = 0; const inner = onMapResize;
+scheduleMapResize(); scheduleMapResize();
+const queued = frames.length; frames.shift()();
+console.log(JSON.stringify({queued, after: frames.length}));
+""")
+        self.assertEqual(output['queued'], 1)
+        page = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        self.assertIn('new ResizeObserver(scheduleMapResize)', page)
 
     def test_narrow_header_wraps_search_onto_second_line(self):
         page = (ROOT / 'kitty/fleetmap/page.html').read_text()
