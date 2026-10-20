@@ -1051,6 +1051,7 @@ const word = host => {
 console.log(JSON.stringify([
   word({memory: {swap_gb: 0}, workers: 1, cap: 4}),
   word({memory: {free_pct: 55, swap_gb: 0}, cap: 4}),
+  word({memory: {free_pct: 55, swap_gb: 0}, workers: 1}),
   word({})]));
 """)
         for line in output:

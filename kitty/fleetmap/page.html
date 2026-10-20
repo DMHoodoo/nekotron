@@ -685,7 +685,7 @@ function render() {
     region.group.style.display = '';
     region.label.textContent = host.label || host.name;
     const memory = host.memory || {};
-    const known = memory.free_pct != null && host.workers != null;
+    const known = memory.free_pct != null && host.workers != null && host.cap != null;
     const status = !known ? '' : host.cap != null && host.workers > host.cap ? 'Over cap'
       : memory.free_pct < 40 ? 'Tight' : 'OK';
     region.metrics.textContent = `${status ? status + ' · ' : ''}${memory.free_pct == null ? '—' : memory.free_pct.toFixed(1) + '%'} free · swap ${memory.swap_gb == null ? '—' : memory.swap_gb.toFixed(1) + ' GB'} · ${host.workers ?? '—'}/${host.cap ?? '—'} workers/cap`;
