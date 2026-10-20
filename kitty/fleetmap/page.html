@@ -516,16 +516,23 @@ function layoutFleet(hosts) {
         const parent = positions.get(node.parent), point = positions.get(node.id);
         if (!parent || parent.cluster !== id) continue;
         // Outer selection rings: 22 px for a node, 22 * SUBAGENT_SCALE for a dot; keep a 4 px gap.
-        const dotRadius = 22 * SUBAGENT_SCALE, reach = 22 + dotRadius + 4;
+        const stroke = 1.5, dotRadius = 22 * SUBAGENT_SCALE, reach = 22 + dotRadius + 4 + stroke;
         for (let direction = 0; direction < 8; direction++) {
           const angle = direction * Math.PI / 4;
           const candidate = {x: parent.x + reach * Math.cos(angle), y: parent.y + reach * Math.sin(angle)};
           if (candidate.x < 20 || candidate.x > baseWidth - 40 || candidate.y < 20) continue;
+          // Labels sit centered 26-42 px under each drawn node; a dot must not land on one.
+          if (sorted.some(other => {
+            if (other.kind === 'chip' || other.kind === 'subagent') return false;
+            const at = positions.get(other.id), nearX = Math.max(at.x - CELL / 2, Math.min(candidate.x, at.x + CELL / 2)),
+              nearY = Math.max(at.y + 26, Math.min(candidate.y, at.y + 42));
+            return Math.hypot(candidate.x - nearX, candidate.y - nearY) < dotRadius;
+          })) continue;
           if (sorted.some(other => {
             if (other.id === node.id) return false;
             const occupied = positions.get(other.id);
             return Math.hypot(occupied.x - candidate.x, occupied.y - candidate.y) <
-              (other.kind === 'subagent' ? dotRadius : 22) + dotRadius + 4 - 1e-6;
+              (other.kind === 'subagent' ? dotRadius : 22) + dotRadius + 4 + stroke - 1e-6;
           })) continue;
           Object.assign(point, candidate); break;
         }
@@ -622,6 +629,11 @@ function updateNode(node) {
   view.group.setAttribute('transform', `translate(${position.x} ${position.y})`);
   paintNode(node, view);
 }
+// Keeps a chip's rectangle inside its box: at least the 10 px panel padding from each edge.
+function chipX(cluster, position, half) {
+  const grid = cluster.geometry ? cluster.geometry.width - 20 : Infinity;
+  return Math.min(Math.max(position.x, half), Math.max(half, grid - half));
+}
 function paintFoldChips() {
   for (const chip of foldChips.values()) chip.style.display = 'none';
   for (const cluster of clusters.values()) {
@@ -640,7 +652,7 @@ function paintFoldChips() {
     }
     chip.children[1].textContent = `${count} idle`;
     chip.setAttribute('aria-label', `${count} idle sessions folded; show them`);
-    chip.setAttribute('transform', `translate(${position.x} ${position.y})`);
+    chip.setAttribute('transform', `translate(${chipX(cluster, position, 26)} ${position.y})`);
     if (chip.parentNode !== cluster.grid) cluster.grid.append(chip);
     chip.style.display = '';
     chip.style.opacity = clusterItems(cluster).filter(isFolded).every(nodeDimmed) ? .25 : 1;
@@ -664,7 +676,7 @@ function paintRetiredChips() {
     }
     chip.children[1].textContent = `${list.length} retired worker${list.length === 1 ? '' : 's'}`;
     chip.setAttribute('aria-label', `${list.length} retired worker${list.length === 1 ? '' : 's'}; list them`);
-    chip.setAttribute('transform', `translate(${position.x} ${position.y})`);
+    chip.setAttribute('transform', `translate(${chipX(cluster, position, 48)} ${position.y})`);
     if (chip.parentNode !== cluster.grid) cluster.grid.append(chip);
     chip.style.display = '';
     chip.style.opacity = list.map(retiredPseudo).every(nodeDimmed) ? .25 : 1;

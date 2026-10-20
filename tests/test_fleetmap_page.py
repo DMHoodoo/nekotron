@@ -1711,7 +1711,7 @@ console.log(JSON.stringify({gaps}));
 """)
         self.assertTrue(output['gaps'])
         for a, b, gap in output['gaps']:
-            self.assertGreater(gap, 0, (a, b))
+            self.assertGreaterEqual(gap, 4 - 1e-6, (a, b))
 
     def test_live_like_row_with_one_subagent_has_no_intersecting_outer_circles(self):
         output = run_page_js(self.BOX_FIXTURE + """
@@ -1735,7 +1735,45 @@ console.log(JSON.stringify({pairs, dotOuter: outer('dot'), fullOuter: outer('p0'
         self.assertEqual(output['rings'], 4)
         self.assertLess(output['dotOuter'], output['fullOuter'] / 1.5)
         for a, b, gap in output['pairs']:
-            self.assertGreater(gap, 0, (a, b))
+            self.assertGreaterEqual(gap, 4 - 1e-6, (a, b))
+
+    def test_subagent_dot_never_covers_a_label(self):
+        output = run_page_js(self.BOX_FIXTURE + """
+const parents = makeNodes('Live', 4, 'p');
+const dot = {id: 'dot', title: 'sub', state: 'working', kind: 'subagent', host: 'local',
+  cluster: 'Live', parent: 'p1'};
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes: [...parents, dot]};
+render();
+const outer = Math.max(...descendants(nodeViews.get('dot').group)
+  .filter(el => el.tagName === 'circle' && el.attributes.fill === 'none')
+  .map(el => Number(el.attributes.r) + Number(el.attributes['stroke-width']) / 2));
+const d = endpoint('dot'), gaps = parents.map(n => {
+  const p = endpoint(n.id);
+  const nx = Math.max(p.x - 35, Math.min(d.x, p.x + 35)), ny = Math.max(p.y + 26, Math.min(d.y, p.y + 42));
+  return Math.hypot(d.x - nx, d.y - ny) - outer;
+});
+console.log(JSON.stringify({gaps, moved: d.x !== endpoint('p1').x || d.y !== endpoint('p1').y}));
+""")
+        self.assertTrue(output['moved'])
+        for gap in output['gaps']:
+            self.assertGreaterEqual(gap, 0)
+
+    def test_chips_stay_inside_their_box(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+const retired = ['a', 'b'].map(n => ({title: 'Worker ' + n, dispatchId: 'd' + n,
+  state: 'released', retainedFor: 600, host: 'local'}));
+snapshot = {generated_at: Date.now() / 1000, hosts: [{name: 'local'}],
+  clusters: {Past: {name: 'Past', full_name: 'Past', short_name: 'Past', retired_workers: retired}},
+  runs: {}, nodes: [], edges: []};
+render();
+const c = cluster(), chip = unique(byClass(c.grid, 'retired-chip')).find(g => g.style.display !== 'none');
+const m = /translate\\(([-\\d.]+)/.exec(chip.attributes.transform);
+console.log(JSON.stringify({retiredLeft: 10 + Number(m[1]) - 48, retiredRight: 10 + Number(m[1]) + 48,
+  width: c.geometry.width, half: 26, fold: chipX(c, {x: 35}, 26) }));
+""")
+        self.assertGreaterEqual(output['retiredLeft'], 10)
+        self.assertLessEqual(output['retiredRight'], output['width'] - 10)
+        self.assertGreaterEqual(10 + output['fold'] - 26, 10)
 
     def test_subagent_rings_keep_a_full_nodes_proportions(self):
         output = run_page_js(self.BOX_FIXTURE + """
