@@ -359,7 +359,8 @@ function nodeMatches(node, query) {
     .some(field => String(node[field] ?? '').toLowerCase().includes(needle));
 }
 function isFolded(node) {
-  return foldable(node) && !unfolded.has(clusterKey(node)) && !(searchQuery && nodeMatches(node, searchQuery));
+  return foldable(node) && node.id !== selectedId && !unfolded.has(clusterKey(node)) &&
+    !(searchQuery && nodeMatches(node, searchQuery));
 }
 function layoutFleet(hosts) {
   const ordered = [...snapshot.nodes].sort((a, b) => a.id.localeCompare(b.id));
@@ -839,8 +840,8 @@ function selectNode(id) {
   $('action-error').hidden = true;
   $('action-status').textContent = '';
   $('rail').scrollTop = 0;
-  paintFocus();
-  renderRail();
+  if (foldable(nodes.get(id))) render();
+  else { paintFocus(); renderRail(); }
 }
 function selectCluster(id) {
   if (!clusters.has(id)) return;

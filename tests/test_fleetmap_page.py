@@ -399,7 +399,7 @@ console.log(JSON.stringify({children: heading.children.map(text),
 
     def run_selection_js(self, source):
         return self.run_cluster_js(page_functions(
-            'selectCluster', 'renderRail', 'lastTouched', 'stateLine', 'renderContext', 'openBroadcast',
+            'selectCluster', 'renderRail', 'lastTouched', 'foldable', 'stateLine', 'renderContext', 'openBroadcast',
             'openOverlay', 'updateBroadcastCount', 'broadcastTargets',
             'selectNode', 'showContext', 'setText', 'age', 'secondsSince',
             'paintFocus', 'drawEdges') + """
@@ -698,12 +698,12 @@ console.log(JSON.stringify({collapsed, expanded: text(cluster.panel),
     def test_layout_preserves_positions_across_membership_thresholds_and_hosts(self):
         source = DOM + page_functions('ensureRegion', 'ensureCluster', 'clusterInfo',
                                      'clusterRun', 'nodeText', 'panelContentHeight', 'layoutFleet', 'endpoint',
-                                     'foldable', 'isFolded', 'clusterRetired')
+                                     'lastTouched', 'foldable', 'isFolded', 'clusterRetired')
         output = run_js(source + """
 const svg = () => new Element();
 const positions = new Map(), regions = new Map(), clusters = new Map(), expanded = new Set(), unfolded = new Set();
 const MIN_REGION = 420, CELL = 70, GAP = 16;
-let layoutSignature = '', layoutModeSignature = '';
+let layoutSignature = '', layoutModeSignature = '', selectedId = null, searchQuery = '';
 function renderCluster() {}
 const clusterKey = node => JSON.stringify([node.host, node.cluster]);
 const member = (id, host = 'local', cluster = 'A') => ({id, host, cluster, kind: 'claude'});
@@ -1037,6 +1037,20 @@ searchQuery = 'zzz'; dimClusters(); paintRetiredChips();
 console.log(JSON.stringify({hit, miss: [box(), chip()]}));
 """)
         self.assertEqual(output, {'hit': [1, 1], 'miss': [.25, .25]})
+
+    def test_selected_folded_node_stays_drawn_with_its_edges(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([mk('a', 'idle', 30), mk('b', 'idle', 30), mk('c', 'idle', 1)]);
+const before = {nodes: drawnNodes().length, chips: chips().length};
+selectNode('a');
+const selected = {nodes: drawnNodes().length, chips: chips().length, endpoint: endpoint('a') !== null};
+selectNode('c');
+render();
+console.log(JSON.stringify({before, selected, after: {nodes: drawnNodes().length, chips: chips().length, a: endpoint('a')}}));
+""")
+        self.assertEqual(output['before'], {'nodes': 1, 'chips': 1})
+        self.assertEqual(output['selected'], {'nodes': 2, 'chips': 1, 'endpoint': True})
+        self.assertEqual(output['after'], {'nodes': 1, 'chips': 1, 'a': None})
 
     def test_clicking_chip_unfolds_cluster(self):
         output = run_page_js(self.FOLD_FIXTURE + """
