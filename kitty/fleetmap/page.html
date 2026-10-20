@@ -13,6 +13,8 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: 58px auto mi
 header { display: flex; align-items: center; gap: 20px; padding: 0 22px; border-bottom: 1px solid #303548; }
 h1 { font-size: 18px; margin: 0; font-weight: 650; }
 #status { color: #a0a8be; font-size: 12px; }
+#status button { background: none; border: 0; padding: 0 2px; color: inherit; font: inherit; cursor: pointer; text-decoration: underline dotted; }
+#status button[aria-pressed=true] { color: #fff; text-decoration: underline; }
 #legend-toggle { margin-left: auto; }
 main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; min-height: 0; }
 #map-scroll { overflow: auto; position: relative; }
@@ -209,6 +211,7 @@ const expanded = new Set();
 let selectedContext = null, selectedCluster = null, broadcastCluster = null, closeBatch = [];
 let overlayVersion = 0;
 let miniViews = [];
+let stateFilter = null;
 let decisionSignature = '';
 
 function toggleLegend(open = $('legend').hidden) {
@@ -510,7 +513,41 @@ function updateNode(node) {
   view.group.setAttribute('transform', `translate(${position.x} ${position.y})`);
   paintNode(node, view);
 }
+function nodeState(node) { return node.state === 'done' ? 'idle' : node.state; }
+function nodeDimmed(node) { return stateFilter !== null && nodeState(node) !== stateFilter; }
+function setStateFilter(state) {
+  stateFilter = stateFilter === state ? null : state;
+  renderStatus();
+  for (const [id, view] of nodeViews) if (nodes.has(id)) paintNode(nodes.get(id), view);
+  for (const [id, view] of miniViews) if (nodes.has(id)) paintNode(nodes.get(id), view);
+  dimClusters();
+}
+function dimClusters() {
+  for (const cluster of clusters.values()) {
+    const dim = stateFilter !== null && !clusterItems(cluster).some(node => !nodeDimmed(node));
+    const opacity = dim ? .25 : 1;
+    cluster.background.style.opacity = opacity;
+    cluster.content.style.opacity = opacity;
+  }
+}
+function renderStatus() {
+  if (snapshot.generated_at == null) { $('status').textContent = 'Waiting for the first snapshot…'; return; }
+  const tally = {working: 0, attention: 0, idle: 0};
+  for (const node of snapshot.nodes) tally[nodeState(node)] = (tally[nodeState(node)] || 0) + 1;
+  const parts = [document.createTextNode(`${snapshot.nodes.length} sessions`)];
+  for (const [state, word] of [['working', 'working'], ['attention', 'need you'], ['idle', 'idle']]) {
+    const button = document.createElement('button');
+    button.type = 'button'; button.dataset.state = state;
+    button.textContent = `${tally[state]} ${word}`;
+    button.setAttribute('aria-pressed', String(stateFilter === state));
+    button.addEventListener('click', () => setStateFilter(state));
+    parts.push(document.createTextNode(' · '), button);
+  }
+  parts.push(document.createTextNode(` · updated ${age(snapshot.generated_at)} ago`));
+  $('status').replaceChildren(...parts);
+}
 function paintNode(node, view) {
+  view.group.style.opacity = nodeDimmed(node) ? .25 : 1;
   view.hatch.style.display = node.stalled ? '' : 'none';
   view.group.setAttribute('aria-pressed', String(selectedId === node.id));
   const edgeCount = snapshot.edges.filter(edge => edge.kind !== 'subagent' &&
@@ -596,7 +633,9 @@ function render() {
     region.group.style.display = '';
     region.label.textContent = host.label || host.name;
     const memory = host.memory || {};
-    region.metrics.textContent = `${memory.free_pct == null ? '—' : memory.free_pct.toFixed(1) + '%'} free · swap ${memory.swap_gb == null ? '—' : memory.swap_gb.toFixed(1) + ' GB'} · ${host.workers ?? '—'}/${host.cap ?? '—'} workers/cap`;
+    const status = host.workers != null && host.cap != null && host.workers > host.cap ? 'Over cap'
+      : memory.free_pct != null && memory.free_pct < 40 ? 'Tight' : 'OK';
+    region.metrics.textContent = `${status} · ${memory.free_pct == null ? '—' : memory.free_pct.toFixed(1) + '%'} free · swap ${memory.swap_gb == null ? '—' : memory.swap_gb.toFixed(1) + ' GB'} · ${host.workers ?? '—'}/${host.cap ?? '—'} workers/cap`;
     region.metrics.setAttribute('fill', host.amber ? '#ffba71' : '#a0a8be');
     region.background.setAttribute('stroke', host.amber ? '#bb8445' : 'none');
     region.badge.style.display = host.reachable === false ? '' : 'none';
@@ -618,6 +657,7 @@ function render() {
     }
   }
   for (const [id, view] of miniViews) if (nodes.has(id)) paintNode(nodes.get(id), view);
+  dimClusters();
   renderDecisions();
   if ($('overlay').open && !$('broadcast-form').hidden) updateBroadcastCount();
   drawEdges();
@@ -1158,7 +1198,7 @@ async function refresh() {
     const nextSeconds = Number(snapshot.poll_seconds);
     if (Number.isFinite(nextSeconds) && nextSeconds > 0 && nextSeconds !== pollSeconds) { pollSeconds = nextSeconds; startPolling(); }
     render();
-    $('status').textContent = snapshot.generated_at == null ? 'Waiting for the first snapshot…' : `${snapshot.nodes.length} sessions · updated ${age(snapshot.generated_at)} ago`;
+    renderStatus();
     $('status').style.color = '';
   } catch (error) {
     $('status').textContent = `Connection error: ${error.message}. Retrying…`;

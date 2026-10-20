@@ -530,13 +530,13 @@ console.log(JSON.stringify([collapsed, {text: text(name), title: name.attributes
              'title': 'Review run: finish the pending delivery with all evidence'}])
 
     def test_node_label_wraps_to_two_lines_at_a_space(self):
-        output = run_js(DOM + page_functions('paintNode') + """
+        output = run_js(DOM + page_functions('nodeState', 'nodeDimmed', 'paintNode') + """
 const svg = (tag, attrs = {}) => {
   const element = new Element(tag);
   for (const [key, value] of Object.entries(attrs)) element.setAttribute(key, value);
   return element;
 };
-const selectedId = null, hoveredId = null, snapshot = {edges: []};
+const stateFilter = null, selectedId = null, hoveredId = null, snapshot = {edges: []};
 const colors = {idle: '#888'}, secondsSince = () => 0;
 const view = Object.fromEntries(['hatch', 'group', 'title', 'label', 'center',
   'rim', 'body', 'pulse', 'ring', 'badge'].map(key => [key, new Element()]));
@@ -872,6 +872,72 @@ await Promise.resolve();
 console.log(JSON.stringify(requests));
 """.replace('await Promise.resolve();', ''))
         self.assertEqual(output, [['/api/open-plan', {'run': 'run_test'}]])
+
+
+    HEADER_FIXTURE = """
+const states = [...Array(2).fill('working'), 'attention', ...Array(10).fill('idle'),
+  ...Array(5).fill('done'), ...Array(4).fill('unknown')];
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], generated_at: Date.now() / 1000,
+  nodes: states.map((state, index) => ({id: 'n' + index, title: 'n' + index, state, kind: 'claude',
+    host: 'local', cluster: 'Traffic'}))};
+$('map-scroll').clientWidth = 1200;
+render();
+renderStatus();
+const counts = () => descendants($('status')).filter(item => item.dataset?.state);
+const countFor = state => counts().find(item => item.dataset.state === state);
+const opacities = () => Object.fromEntries(snapshot.nodes.map(node =>
+  [node.id, nodeViews.get(node.id).group.style.opacity]));
+"""
+
+    def test_header_counts_by_state(self):
+        output = run_page_js(self.HEADER_FIXTURE + """
+console.log(JSON.stringify({text: text($('status')).replace(/\\s+/g, ' ').trim(),
+  states: counts().map(item => item.dataset.state)}));
+""")
+        self.assertTrue(output['text'].startswith(
+            '22 sessions · 2 working · 1 need you · 15 idle'), output['text'])
+        self.assertEqual(output['states'], ['working', 'attention', 'idle'])
+
+    def test_state_filter_dims_others_and_toggles_off(self):
+        output = run_page_js(self.HEADER_FIXTURE + """
+countFor('working').click();
+const on = {filter: stateFilter, opacities: opacities()};
+countFor('working').click();
+const off = {filter: stateFilter, opacities: opacities()};
+countFor('idle').click();
+const idle = opacities();
+countFor('attention').click();
+console.log(JSON.stringify({on, off, idleDone: [idle.n13, idle.n0], filter: stateFilter,
+  attention: opacities().n2}));
+""")
+        self.assertEqual(output['on']['filter'], 'working')
+        self.assertEqual(output['on']['opacities']['n0'], 1)
+        self.assertEqual(output['on']['opacities']['n2'], 0.25)
+        self.assertEqual(output['on']['opacities']['n5'], 0.25)
+        self.assertIsNone(output['off']['filter'])
+        self.assertEqual(set(output['off']['opacities'].values()), {1})
+        self.assertEqual(output['idleDone'], [1, 0.25])
+        self.assertEqual(output['filter'], 'attention')
+        self.assertEqual(output['attention'], 1)
+
+    def test_region_status_word(self):
+        output = run_page_js("""
+$('map-scroll').clientWidth = 1200;
+const word = host => {
+  snapshot = {hosts: [Object.assign({name: 'local'}, host)], clusters: {}, runs: {}, nodes: [], edges: []};
+  render();
+  return regions.get('local').metrics.textContent;
+};
+console.log(JSON.stringify([
+  word({memory: {free_pct: 55, swap_gb: 0}, workers: 1, cap: 4}),
+  word({memory: {free_pct: 39.9, swap_gb: 0}, workers: 1, cap: 4}),
+  word({memory: {free_pct: 55, swap_gb: 0}, workers: 5, cap: 4}),
+  word({memory: {free_pct: 40, swap_gb: 0}, workers: 4, cap: 4})]));
+""")
+        self.assertTrue(output[0].startswith('OK · 55.0% free'), output[0])
+        self.assertTrue(output[1].startswith('Tight · '), output[1])
+        self.assertTrue(output[2].startswith('Over cap · '), output[2])
+        self.assertTrue(output[3].startswith('OK · '), output[3])
 
 
 if __name__ == "__main__":
