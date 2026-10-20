@@ -36,7 +36,7 @@ DOM = """
 class Element {
   constructor(tag = '') {
     this.tagName = tag; this.children = []; this.textContent = '';
-    this.style = {}; this.attributes = {}; this.listeners = {};
+    this.style = {}; this.attributes = {}; this.listeners = {}; this.dataset = {};
   }
   append(...items) { this.children.push(...items); }
   replaceChildren(...items) { this.children = items; }
@@ -80,22 +80,149 @@ function showContext(context, node) { selections.push({context, node}); }
 
 
 class FleetMapPage(unittest.TestCase):
+    def test_heading_has_only_caret_and_name(self):
+        output = self.run_cluster_js("""
+renderCluster(cluster);
+const heading = byClass(cluster.panel, 'cluster-heading')[0];
+console.log(JSON.stringify({children: heading.children.map(text),
+  buttons: descendants(heading).filter(child => child.tagName === 'button').map(text)}));
+""")
+        self.assertEqual(output, {'children': ['▸', 'Review run'], 'buttons': ['▸']})
+
+    def run_selection_js(self, source):
+        return self.run_cluster_js(page_functions(
+            'selectCluster', 'renderRail', 'renderContext', 'openBroadcast',
+            'openOverlay', 'updateBroadcastCount', 'broadcastTargets',
+            'selectNode', 'showContext', 'setText', 'age', 'secondsSince') + """
+const clusters = new Map([[cluster.id, cluster]]), nodeViews = new Map();
+let selectedCluster = null, assignmentChoices = '', overlayVersion = 0;
+let dialogNodeId = null, closeToken = null, broadcastCluster = null;
+const Option = class extends Element {
+  constructor(label, value) { super('option'); this.textContent = label; this.value = value; }
+};
+$('empty').append(new Element('h2'), new Element('p'));
+$('empty').lastElementChild = $('empty').children[1];
+$('overlay').showModal = () => { $('overlay').open = true; };
+function render() { renderCluster(cluster); renderRail(); }
+""" + source)
+
+    def test_clicking_name_selects_cluster_and_rail_shows_send_to_all(self):
+        output = self.run_selection_js("""
+info.short_name = 'Short review';
+info.full_name = 'Review run: finish the pending delivery with all evidence';
+selectedId = 'previous-node'; selectedContext = {package: 'previous-package'};
+renderCluster(cluster);
+const before = [...expanded];
+byClass(cluster.panel, 'cluster-name')[0].click();
+const details = $('context-details');
+const send = descendants(details).find(child => child.tagName === 'button' && text(child) === 'Send to all');
+send.click();
+console.log(JSON.stringify({selectedCluster, selectedId, selectedContext,
+  before, after: [...expanded], title: text($('context-title')), details: text(details),
+  hidden: [$('empty').hidden, $('details').hidden, $('context-rail').hidden],
+  counts: byClass(details, 'cluster-summary').map(text),
+  broadcast: broadcastCluster, dialog: $('overlay').open, formHidden: $('broadcast-form').hidden}));
+""")
+        self.assertEqual(output['selectedCluster'], 'cluster')
+        self.assertIsNone(output['selectedId'])
+        self.assertIsNone(output['selectedContext'])
+        self.assertEqual(output['before'], output['after'])
+        self.assertEqual(output['title'],
+                         'Review run: finish the pending delivery with all evidence')
+        self.assertIn('Host:  local', output['details'])
+        self.assertIn('Open run plan', output['details'])
+        self.assertEqual(output['hidden'], [True, True, False])
+        self.assertEqual(output['counts'], [])
+        self.assertEqual(output['broadcast'], 'Review run')
+        self.assertTrue(output['dialog'])
+        self.assertFalse(output['formHidden'])
+
+    def test_caret_alone_expands(self):
+        output = self.run_selection_js("""
+renderCluster(cluster);
+byClass(cluster.panel, 'cluster-name')[0].click();
+const afterName = [...expanded];
+byClass(cluster.panel, 'cluster-toggle')[0].click();
+const afterCaret = [...expanded];
+byClass(cluster.panel, 'cluster-name')[0].click();
+const afterExpandedName = [...expanded];
+byClass(cluster.panel, 'cluster-toggle')[0].click();
+console.log(JSON.stringify([afterName, afterCaret, afterExpandedName, [...expanded]]));
+""")
+        self.assertEqual(output, [[], ['cluster'], ['cluster'], []])
+
+    def test_cluster_rail_counts_and_run_plan_follow_snapshot(self):
+        output = self.run_selection_js("""
+renderCluster(cluster); byClass(cluster.panel, 'cluster-name')[0].click();
+const results = [];
+for (const projected of [true, false]) {
+  info.run = projected ? 'run_test' : null;
+  for (const [waiting, stalled] of [[0, 0], [1, 0], [0, 2], [0, 0]]) {
+    Object.assign(info, {waiting, stalled}); renderRail();
+    results.push({counts: byClass($('context-details'), 'cluster-summary').map(text),
+      plan: text($('context-details')).includes('Open run plan')});
+  }
+}
+console.log(JSON.stringify(results));
+""")
+        counts = [[], ['waiting on you: 1 · 0 stalled'],
+                  ['waiting on you: 0 · 2 stalled'], []]
+        self.assertEqual(output, [
+            {'counts': count, 'plan': projected}
+            for projected in (True, False) for count in counts])
+
+    def test_cluster_selection_yields_to_node_and_context_selection(self):
+        output = self.run_selection_js("""
+snapshot.edges = [];
+nodes.set('worker', {id: 'worker', title: 'Worker', cluster: 'Review run', host: 'local',
+  state: 'idle', kind: 'claude'});
+renderCluster(cluster);
+byClass(cluster.panel, 'cluster-name')[0].click();
+selectNode('worker');
+const node = {selectedCluster, selectedId, hidden: $('details').hidden,
+  title: text($('node-title')), broadcast: text($('context-details')).includes('Send to all')};
+selectCluster(cluster.id);
+showContext({cluster: 'Review run'});
+console.log(JSON.stringify({node, context: {selectedCluster, selectedId,
+  hidden: $('context-rail').hidden, broadcast: text($('context-details')).includes('Send to all')}}));
+""")
+        self.assertEqual(output, {
+            'node': {'selectedCluster': None, 'selectedId': 'worker', 'hidden': False,
+                     'title': 'Worker', 'broadcast': False},
+            'context': {'selectedCluster': None, 'selectedId': None, 'hidden': False,
+                        'broadcast': False}})
+
+    def test_cluster_name_supports_keyboard_selection(self):
+        output = self.run_selection_js("""
+renderCluster(cluster);
+const name = byClass(cluster.panel, 'cluster-name')[0], results = [];
+for (const key of ['Enter', ' ']) {
+  selectedCluster = null;
+  let prevented = false;
+  name.listeners.keydown({key, preventDefault() { prevented = true; }});
+  results.push({selectedCluster, prevented, expanded: [...expanded]});
+}
+console.log(JSON.stringify({role: name.attributes.role, tabindex: name.attributes.tabindex, results}));
+""")
+        self.assertEqual(output, {'role': 'button', 'tabindex': '0', 'results': [
+            {'selectedCluster': 'cluster', 'prevented': True, 'expanded': []}] * 2})
+
     def test_cluster_heading_uses_short_name_with_full_title(self):
         output = self.run_cluster_js("""
 info.name = cluster.name;
 info.full_name = 'Review run: finish the pending delivery with all evidence';
 info.short_name = 'Short review';
 renderCluster(cluster);
-let toggle = byClass(cluster.panel, 'cluster-toggle')[0];
-const collapsed = {text: text(toggle), title: toggle.attributes.title};
+let name = byClass(cluster.panel, 'cluster-name')[0];
+const collapsed = {text: text(name), title: name.attributes.title};
 expanded.add(cluster.id); renderCluster(cluster);
-toggle = byClass(cluster.panel, 'cluster-toggle')[0];
-console.log(JSON.stringify([collapsed, {text: text(toggle), title: toggle.attributes.title}]));
+name = byClass(cluster.panel, 'cluster-name')[0];
+console.log(JSON.stringify([collapsed, {text: text(name), title: name.attributes.title}]));
 """)
         self.assertEqual(output, [
-            {'text': '▸ Short review',
+            {'text': 'Short review',
              'title': 'Review run: finish the pending delivery with all evidence'},
-            {'text': '▾ Short review',
+            {'text': 'Short review',
              'title': 'Review run: finish the pending delivery with all evidence'}])
 
     def test_node_label_wraps_to_two_lines_at_a_space(self):
@@ -253,7 +380,7 @@ console.log(JSON.stringify({collapsed, expanded: text(cluster.panel),
         self.assertEqual(output['matrices'], 1)
         self.assertIn('Chief:', output['expanded'])
         for rendered in (output['collapsed'], output['expanded']):
-            self.assertIn('Open run plan', rendered)
+            self.assertNotIn('Open run plan', rendered)
             self.assertIn('run_legacy', rendered)
             self.assertIn('Review run: legacy work; waiting', rendered)
             self.assertIn('projection v1, Chief must re-render', rendered)
