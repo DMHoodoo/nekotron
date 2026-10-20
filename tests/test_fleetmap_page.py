@@ -692,10 +692,12 @@ console.log(JSON.stringify({collapsed, expanded: text(cluster.panel),
 
     def test_layout_preserves_positions_across_membership_thresholds_and_hosts(self):
         source = DOM + page_functions('ensureRegion', 'ensureCluster', 'clusterInfo',
-                                     'clusterRun', 'nodeText', 'panelContentHeight', 'layoutFleet', 'endpoint')
+                                     'clusterRun', 'nodeText', 'panelContentHeight', 'layoutFleet', 'endpoint',
+                                     'foldable', 'isFolded')
         output = run_js(source + """
 const svg = () => new Element();
-const positions = new Map(), regions = new Map(), clusters = new Map(), expanded = new Set();
+const positions = new Map(), regions = new Map(), clusters = new Map(), expanded = new Set(), unfolded = new Set();
+const secondsSince = epoch => epoch == null ? null : Math.max(0, Date.now() / 1000 - epoch);
 const MIN_REGION = 420, CELL = 70, GAP = 16;
 let layoutSignature = '', layoutModeSignature = '';
 function renderCluster() {}
@@ -938,6 +940,99 @@ console.log(JSON.stringify([
         self.assertTrue(output[1].startswith('Tight · '), output[1])
         self.assertTrue(output[2].startswith('Over cap · '), output[2])
         self.assertTrue(output[3].startswith('OK · '), output[3])
+
+    FOLD_FIXTURE = """
+$('map-scroll').clientWidth = 1200;
+const hours = h => Date.now() / 1000 - h * 3600;
+const mk = (id, state, h, extra = {}) => Object.assign({id, title: id, state, kind: 'claude',
+  host: 'local', cluster: 'Box', you_at: hours(h), it_at: hours(h)}, extra);
+const load = list => {
+  snapshot = {generated_at: Date.now() / 1000, hosts: [{name: 'local'}], clusters: {}, runs: {},
+    nodes: list, edges: []};
+  render(); renderStatus();
+};
+const cluster = () => [...clusters.values()][0];
+const unique = list => [...new Set(list)];
+const drawnNodes = () => unique(byClass(cluster().grid, 'node')).filter(g => g.style.display !== 'none');
+const chips = () => unique(byClass(cluster().grid, 'fold-chip')).filter(g => g.style.display !== 'none');
+"""
+
+    def test_old_idle_nodes_fold_into_a_chip(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([mk('a', 'idle', 30), mk('b', 'idle', 30), mk('c', 'done', 30)]);
+console.log(JSON.stringify({nodes: drawnNodes().length, chips: chips().map(text)}));
+""")
+        self.assertEqual(output['nodes'], 0)
+        self.assertEqual([chip.strip() for chip in output['chips']], ['3 idle'])
+
+    def test_working_and_recent_nodes_never_fold(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([mk('w', 'working', 30), mk('r', 'idle', 2), mk('t', 'attention', 30), mk('o', 'idle', 30)]);
+console.log(JSON.stringify({nodes: drawnNodes().length, chips: chips().map(text)}));
+""")
+        self.assertEqual(output['nodes'], 3)
+        self.assertEqual([chip.strip() for chip in output['chips']], ['1 idle'])
+
+    def test_never_prompted_idle_node_folds(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([{id: 'n', title: 'n', state: 'idle', kind: 'claude', host: 'local', cluster: 'Box',
+  never_prompted: true, you_at: null, it_at: null}]);
+console.log(JSON.stringify({nodes: drawnNodes().length, chips: chips().length}));
+""")
+        self.assertEqual(output, {'nodes': 0, 'chips': 1})
+
+    def test_clicking_chip_unfolds_cluster(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([mk('a', 'idle', 30), mk('b', 'idle', 30), mk('c', 'idle', 30)]);
+chips()[0].click();
+const after = {nodes: drawnNodes().length, chips: chips().length};
+load(snapshot.nodes);
+console.log(JSON.stringify({after, reload: {nodes: drawnNodes().length, chips: chips().length}}));
+""")
+        self.assertEqual(output['after'], {'nodes': 3, 'chips': 0})
+        self.assertEqual(output['reload'], {'nodes': 3, 'chips': 0})
+
+    def test_unfolding_restores_node_positions(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+const list = [mk('a', 'idle', 1), mk('b', 'idle', 1), mk('c', 'idle', 1)];
+load(list);
+const before = Object.fromEntries(list.map(n => [n.id, endpoint(n.id)]));
+list[0].you_at = list[0].it_at = hours(30); list[1].you_at = list[1].it_at = hours(30);
+load(list);
+const folded = {nodes: drawnNodes().length, chips: chips().length, c: endpoint('c')};
+chips()[0].click();
+console.log(JSON.stringify({before, folded, after: Object.fromEntries(list.map(n => [n.id, endpoint(n.id)]))}));
+""")
+        self.assertEqual(output['folded'], {'nodes': 1, 'chips': 1, 'c': output['before']['c']})
+        self.assertEqual(output['after'], output['before'])
+
+    def test_header_counts_include_folded(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([mk('a', 'idle', 30), mk('b', 'done', 30), mk('c', 'working', 30), mk('d', 'attention', 1)]);
+console.log(JSON.stringify({chips: chips().length, text: text($('status')).replace(/\\s+/g, ' ').trim()}));
+""")
+        self.assertEqual(output['chips'], 1)
+        self.assertTrue(output['text'].startswith(
+            '4 sessions · 1 working · 1 need you · 2 idle'), output['text'])
+
+    def test_region_status_word_omitted_when_unknown(self):
+        output = run_page_js("""
+$('map-scroll').clientWidth = 1200;
+const word = host => {
+  snapshot = {hosts: [Object.assign({name: 'local'}, host)], clusters: {}, runs: {}, nodes: [], edges: []};
+  render();
+  return regions.get('local').metrics.textContent;
+};
+console.log(JSON.stringify([
+  word({memory: {swap_gb: 0}, workers: 1, cap: 4}),
+  word({memory: {free_pct: 55, swap_gb: 0}, cap: 4}),
+  word({})]));
+""")
+        for line in output:
+            for status in ('OK', 'Tight', 'Over cap'):
+                self.assertFalse(line.startswith(status), line)
+            self.assertFalse(line.startswith(' ·'), line)
+        self.assertTrue(output[1].startswith('55.0% free'), output[1])
 
 
 if __name__ == "__main__":

@@ -55,6 +55,9 @@ dialog::backdrop { background: #05070bd9; }
 pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; background: #0e1119; padding: 16px; max-height: 60vh; overflow: auto; }
 .region-label { fill: #e4e7f0; font-size: 15px; font-weight: 650; }
 .cluster-label { fill: #bfc9e0; font-size: 12px; }
+.fold-chip { cursor: pointer; }
+.fold-chip rect { fill: #232838; stroke: #4a5272; }
+.fold-chip text { fill: #bfc6d9; font-size: 11px; }
 .node-label { fill: #bfc6d9; font-size: 10px; pointer-events: none; }
 .edge-badge { fill: #e4e7f0; stroke: #161924; stroke-width: 4px; paint-order: stroke; font-size: 10px; font-weight: 650; pointer-events: none; }
 .node { cursor: pointer; outline: none; }
@@ -207,7 +210,7 @@ let gradientId = 0, assignmentChoices = '';
 const stages = ['goal', 'design', 'plan', 'implementing', 'review', 'delivery', 'accepted'];
 const stageLabels = ['Goal', 'Design', 'Plan (readiness)', 'Implementing', 'Review', 'Delivery', 'Accepted'];
 const packageColors = {planned: '#6b7394', assigned: '#8567b4', running: '#4f8ef7', returned: '#277c8b', verified: '#298456', blocked: '#a95b28'};
-const expanded = new Set();
+const expanded = new Set(), unfolded = new Set(), foldChips = new Map();
 let selectedContext = null, selectedCluster = null, broadcastCluster = null, closeBatch = [];
 let overlayVersion = 0;
 let miniViews = [];
@@ -317,6 +320,13 @@ function panelContentHeight(panel, width) {
   }
   return total ? total + 32 : 0;
 }
+function foldable(node, now = Date.now() / 1000) {
+  if (node.state !== 'idle' && node.state !== 'done') return false;
+  if (node.never_prompted === true) return true;
+  const stamps = [node.you_at, node.it_at].filter(stamp => stamp != null);
+  return stamps.length > 0 && now - Math.max(...stamps) > 24 * 3600;
+}
+function isFolded(node) { return foldable(node) && !unfolded.has(clusterKey(node)); }
 function layoutFleet(hosts) {
   const ordered = [...snapshot.nodes].sort((a, b) => a.id.localeCompare(b.id));
   const viewport = $('map-scroll').clientWidth;
@@ -324,7 +334,8 @@ function layoutFleet(hosts) {
   const repack = mode !== layoutModeSignature;
   layoutModeSignature = mode;
   let width = Math.max(viewport, hosts.length * MIN_REGION);
-  const signature = JSON.stringify([width, hosts.map(host => host.name), [...expanded],
+  const signature = JSON.stringify([width, hosts.map(host => host.name), [...expanded], [...unfolded],
+    ordered.filter(isFolded).map(node => node.id),
     ordered.map(node => [node.id, clusterKey(node), node.kind, node.parent]),
     Object.values(snapshot.runs || {}).map(run => [run.run, run.rows.map(row => [row.id, row.live])]),
     Object.values(snapshot.clusters || {}).map(info => [info.name, info.run, info.matrix_host, info.fallbacks, info.waiting, info.stalled, info.short_name]),
@@ -385,11 +396,20 @@ function layoutFleet(hosts) {
       } else if (x && x + clusterWidth > available) { x = 0; y += rowHeight + GAP; rowHeight = 0; }
       const columns = Math.max(1, Math.floor((baseWidth - 20) / CELL));
       // Slots belong to node IDs, so expansion never rearranges untouched grids.
-      const sorted = [...items].sort((a, b) => (a.kind === 'subagent') - (b.kind === 'subagent'));
+      const chipId = 'fold:' + id, foldedNodes = items.filter(isFolded);
+      const sorted = items.filter(node => !isFolded(node)).sort((a, b) => (a.kind === 'subagent') - (b.kind === 'subagent'));
+      if (foldedNodes.length) sorted.push({id: chipId, kind: 'chip'}); else positions.delete(chipId);
       const slots = new Map(), preserved = new Set();
+      // A folded node keeps its slot reserved, so unfolding puts it back where it was.
+      const heldSlots = foldedNodes.map(node => [node, positions.get(node.id)])
+        .filter(([, old]) => old?.cluster === id && old.columns === columns);
+      for (const [node, old] of heldSlots) slots.set(node.id, old.slot);
       for (const node of sorted) {
         const old = positions.get(node.id);
         if (old?.cluster === id && old.columns === columns) { slots.set(node.id, old.slot); preserved.add(node.id); }
+      }
+      if (foldedNodes.length && !preserved.has(chipId) && heldSlots.length) {
+        slots.set(chipId, slots.get(heldSlots[0][0].id)); slots.delete(heldSlots[0][0].id);
       }
       for (const node of sorted) {
         let slot = slots.get(node.id);
@@ -430,7 +450,7 @@ function layoutFleet(hosts) {
         }
       }
       const bodyHeight = open ? (run ? 75 + run.rows.reduce((sum, row) => sum + Math.max(150, Math.ceil(row.live.length / 2) * 76 + 20), 0) : 85 + items.length * 78)
-        : Math.max(50, ...items.map(node => positions.get(node.id).y + 42));
+        : Math.max(50, ...sorted.map(node => positions.get(node.id).y + 42));
       const floorHeight = Math.max(saved?.floorHeight || 0, baseHeader + bodyHeight + 20);
       const clusterHeight = Math.max(floorHeight, headerHeight + bodyHeight + 20);
       cluster.geometry = {left: x, top: y, baseTop: y, width: clusterWidth, baseWidth, baseHeader,
@@ -466,7 +486,7 @@ function layoutFleet(hosts) {
     regionX += regionWidth;
     width = Math.max(width, regionX);
   }
-  for (const id of positions.keys()) if (!nodes.has(id)) positions.delete(id);
+  for (const id of positions.keys()) if (!nodes.has(id) && !id.startsWith('fold:')) positions.delete(id);
   $('map').setAttribute('width', width);
   $('map').setAttribute('height', height);
 }
@@ -512,6 +532,29 @@ function updateNode(node) {
   view.group.style.display = '';
   view.group.setAttribute('transform', `translate(${position.x} ${position.y})`);
   paintNode(node, view);
+}
+function paintFoldChips() {
+  for (const chip of foldChips.values()) chip.style.display = 'none';
+  for (const cluster of clusters.values()) {
+    const count = clusterItems(cluster).filter(isFolded).length, position = positions.get('fold:' + cluster.id);
+    if (!count || !position) continue;
+    let chip = foldChips.get(cluster.id);
+    if (!chip) {
+      chip = svg('g', {class: 'fold-chip', role: 'button', tabindex: 0});
+      chip.append(svg('rect', {x: -26, y: -11, width: 52, height: 22, rx: 11}), svg('text', {y: 4, 'text-anchor': 'middle'}));
+      const unfold = () => { unfolded.add(cluster.id); render(); };
+      chip.addEventListener('click', unfold);
+      chip.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); unfold(); }
+      });
+      foldChips.set(cluster.id, chip);
+    }
+    chip.children[1].textContent = `${count} idle`;
+    chip.setAttribute('aria-label', `${count} idle sessions folded; show them`);
+    chip.setAttribute('transform', `translate(${position.x} ${position.y})`);
+    if (chip.parentNode !== cluster.grid) cluster.grid.append(chip);
+    chip.style.display = '';
+  }
 }
 function nodeState(node) { return node.state === 'done' ? 'idle' : node.state; }
 function nodeDimmed(node) { return stateFilter !== null && nodeState(node) !== stateFilter; }
@@ -586,7 +629,7 @@ function paintNode(node, view) {
   view.ring.setAttribute('stroke-dasharray', dash);
 }
 function endpoint(id) {
-  if (!nodes.has(id)) return null;
+  if (!nodes.has(id) || isFolded(nodes.get(id))) return null;
   const position = positions.get(id);
   if (!position || expanded.has(position.cluster)) return null;
   const cluster = clusters.get(position.cluster);
@@ -633,9 +676,10 @@ function render() {
     region.group.style.display = '';
     region.label.textContent = host.label || host.name;
     const memory = host.memory || {};
-    const status = host.workers != null && host.cap != null && host.workers > host.cap ? 'Over cap'
-      : memory.free_pct != null && memory.free_pct < 40 ? 'Tight' : 'OK';
-    region.metrics.textContent = `${status} · ${memory.free_pct == null ? '—' : memory.free_pct.toFixed(1) + '%'} free · swap ${memory.swap_gb == null ? '—' : memory.swap_gb.toFixed(1) + ' GB'} · ${host.workers ?? '—'}/${host.cap ?? '—'} workers/cap`;
+    const known = memory.free_pct != null && host.workers != null;
+    const status = !known ? '' : host.cap != null && host.workers > host.cap ? 'Over cap'
+      : memory.free_pct < 40 ? 'Tight' : 'OK';
+    region.metrics.textContent = `${status ? status + ' · ' : ''}${memory.free_pct == null ? '—' : memory.free_pct.toFixed(1) + '%'} free · swap ${memory.swap_gb == null ? '—' : memory.swap_gb.toFixed(1) + ' GB'} · ${host.workers ?? '—'}/${host.cap ?? '—'} workers/cap`;
     region.metrics.setAttribute('fill', host.amber ? '#ffba71' : '#a0a8be');
     region.background.setAttribute('stroke', host.amber ? '#bb8445' : 'none');
     region.badge.style.display = host.reachable === false ? '' : 'none';
@@ -646,8 +690,9 @@ function render() {
   for (const node of [...snapshot.nodes].sort((a, b) => (a.kind === 'subagent') - (b.kind === 'subagent'))) {
     const cluster = ensureCluster(node);
     cluster.group.style.display = '';
-    updateNode(node);
+    if (!isFolded(node)) updateNode(node);
   }
+  paintFoldChips();
   miniViews = [];
   for (const cluster of clusters.values()) {
     const info = clusterInfo(cluster);
