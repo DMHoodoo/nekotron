@@ -9,7 +9,7 @@
 <style>
 :root { color-scheme: dark; font: 14px/1.5 system-ui, sans-serif; background: #10121a; color: #e4e7f0; }
 * { box-sizing: border-box; }
-body { margin: 0; height: 100vh; display: grid; grid-template-rows: 58px minmax(0, 1fr) auto; }
+body { margin: 0; height: 100vh; display: grid; grid-template-rows: 58px auto minmax(0, 1fr) auto; }
 header { display: flex; align-items: center; gap: 20px; padding: 0 22px; border-bottom: 1px solid #303548; }
 h1 { font-size: 18px; margin: 0; font-weight: 650; }
 #status { color: #a0a8be; font-size: 12px; }
@@ -57,13 +57,49 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospac
 .node .selection { stroke: transparent; }
 .node[aria-pressed="true"] .selection, .node:focus-visible .selection { stroke: #fff; }
 .attention { filter: drop-shadow(0 0 6px #f0803c); }
+#decisions { padding: 8px 22px; display: flex; gap: 8px; overflow: auto; max-height: 130px; border-bottom: 1px solid #303548; }
+#decisions button { min-width: 260px; text-align: left; font-size: 12px; }
+.cluster-content { font-size: 12px; padding: 10px; overflow: auto; height: 100%; }
+.cluster-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cluster-heading button { font-size: 12px; padding: 3px 6px; }
+.cluster-heading .cluster-toggle { font-weight: 650; font-size: 14px; }
+.stepper { display: flex; align-items: center; gap: 5px; margin-top: 6px; }
+.stepper span:first-child { width: 145px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stepper i { width: 8px; height: 8px; border-radius: 50%; border: 1px solid #77839e; }
+.stepper i.reached { background: #4f8ef7; }
+.stepper i.current { outline: 2px solid #d2e1ff; outline-offset: 2px; }
+.cluster-summary { margin: 6px 0; color: #bfc6d9; }
+table { border-collapse: collapse; font-size: 11px; margin-top: 12px; width: 100%; }
+.matrix { min-width: 1130px; table-layout: fixed; }
+th, td { text-align: left; border: 1px solid #374058; padding: 8px; vertical-align: top; overflow-wrap: anywhere; }
+th { color: #bfc9e0; }
+.matrix th:first-child { width: 130px; }
+.matrix th:nth-child(5) { width: 180px; }
+.matrix th:nth-child(6) { width: 150px; }
+.matrix th:last-child { width: 165px; }
+.chip { display: block; margin: 3px 0; padding: 2px 4px; border: 1px solid #555f7a; border-radius: 4px; font-size: 10px; }
+.pass, .accepted, .merged { color: #4cc38a; }
+.revise, .stale { color: #ffba71; }
+.pending { color: #a0a8be; }
+.stale { display: block; margin-top: 4px; }
+.segments { display: flex; gap: 2px; height: 26px; margin: 5px 0; }
+.segments button { min-width: 0; border: 0; white-space: nowrap; padding: 0; border-radius: 2px; font-size: 9px; color: #fff; overflow: hidden; }
+.live-node { display: inline-flex; flex-direction: column; align-items: center; width: 66px; vertical-align: top; }
+.live-node span { font-size: 10px; text-align: center; overflow-wrap: anywhere; }
+input[type=checkbox] { width: auto; }
+#context-details { white-space: pre-wrap; overflow-wrap: anywhere; }
+#context-rail { margin-bottom: 20px; }
 </style>
 </head>
 <body>
 <header><h1>Fleet map</h1><span id="status" role="status">Connecting…</span></header>
+<nav id="decisions" aria-label="Decision strip"></nav>
 <main>
-  <div id="map-scroll"><svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="Agent sessions grouped by host and cluster"><g id="regions"></g><g id="edges" pointer-events="none"></g><g id="clusters"></g></svg></div>
+  <div id="map-scroll"><svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="Agent sessions grouped by host and cluster"><defs><pattern id="stalled-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#f3d18a" stroke-width="2"/></pattern></defs><g id="regions"></g><g id="edges" pointer-events="none"></g><g id="clusters"></g></svg></div>
   <aside id="rail" aria-label="Session details">
+      <div id="action-error" class="error" role="alert" hidden></div>
+      <p id="action-status" class="muted" role="status"></p>
+    <section id="context-rail" hidden><h2 id="context-title"></h2><div id="context-details"></div></section>
     <div id="empty"><h2>Your fleet, at a glance</h2><p class="muted">Select a session to see its purpose, recent work, and terminal actions.</p></div>
     <section id="details" hidden>
       <h2 id="node-title"></h2><p id="node-kind"></p>
@@ -86,8 +122,14 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospac
       <div id="actions" hidden>
         <button type="button" data-action="peek">Peek</button><button type="button" data-action="jump">Jump</button><button type="button" data-action="send">Send</button><button type="button" data-action="close" class="danger">Close</button>
       </div>
-      <div id="action-error" class="error" role="alert" hidden></div>
-      <p id="action-status" class="muted" role="status"></p>
+      <p id="pin-note" class="muted"></p>
+      <form id="promote-form">
+        <h2>Make a slice</h2>
+        <label for="project-name">Project</label><input id="project-name" required maxlength="200">
+        <label for="slice-name">Slice</label><input id="slice-name" required maxlength="200">
+        <label for="slice-stage">Stage</label><select id="slice-stage"><option value="goal">Goal</option><option value="design">Design</option><option value="plan">Plan (readiness)</option><option value="implementing">Implementing</option><option value="review">Review</option><option value="delivery">Delivery</option><option value="accepted">Accepted</option></select>
+        <button type="submit">Save slice / stage</button>
+      </form>
       <form id="assign-form">
         <label for="cluster-choice">Move to…</label><select id="cluster-choice"></select>
         <div id="new-cluster-row" hidden><label for="new-cluster">New cluster name</label><input id="new-cluster" maxlength="200" autocomplete="off"></div>
@@ -109,11 +151,21 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospac
     <p><strong>Subagents:</strong> Radius 6, joined to a parent by a 20px line when space allows; overflow uses free grid slots with longer parent links.</p>
     <p><strong>Edge kinds:</strong> Solid = message, dashed = dispatch, thin gray = subagent.</p>
     <p><strong>Edge age:</strong> Full opacity under 10m; fades linearly to 25% at 60m, then stays at 25%.</p>
+    <p><strong>Stepper:</strong> Seven dots: Goal, Design, Plan (readiness), Implementing, Review, Delivery, Accepted. Blue through current stage; outlined dot is current. Stage is not verified progress.</p>
+    <p><strong>Package segments:</strong> Width S=1, M=2, L=3. Planned gray, assigned violet, running blue, returned teal, verified green, blocked orange. Only verified units count.</p>
+    <p><strong>Review chips:</strong> Test quality, code standards, commenting, general code; green pass, amber revise, gray pending. Gate cells show verdict and date.</p>
+    <p><strong>Evidence stale:</strong> Amber marker means the head moved after passed evidence; select it for commits when available.</p>
+    <p><strong>Stalled hatch:</strong> Diagonal stripes over a working node mean transcript and terminal output have not changed for 10 minutes.</p>
+    <p><strong>Regions:</strong> Free memory, swap used, workers/cap. Amber when free memory is below 40% or workers exceed cap. Unreachable probes show blanks.</p>
+    <p><strong>Ladder:</strong> Asked → Working (commits ahead) → PR (number, draft and checks) → Merged. Hand-set project stages are labeled separately.</p>
+    <p><strong>Decisions:</strong> Open C/D items and unratified B defaults; B ordered by apply-by. Live nodes use map encodings with host tags.</p>
   </div>
 </footer>
 <dialog id="overlay" aria-labelledby="overlay-title">
   <h2 id="overlay-title"></h2><p id="overlay-text"></p><pre id="screen" tabindex="0" hidden></pre>
   <form id="send-form" hidden><label for="send-text">Line to send</label><input id="send-text" autocomplete="off" required><button id="send-submit" type="submit">Send line</button></form>
+  <form id="broadcast-form" hidden><label for="broadcast-text">Line to send</label><input id="broadcast-text" required autocomplete="off"><label><input id="include-terminals" type="checkbox"> Include terminal-only nodes</label><p id="broadcast-count"></p><button type="submit">Confirm send to all</button></form>
+  <button id="confirm-batch" class="danger" type="button" hidden>Close all</button>
   <div id="overlay-error" class="error" role="alert" hidden></div>
   <div class="dialog-buttons"><button id="cancel-overlay" type="button">Cancel</button><button id="confirm-close" type="button" class="danger" hidden>Close it</button></div>
 </dialog>
@@ -127,13 +179,21 @@ const positions = new Map(); // Keyed by node id; ordinary polls retain the layo
 const regions = new Map();
 const clusters = new Map();
 const nodeViews = new Map();
-const MIN_REGION = 320, CELL = 70, GAP = 16;
+const MIN_REGION = 420, CELL = 70, GAP = 16;
 let layoutSignature = '';
 let regionOrder = [];
 let snapshot = {hosts: [], nodes: [], edges: []};
 let nodes = new Map(), selectedId = null, dialogNodeId = null;
 let timer = null, pollSeconds = 3, loading = false, actionBusy = false;
 let gradientId = 0, assignmentChoices = '';
+const stages = ['goal', 'design', 'plan', 'implementing', 'review', 'delivery', 'accepted'];
+const stageLabels = ['Goal', 'Design', 'Plan (readiness)', 'Implementing', 'Review', 'Delivery', 'Accepted'];
+const packageColors = {planned: '#6b7394', assigned: '#8567b4', running: '#4f8ef7', returned: '#277c8b', verified: '#298456', blocked: '#a95b28'};
+const expanded = new Set();
+let selectedContext = null, broadcastCluster = null, closeBatch = [];
+let miniViews = [];
+let decisionSignature = '';
+
 
 function svg(tag, attributes = {}, text) {
   const element = document.createElementNS(NS, tag);
@@ -179,11 +239,12 @@ function ensureRegion(host) {
   const group = svg('g');
   const background = svg('rect', {y: 10, rx: 12, fill: '#141824'});
   const label = svg('text', {y: 38, class: 'region-label'});
+  const metrics = svg('text', {y: 62, fill: '#a0a8be', 'font-size': 12});
   const badge = svg('g');
   badge.append(svg('rect', {y: 22, width: 99, height: 22, rx: 5, fill: '#702e38'}), svg('text', {x: 10, y: 37, fill: '#ffd2d7', 'font-size': 11}, 'unreachable'));
-  group.append(background, label, badge);
+  group.append(background, label, metrics, badge);
   $('regions').append(group);
-  const region = {group, background, label, badge};
+  const region = {group, background, label, metrics, badge};
   regions.set(host.name, region);
   return region;
 }
@@ -192,107 +253,121 @@ function ensureCluster(node) {
   if (clusters.has(id)) return clusters.get(id);
   const group = svg('g');
   const background = svg('rect', {rx: 10, fill: 'none', stroke: '#4b546d', 'stroke-dasharray': '5 5'});
-  const name = node.cluster || 'Unsorted';
-  const label = svg('text', {x: 14, y: 24, class: 'cluster-label'});
-  const grid = svg('g', {transform: 'translate(10 34)'});
-  group.append(background, label, grid);
+  const content = svg('foreignObject', {x: 0, y: 0});
+  const panel = document.createElement('div'); panel.className = 'cluster-content';
+  content.append(panel);
+  const grid = svg('g');
+  group.append(background, content, grid);
   $('clusters').append(group);
-  const cluster = {id, name, group, background, label, grid};
+  const cluster = {id, name: node.cluster || 'Unsorted', host: node.host, group, background, content, panel, grid};
   clusters.set(id, cluster);
   return cluster;
 }
+function clusterInfo(cluster) { return snapshot.clusters?.[cluster.name] || {}; }
+function clusterRun(cluster) { return snapshot.runs?.[clusterInfo(cluster).run]; }
+function clusterItems(cluster) { return snapshot.nodes.filter(node => clusterKey(node) === cluster.id); }
 function layoutFleet(hosts) {
-  const ordered = [...snapshot.nodes].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const ordered = [...snapshot.nodes].sort((a, b) => a.id.localeCompare(b.id));
   const width = Math.max($('map-scroll').clientWidth, hosts.length * MIN_REGION);
-  const signature = JSON.stringify([width, hosts.map(host => host.name),
-    ordered.map(node => [node.id, clusterKey(node), node.kind, node.parent])]);
+  const signature = JSON.stringify([width, hosts.map(host => host.name), [...expanded],
+    ordered.map(node => [node.id, clusterKey(node), node.kind, node.parent]),
+    Object.values(snapshot.runs || {}).map(run => [run.run, run.rows.map(row => [row.id, row.live])]),
+    Object.values(snapshot.clusters || {}).map(info => [info.name, info.run, info.matrix_host])]);
   if (signature === layoutSignature) return;
   layoutSignature = signature;
-  positions.clear();
-  const counts = new Map(hosts.map(host => [host.name, 0]));
   const members = new Map();
   for (const node of ordered) {
-    counts.set(node.host, counts.get(node.host) + 1);
     const id = clusterKey(node);
     if (!members.has(id)) members.set(id, []);
     members.get(id).push(node);
   }
-  // Clamp small regions first, then divide the remaining width proportionally.
+  // A projection can outlive its Chief session. Keep its matrix accessible.
+  for (const info of Object.values(snapshot.clusters || {})) {
+    if (info.run && !members.has(JSON.stringify([info.matrix_host, info.name])))
+      members.set(JSON.stringify([info.matrix_host, info.name]), []);
+  }
+  const counts = new Map(hosts.map(host => [host.name, ordered.filter(node => node.host === host.name).length]));
   const widths = new Map();
   let remaining = width, pending = [...hosts];
   while (pending.length) {
     const total = pending.reduce((sum, host) => sum + counts.get(host.name), 0);
     const share = host => total ? remaining * counts.get(host.name) / total : remaining / pending.length;
     const small = pending.filter(host => share(host) < MIN_REGION);
-    if (!small.length) {
-      for (const host of pending) widths.set(host.name, share(host));
-      break;
-    }
+    if (!small.length) { for (const host of pending) widths.set(host.name, share(host)); break; }
     for (const host of small) { widths.set(host.name, MIN_REGION); remaining -= MIN_REGION; }
     pending = pending.filter(host => !widths.has(host.name));
   }
   let regionX = 0, height = 100;
   for (const host of hosts) {
-    const region = ensureRegion(host), regionWidth = widths.get(host.name);
-    const available = regionWidth - 36;
+    const region = ensureRegion(host), regionWidth = widths.get(host.name), available = regionWidth - 36;
     region.background.setAttribute('x', regionX + 8);
     region.background.setAttribute('width', regionWidth - 16);
     region.label.setAttribute('x', regionX + 24);
+    region.metrics.setAttribute('x', regionX + 24);
     region.badge.setAttribute('transform', `translate(${regionX + regionWidth - 124} 0)`);
-    const groups = [...members.values()].filter(items => items[0].host === host.name)
-      .sort((a, b) => b.length - a.length || clusterKey(a[0]).localeCompare(clusterKey(b[0])));
-    let x = 0, y = 62, rowHeight = 0;
-    for (const items of groups) {
-      const cluster = ensureCluster(items[0]);
-      let clusterWidth = Math.min(available, Math.max(160, Math.ceil(Math.sqrt(items.length)) * CELL + 20));
-      const room = available - x;
-      // Use the rest of a row when it still offers a useful node grid.
-      if (x && room < clusterWidth && room >= Math.max(160, clusterWidth / 2)) clusterWidth = room;
+    const groups = [...members.entries()].filter(([id]) => JSON.parse(id)[0] === host.name)
+      .sort(([a], [b]) => a.localeCompare(b));
+    let x = 0, y = 82, rowHeight = 0;
+    for (const [id, items] of groups) {
+      const cluster = ensureCluster({host: host.name, cluster: JSON.parse(id)[1]});
+      const run = clusterRun(cluster), open = expanded.has(id);
+      const headerHeight = 125 + (run?.rows.length || 0) * 24;
+      const baseWidth = Math.min(available, Math.max(340, Math.ceil(Math.sqrt(items.length)) * CELL + 20));
+      const clusterWidth = open ? available : baseWidth;
       if (x && x + clusterWidth > available) { x = 0; y += rowHeight + GAP; rowHeight = 0; }
-      const columns = Math.max(1, Math.floor((clusterWidth - 20) / CELL));
+      const columns = Math.max(1, Math.floor((baseWidth - 20) / CELL));
+      // Slots belong to node IDs, so expansion never rearranges untouched grids.
       const sorted = [...items].sort((a, b) => (a.kind === 'subagent') - (b.kind === 'subagent'));
-      sorted.forEach((node, slot) => positions.set(node.id, {
-        cluster: cluster.id, x: CELL / 2 + (slot % columns) * CELL,
-        y: 28 + Math.floor(slot / columns) * CELL
-      }));
-      // Keep short parent links where they fit; overflow retains its grid slot.
+      const slots = new Map();
+      for (const node of sorted) {
+        const old = positions.get(node.id);
+        if (old?.cluster === id && old.columns === columns) slots.set(node.id, old.slot);
+      }
+      for (const node of sorted) {
+        let slot = slots.get(node.id);
+        if (slot === undefined) { slot = 0; while ([...slots.values()].includes(slot)) slot++; slots.set(node.id, slot); }
+        positions.set(node.id, {cluster: id, slot, columns,
+          x: CELL / 2 + slot % columns * CELL, y: 28 + Math.floor(slot / columns) * CELL});
+      }
+      // Retain the map's short parent attachments without changing reserved slots.
       for (const node of sorted) {
         if (node.kind !== 'subagent') continue;
-        const parent = positions.get(node.parent);
-        if (!parent || parent.cluster !== cluster.id) continue;
+        const parent = positions.get(node.parent), point = positions.get(node.id);
+        if (!parent || parent.cluster !== id) continue;
         for (let direction = 0; direction < 8; direction++) {
           const angle = direction * Math.PI / 4;
-          const position = {cluster: cluster.id, x: parent.x + 20 * Math.cos(angle), y: parent.y + 20 * Math.sin(angle)};
-          if (position.x < 20 || position.x > clusterWidth - 40 || position.y < 20) continue;
-          const occupied = sorted.some(other => {
+          const candidate = {x: parent.x + 20 * Math.cos(angle), y: parent.y + 20 * Math.sin(angle)};
+          if (candidate.x < 20 || candidate.x > baseWidth - 40 || candidate.y < 20) continue;
+          if (sorted.some(other => {
             if (other.id === node.id || other.id === node.parent) return false;
-            const point = positions.get(other.id);
-            return Math.hypot(point.x - position.x, point.y - position.y) < 40;
-          });
-          if (!occupied) { positions.set(node.id, position); break; }
+            const occupied = positions.get(other.id);
+            return Math.hypot(occupied.x - candidate.x, occupied.y - candidate.y) < 40;
+          })) continue;
+          Object.assign(point, candidate); break;
         }
       }
-      const clusterHeight = Math.max(...items.map(node => positions.get(node.id).y + 42)) + 40;
-      cluster.x = regionX + 18 + x + 10;
-      cluster.y = y + 34;
+      const bodyHeight = open ? (run ? 75 + run.rows.reduce((sum, row) => sum + Math.max(150, Math.ceil(row.live.length / 2) * 76 + 20), 0) : 85 + items.length * 78)
+        : Math.max(50, ...items.map(node => positions.get(node.id).y + 42));
+      const clusterHeight = headerHeight + bodyHeight + 20;
+      Object.assign(cluster, {x: regionX + 28 + x, y: y + headerHeight, headerHeight});
       cluster.group.setAttribute('transform', `translate(${regionX + 18 + x} ${y})`);
       cluster.background.setAttribute('width', clusterWidth);
       cluster.background.setAttribute('height', clusterHeight);
-      const labelLength = Math.max(8, Math.floor((clusterWidth - 28) / 7));
-      cluster.label.textContent = cluster.name.length > labelLength ? `${cluster.name.slice(0, labelLength - 1)}…` : cluster.name;
-      cluster.label.append(svg('title', {}, cluster.name));
-      x += clusterWidth + GAP;
-      rowHeight = Math.max(rowHeight, clusterHeight);
+      cluster.content.setAttribute('width', clusterWidth);
+      cluster.content.setAttribute('height', open ? clusterHeight : headerHeight);
+      cluster.grid.setAttribute('transform', `translate(10 ${headerHeight})`);
+      cluster.grid.style.display = open ? 'none' : '';
+      x += clusterWidth + GAP; rowHeight = Math.max(rowHeight, clusterHeight);
     }
-    const bottom = y + rowHeight + 18;
-    region.background.setAttribute('height', bottom - 10);
-    height = Math.max(height, bottom + 10);
+    region.background.setAttribute('height', y + rowHeight + 16);
+    height = Math.max(height, y + rowHeight + 26);
     regionX += regionWidth;
   }
+  for (const id of positions.keys()) if (!nodes.has(id)) positions.delete(id);
   $('map').setAttribute('width', width);
   $('map').setAttribute('height', height);
 }
-function makeNode(node) {
+function makeNode(node, register = true) {
   const small = node.kind === 'subagent';
   const group = svg('g', {class: 'node', role: 'button', tabindex: 0});
   const title = svg('title');
@@ -306,19 +381,20 @@ function makeNode(node) {
   const pulse = svg('circle', {r: 11, fill: 'none', 'stroke-width': 1.5, opacity: .6});
   pulse.append(svg('animate', {attributeName: 'r', values: '11;16', dur: '1.6s', repeatCount: 'indefinite'}), svg('animate', {attributeName: 'opacity', values: '.6;0', dur: '1.6s', repeatCount: 'indefinite'}));
   const body = svg('circle', {r: small ? 6 : 11, fill: `url(#${gradient.id})`});
+  const hatch = svg('circle', {r: small ? 6 : 11, fill: 'url(#stalled-hatch)', 'pointer-events': 'none'});
   const ringBackground = svg('circle', {r: 17, fill: 'none', stroke: 'rgba(127,127,127,.25)', 'stroke-width': 3});
   const ring = svg('circle', {r: 17, fill: 'none', 'stroke-width': 3, transform: 'rotate(-90)'});
   const label = svg('text', {y: 36, 'text-anchor': 'middle', class: 'node-label'});
   // Decorative rings can cross a short parent attachment, but must not steal clicks.
   for (const decoration of [selection, ringBackground, ring, pulse]) decoration.setAttribute('pointer-events', 'none');
-  group.append(defs, title, hit, selection, ringBackground, ring, pulse, body, label);
+  group.append(defs, title, hit, selection, ringBackground, ring, pulse, body, hatch, label);
   if (small) label.style.display = 'none';
   group.addEventListener('click', () => selectNode(node.id));
   group.addEventListener('keydown', event => {
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectNode(node.id); }
   });
-  const view = {group, title, center, rim, pulse, body, ring, label};
-  nodeViews.set(node.id, view);
+  const view = {group, title, center, rim, pulse, body, hatch, ring, label};
+  if (register) nodeViews.set(node.id, view);
   return view;
 }
 function updateNode(node) {
@@ -327,6 +403,10 @@ function updateNode(node) {
   if (view.group.parentNode !== cluster.grid) cluster.grid.append(view.group);
   view.group.style.display = '';
   view.group.setAttribute('transform', `translate(${position.x} ${position.y})`);
+  paintNode(node, view);
+}
+function paintNode(node, view) {
+  view.hatch.style.display = node.stalled ? '' : 'none';
   view.group.setAttribute('aria-pressed', String(selectedId === node.id));
   const title = node.title || node.id;
   view.group.setAttribute('aria-label', `${title}, ${node.state}, ${node.kind}`);
@@ -353,7 +433,7 @@ function updateNode(node) {
 function endpoint(id) {
   if (!nodes.has(id)) return null;
   const position = positions.get(id);
-  if (!position) return null;
+  if (!position || expanded.has(position.cluster)) return null;
   const cluster = clusters.get(position.cluster);
   return {x: cluster.x + position.x, y: cluster.y + position.y};
 }
@@ -379,11 +459,20 @@ function render() {
   regionOrder = regionOrder.filter(name => hostMap.has(name));
   for (const name of hostMap.keys()) if (!regionOrder.includes(name)) regionOrder.push(name);
   const hosts = regionOrder.map(name => hostMap.get(name));
+  for (const info of Object.values(snapshot.clusters || {})) {
+    if (info.run && !hostMap.has(info.matrix_host)) {
+      const host = {name: info.matrix_host}; hosts.push(host); hostMap.set(host.name, host);
+    }
+  }
   layoutFleet(hosts);
   for (const host of hosts) {
     const region = ensureRegion(host);
     region.group.style.display = '';
     region.label.textContent = host.label || host.name;
+    const memory = host.memory || {};
+    region.metrics.textContent = `${memory.free_pct == null ? '—' : memory.free_pct.toFixed(1) + '%'} free · swap ${memory.swap_gb == null ? '—' : memory.swap_gb.toFixed(1) + ' GB'} · ${host.workers ?? '—'}/${host.cap ?? '—'} workers/cap`;
+    region.metrics.setAttribute('fill', host.amber ? '#ffba71' : '#a0a8be');
+    region.background.setAttribute('stroke', host.amber ? '#bb8445' : 'none');
     region.badge.style.display = host.reachable === false ? '' : 'none';
   }
   for (const cluster of clusters.values()) cluster.group.style.display = 'none';
@@ -394,28 +483,50 @@ function render() {
     cluster.group.style.display = '';
     updateNode(node);
   }
+  miniViews = [];
+  for (const cluster of clusters.values()) {
+    const info = clusterInfo(cluster);
+    if (clusterItems(cluster).length || (info.run && info.matrix_host === cluster.host)) {
+      cluster.group.style.display = ''; renderCluster(cluster);
+      miniViews.push(...(cluster.miniViews || []));
+    }
+  }
+  for (const [id, view] of miniViews) if (nodes.has(id)) paintNode(nodes.get(id), view);
+  renderDecisions();
+  if ($('overlay').open && !$('broadcast-form').hidden) updateBroadcastCount();
   drawEdges();
   renderRail();
 }
 function selectNode(id) {
   if (!nodes.has(id)) return;
   selectedId = id;
+  selectedContext = null;
   assignmentChoices = '';
   $('action-error').hidden = true;
   $('action-status').textContent = '';
   $('rail').scrollTop = 0;
   for (const [nodeId, view] of nodeViews) view.group.setAttribute('aria-pressed', String(id === nodeId));
+  for (const [nodeId, view] of miniViews) view.group.setAttribute('aria-pressed', String(id === nodeId));
   renderRail();
 }
 function renderRail() {
+  renderContext();
   const node = nodes.get(selectedId);
-  $('empty').hidden = Boolean(node);
+  $('empty').hidden = Boolean(node) || Boolean(selectedContext);
   $('details').hidden = !node;
   if (!node) {
     $('empty').lastElementChild.textContent = selectedId ? 'This session is no longer in the current snapshot. Select another session.' : 'Select a session to see its purpose, recent work, and terminal actions.';
     return;
   }
   setText('node-title', node.title || node.id);
+  $('pin-note').textContent = node.pin_overridden ? `Pin overridden: ${node.pin_overridden}. The run projection controls this session's cluster and stage.` : node.stage ? `Stage: ${node.stage}${node.run ? ' · run projection' : ' · hand-set'}` : '';
+  $('promote-form').hidden = Boolean(snapshot.runs?.[node.run]);
+  if ($('promote-form').dataset.node !== node.id) {
+    $('project-name').value = node.stage ? node.cluster : '';
+    $('slice-name').value = node.title || '';
+    $('slice-stage').value = node.stage || 'goal';
+    $('promote-form').dataset.node = node.id;
+  }
   setText('node-kind', `${node.kind === 'terminal' ? 'Terminal only' : node.kind === 'subagent' ? 'Subagent' : 'Claude session'} · ${node.state === 'attention' ? 'Needs you' : node.state} · ${node.cluster || 'Unsorted'}${node.subagents_total > 0 ? ` · ${node.subagents_total} subagents, ${node.subagents_shown} shown` : ''}`);
   for (const field of ['purpose', 'doing', 'repo', 'worktree', 'branch', 'model']) setText(field, node[field]);
   setText('you-age', node.never_addressed ? 'Never addressed' : node.you_at == null ? 'Unknown' : `${age(node.you_at)} ago`);
@@ -465,6 +576,8 @@ function openOverlay(title, nodeId) {
   $('screen').hidden = true;
   $('send-form').hidden = true;
   $('confirm-close').hidden = true;
+  $('broadcast-form').hidden = true;
+  $('confirm-batch').hidden = true;
   $('overlay-error').hidden = true;
   $('cancel-overlay').textContent = 'Cancel';
   $('overlay').showModal();
@@ -474,11 +587,11 @@ async function runAction(work) {
   actionBusy = true;
   $('action-error').hidden = true;
   $('overlay-error').hidden = true;
-  document.querySelectorAll('#actions button, #confirm-close, #send-submit').forEach(button => button.disabled = true);
+  document.querySelectorAll('#actions button, #confirm-close, #send-submit, #confirm-batch, #broadcast-form button').forEach(button => button.disabled = true);
   try { await work(); } catch (error) { showError(error, $('overlay').open); }
   finally {
     actionBusy = false;
-    document.querySelectorAll('#actions button, #confirm-close, #send-submit').forEach(button => button.disabled = false);
+    document.querySelectorAll('#actions button, #confirm-close, #send-submit, #confirm-batch, #broadcast-form button').forEach(button => button.disabled = false);
   }
 }
 $('actions').addEventListener('click', event => {
@@ -530,11 +643,261 @@ $('assign-form').addEventListener('submit', async event => {
   const button = event.target.querySelector('button'); button.disabled = true;
   $('action-error').hidden = true;
   try {
-    await request('/api/assign', {node: id, initiative});
+    // /api/assign remains supported by the server; /api/move also clears obsolete promotion.
+    await request('/api/move', {node: id, cluster: initiative});
     $('action-status').textContent = `Move to ${initiative} saved. The next snapshot will show the assignment.`;
   } catch (error) { showError(error); }
   finally { button.disabled = false; }
 });
+function html(tag, text, className) {
+  const element = document.createElement(tag);
+  if (text !== undefined) element.textContent = text;
+  if (className) element.className = className;
+  return element;
+}
+function button(text, action, className = '') {
+  const element = html('button', text, className); element.type = 'button';
+  element.addEventListener('click', action); return element;
+}
+function miniNode(id) {
+  const node = nodes.get(id);
+  if (!node) return html('span', 'Session unavailable', 'muted');
+  const wrapper = html('span', undefined, 'live-node');
+  const drawing = svg('svg', {width: 46, height: 44, viewBox: '-25 -25 50 50'});
+  const view = makeNode(node, false); paintNode(node, view); view.label.style.display = 'none';
+  drawing.append(view.group); wrapper.append(drawing, html('span', node.host));
+  miniViews.push([id, view]); return wrapper;
+}
+function showContext(context, nodeId = null) {
+  selectedContext = context; selectedId = nodeId; assignmentChoices = '';
+  $('rail').scrollTop = 0; renderRail();
+  for (const [id, view] of [...nodeViews, ...miniViews]) view.group.setAttribute('aria-pressed', String(id === nodeId));
+}
+function openRun(runId) {
+  const run = snapshot.runs?.[runId]; if (!run) return;
+  const info = snapshot.clusters?.[run.title]; if (!info) return;
+  const id = JSON.stringify([info.matrix_host, run.title]);
+  expanded.add(id); selectedContext = {run: runId}; selectedId = run.chief_node;
+  render(); clusters.get(id)?.group.scrollIntoView({block: 'nearest', inline: 'nearest'});
+  $('rail').scrollTop = 0;
+}
+function renderDecisions() {
+  const signature = JSON.stringify(snapshot.decisions || []);
+  if (decisionSignature === signature) return;
+  decisionSignature = signature;
+  const strip = $('decisions'); strip.replaceChildren(html('strong', 'Decisions'));
+  for (const item of snapshot.decisions || []) {
+    strip.append(button(`${item.title} · Class ${item.class} · ${item.id}\n${item.text}\nPacket: ${item.packet || '—'} · apply-by: ${item.applyAt || '—'}`, () => openRun(item.run)));
+  }
+  if (!snapshot.decisions?.length) strip.append(html('span', 'No open decisions', 'muted'));
+}
+function stepper(row) {
+  const line = html('div', undefined, 'stepper'); line.append(html('span', row.name));
+  line.title = `${row.name}: ${stageLabels[stages.indexOf(row.stage)]}`;
+  line.setAttribute('aria-label', line.title);
+  stages.forEach((stage, index) => {
+    const dot = html('i', undefined, `${row.stepper[index] ? 'reached' : ''} ${row.stage === stage ? 'current' : ''}`);
+    dot.title = stageLabels[index]; line.append(dot);
+  });
+  return line;
+}
+function renderCluster(cluster) {
+  const panel = cluster.panel, info = clusterInfo(cluster), run = clusterRun(cluster);
+  const open = expanded.has(cluster.id), elsewhere = run && info.matrix_host !== cluster.host;
+  const signature = JSON.stringify([info, run, open, clusterItems(cluster).map(node => [node.id, node.title, node.stage, node.ladder, node.you_at, node.purpose])]);
+  if (cluster.renderSignature === signature) return;
+  cluster.renderSignature = signature;
+  const priorViews = miniViews; miniViews = [];
+  panel.replaceChildren();
+  const heading = html('div', undefined, 'cluster-heading');
+  const toggle = button(`${open ? '▾' : '▸'} ${cluster.name}`, () => {
+    if (elsewhere) { openRun(run.run); return; }
+    if (expanded.has(cluster.id)) expanded.delete(cluster.id); else expanded.add(cluster.id);
+    selectedContext = {cluster: cluster.name, run: run?.run}; selectedId = null;
+    render();
+  }, 'cluster-toggle');
+  toggle.setAttribute('aria-expanded', String(open));
+  heading.append(toggle, button('Send to all', () => openBroadcast(cluster.name)));
+  if (run) heading.append(button('Open run plan', () => runAction(async () => {
+    await request('/api/open-plan', {run: run.run});
+    showContext({run: run.run});
+  })));
+  panel.append(heading);
+  panel.append(html('p', `waiting on you: ${info.waiting || 0} · ${info.stalled || 0} stalled`, 'cluster-summary'));
+  if (run) {
+    for (const row of run.rows) panel.append(stepper(row));
+    const proofs = html('div', `Proofs: ${run.proofs.map(proof => `${proof.id} ${proof.status}`).join(' · ') || '—'}`, 'cluster-summary');
+    panel.append(proofs);
+    if (elsewhere) panel.append(button(`matrix on ${info.matrix_host}`, () => openRun(run.run), 'link'));
+    else if (open) {
+      const chief = html('div', 'Chief: '); chief.append(miniNode(run.chief_node)); panel.append(chief);
+      panel.append(matrixTable(run));
+    }
+  } else if (open) panel.append(ladderTable(cluster));
+  cluster.miniViews = miniViews; miniViews = priorViews;
+}
+function gateContent(run, row, stage, gate) {
+  const fragment = document.createDocumentFragment();
+  const verdict = gate.verdict || gate.state || 'pending';
+  const control = button(`${verdict}${gate.at ? ' ' + gate.at.slice(5, 10) : ''}`, () => showContext({run: run.run, row: row.id, gate: stage}), `link ${verdict}`);
+  fragment.append(control);
+  if (gate.stale?.moved) fragment.append(button('evidence stale', () => showContext({run: run.run, row: row.id, gate: stage}), 'link stale'));
+  return fragment;
+}
+function matrixTable(run) {
+  const table = html('table', undefined, 'matrix'); table.setAttribute('aria-label', `${run.title} gate matrix`);
+  const head = html('thead'), labels = html('tr');
+  for (const label of ['Slice', ...stageLabels, 'Live']) labels.append(html('th', label));
+  head.append(labels); table.append(head);
+  const body = html('tbody');
+  for (const row of run.rows) {
+    const tr = html('tr'); tr.append(html('th', row.name));
+    for (const stage of stages) {
+      const cell = row.cells[stage], td = html('td');
+      if (stage === 'implementing') {
+        td.append(html('div', `${cell.verified_units}/${cell.total_units} verified units`));
+        const segments = html('div', undefined, 'segments');
+        for (const segment of cell.segments) {
+          const part = button(segment.id, () => showContext({run: run.run, package: segment.id}, segment.node));
+          part.style.flex = `${segment.size} 1 0`; part.style.background = packageColors[segment.state];
+          part.title = `${segment.id}: ${segment.state}, ${['', 'S', 'M', 'L'][segment.size]} (${segment.size} units)`;
+          part.setAttribute('aria-label', part.title); segments.append(part);
+        }
+        td.append(segments);
+      } else if (stage === 'review') {
+        for (const chip of cell.chips) {
+          const badge = html('div', undefined, 'chip'); badge.append(html('div', chip.id), gateContent(run, row, chip.id, chip)); td.append(badge);
+        }
+      } else td.append(gateContent(run, row, stage, cell));
+      tr.append(td);
+    }
+    const live = html('td');
+    for (const id of row.live) live.append(miniNode(id));
+    if (!row.live.length) live.textContent = 'No live workers';
+    tr.append(live); body.append(tr);
+  }
+  table.append(body); return table;
+}
+function isNeverPrompted(node) { return node.kind === 'claude' && node.you_at == null && !node.purpose; }
+function ladderTable(cluster) {
+  const table = html('table'); table.setAttribute('aria-label', `${cluster.name} ladder`);
+  const head = html('thead'), labels = html('tr');
+  for (const label of ['Session', 'Asked', 'Working', 'PR', 'Merged']) labels.append(html('th', label));
+  head.append(labels); table.append(head);
+  const body = html('tbody'), items = clusterItems(cluster).filter(node => node.kind !== 'subagent');
+  for (const node of items) {
+    const tr = html('tr'), name = html('th'); name.append(button(node.title || node.id, () => selectNode(node.id), 'link')); tr.append(name);
+    if (node.stage) {
+      const td = html('td', `Hand-set stage: ${node.stage}`); td.colSpan = 4; tr.append(td);
+    } else if (!node.ladder) {
+      const td = html('td', isNeverPrompted(node) ? 'Asked · never prompted' : node.kind === 'terminal' ? 'Terminal only · no inferred ladder' : 'Ladder pending'); td.colSpan = 4; tr.append(td);
+    } else {
+      for (const rung of ['asked', 'working', 'pr', 'merged']) {
+        const td = html('td');
+        if (node.ladder.rung === rung) {
+          const pr = node.ladder.pr;
+          td.textContent = pr && ['pr', 'merged'].includes(rung) ? `${pr.number} ${pr.isDraft ? 'draft' : 'ready'}, ${pr.checks === 'pass' ? 'green' : pr.checks}` : rung === 'working' ? `${node.ladder.ahead} commits ahead` : 'Asked';
+          td.className = rung === 'merged' ? 'merged' : '';
+        } else td.textContent = '—';
+        tr.append(td);
+      }
+    }
+    body.append(tr);
+  }
+  const never = items.filter(isNeverPrompted);
+  if (cluster.name === 'Unsorted' && never.length) {
+    const tr = html('tr'), td = html('td'); td.colSpan = 5;
+    td.append(button(`never prompted, close all ${never.length}`, () => {
+      closeBatch = never.map(node => ({id: node.id, title: node.title || node.id, host: node.host}));
+      openOverlay(`Close all ${closeBatch.length} never-prompted sessions?`, null);
+      $('overlay-text').textContent = closeBatch.map(node => `${node.title} · ${node.host}`).join('\n') + '\nEach session will close; transcripts remain resumable.';
+      $('confirm-batch').hidden = false;
+    }, 'danger')); tr.append(td); body.append(tr);
+  }
+  table.append(body); return table;
+}
+function detailLine(container, label, value) {
+  const line = html('p'); line.append(html('strong', `${label}: `), document.createTextNode(value == null || value === '' ? '—' : String(value))); container.append(line);
+}
+function renderContext() {
+  const node = nodes.get(selectedId);
+  const context = selectedContext || (node ? {cluster: node.cluster, run: node.run} : null);
+  $('context-rail').hidden = !context; if (!context) return;
+  const run = snapshot.runs?.[context.run];
+  const details = $('context-details'); details.replaceChildren();
+  $('context-title').textContent = run?.title || context.cluster || 'Run details';
+  if (!run) {
+    const info = snapshot.clusters?.[context.cluster];
+    for (const note of info?.notes || []) detailLine(details, 'Projection', note);
+    return;
+  }
+  if (context.package) {
+    const pkg = run.packages.find(item => item.id === context.package);
+    if (pkg) {
+      $('context-title').textContent = `${pkg.id} · ${pkg.title}`;
+      for (const [label, value] of [['State', pkg.state], ['Branch', pkg.branch], ['Head', pkg.headSha], ['Checkpoint evidence', pkg.checkpointEvidence], ['Independent verifier', pkg.verifier], ['Blocked by', pkg.blockedBy.join(', ')], ['Holds', run.packages.filter(item => item.blockedBy.includes(pkg.id)).map(item => item.id).join(', ')], ['Package proofs', pkg.proofs.join(', ')], ['Last event', `${pkg.lastEvent || '—'} · ${pkg.lastEventAt || '—'}`], ['Session', node ? `${node.title || node.id} · ${node.host}` : 'No live session']]) detailLine(details, label, value);
+    }
+  }
+  if (context.gate) {
+    const row = run.rows.find(item => item.id === context.row);
+    const gate = row?.cells[context.gate] || row?.cells.review.chips.find(item => item.id === context.gate);
+    if (gate) {
+      detailLine(details, `${row.name} · ${context.gate}`, `${gate.verdict || gate.state} · ${gate.at || '—'}`);
+      detailLine(details, 'Evidence', gate.ref);
+      if (gate.stale?.moved) detailLine(details, 'Evidence stale', gate.stale.commits === null ? 'head moved, commits not fetched' : gate.stale.commits.join('\n') || 'Head moved; no additional commits listed');
+    }
+  }
+  detailLine(details, 'Now', run.now);
+  for (const [label, value] of Object.entries(run.status_card || {})) detailLine(details, label, value);
+  detailLine(details, 'Proofs', run.proofs.map(proof => `${proof.id}: ${proof.status}`).join('\n'));
+  detailLine(details, 'Merge gate', `${run.merge_gate.ready ? 'ready' : 'not ready'} · ${run.merge_gate.classDOpen} class D open · ${run.merge_gate.classBUnratified} class B unratified`);
+  detailLine(details, 'Run plan', `${run.run_plan.path} @ ${run.run_plan.commit}`);
+  for (const item of (snapshot.decisions || []).filter(item => item.run === run.run))
+    detailLine(details, `Decision ${item.id} · ${item.class}`, `${item.text}\nPacket: ${item.packet || '—'}\nApply-by: ${item.applyAt || '—'}`);
+  for (const note of run.notes || []) detailLine(details, 'Note', note);
+}
+function broadcastTargets() {
+  return snapshot.nodes.filter(node => node.cluster === broadcastCluster && (node.kind === 'claude' || ($('include-terminals').checked && node.kind === 'terminal')));
+}
+function updateBroadcastCount() {
+  const targets = broadcastTargets();
+  $('broadcast-count').textContent = `${targets.length} sessions on ${[...new Set(targets.map(node => node.host))].join(', ') || 'no hosts'}`;
+}
+function openBroadcast(name) {
+  broadcastCluster = name; openOverlay(`Send to all · ${name}`, null);
+  $('broadcast-form').hidden = false; $('broadcast-text').value = '';
+  $('include-terminals').checked = false; updateBroadcastCount();
+}
+$('include-terminals').addEventListener('change', updateBroadcastCount);
+$('broadcast-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const cluster = broadcastCluster, text = $('broadcast-text').value, include_terminals = $('include-terminals').checked;
+  runAction(async () => {
+    const result = await request('/api/broadcast', {cluster, text, include_terminals});
+    $('broadcast-form').hidden = true; $('screen').hidden = false;
+    $('screen').textContent = JSON.stringify(result.results, null, 2); $('cancel-overlay').textContent = 'Done';
+  });
+});
+$('confirm-batch').addEventListener('click', () => {
+  const batch = [...closeBatch];
+  runAction(async () => {
+    $('confirm-batch').hidden = true; $('screen').hidden = false; $('screen').textContent = '';
+    for (const node of batch) {
+      try { await request('/api/action', {node: node.id, action: 'close'}); $('screen').textContent += `${node.title} · ${node.host}: closed\n`; }
+      catch (error) { $('screen').textContent += `${node.title} · ${node.host}: ${error.message}\n`; }
+    }
+    $('cancel-overlay').textContent = 'Done'; await refresh();
+  });
+});
+$('promote-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const body = {node: selectedId, project: $('project-name').value.trim(), slice: $('slice-name').value.trim(), stage: $('slice-stage').value};
+  runAction(async () => {
+    await request('/api/promote', body);
+    $('action-status').textContent = 'Slice and stage saved. The next snapshot will show the assignment.';
+  });
+});
+
 function startPolling() {
   clearInterval(timer);
   timer = null;

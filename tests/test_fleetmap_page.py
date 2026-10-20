@@ -12,7 +12,9 @@ class FleetMapPage(unittest.TestCase):
     def test_page_references_every_endpoint_and_encoding(self):
         html = (ROOT / "kitty/fleetmap/page.html").read_text()
         for value in ["/api/state", "/api/action", "/api/assign", "/api/confirm",
-                      "X-Fleet-Key", "visibilitychange", "#4f8ef7", "#4cc38a",
+                      "/api/promote", "/api/move", "/api/broadcast", "/api/open-plan",
+                      "stepper", "stalled", "Decision", "X-Fleet-Key", "visibilitychange",
+                      "#4f8ef7", "#4cc38a",
                       "#f0803c", "#6b7394", "Legend", "subagents_shown", "layoutFleet"]:
             self.assertIn(value, html)
         self.assertNotIn("<script src=", html)
