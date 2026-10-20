@@ -26,6 +26,11 @@ case "$f" in
         mdv_args=()
         if [ -n "${MD_PREVIEW_FROM_HEADING:-}" ]; then
             mdv_args=(--from-heading "$MD_PREVIEW_FROM_HEADING")
+            if [ -t 1 ]; then
+                # Keep the heading visible even when its suffix fills scrollback.
+                "$(dirname "${BASH_SOURCE[0]}")/mdv" "${mdv_args[@]}" "$f" | less -R +0
+                exit $?
+            fi
         fi
         "$(dirname "${BASH_SOURCE[0]}")/mdv" "${mdv_args[@]}" "$f"
         if [ -d "/Applications/SMD.app" ]; then

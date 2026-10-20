@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 """Test action routing with disposable CLI executables, never live terminals."""
+import fcntl
 import json
 import os
 from pathlib import Path
+import pty
 import shlex
+import struct
 import subprocess
 import sys
 import tempfile
+import termios
 import unittest
 from unittest.mock import patch
 
@@ -74,16 +78,21 @@ class ActionRouting(unittest.TestCase):
             with self.assertRaises(ActionError):
                 self.actions.open_plan(path)
 
-    def test_md_preview_starts_at_middle_heading_and_falls_back_to_whole_document(self):
-        # Exercise both real preview scripts; only glow's rendering is replaced.
+    def preview_env(self, heading):
         binaries = self.base / 'bin'
-        binaries.mkdir()
+        binaries.mkdir(exist_ok=True)
         for name, source in {
                 'glow': '#!/bin/sh\ncat\n',
                 'python3': '#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' "$@"\n'}.items():
             script = binaries / name
             script.write_text(source)
             script.chmod(0o755)
+        self.fake('less')
+        return dict(os.environ, MD_PREVIEW_FROM_HEADING=heading,
+                    PATH=os.pathsep.join((str(binaries), str(self.base), os.environ.get('PATH', ''))))
+
+    def test_md_preview_starts_at_middle_heading_and_falls_back_to_whole_document(self):
+        # Exercise both real preview scripts; only glow's rendering is replaced.
         path = self.base / 'run plan.md'
         before = '# Run plan\n\nOld status\n\n```markdown\n## Resume here\nexample only\n```\n\n'
         after = '## Resume here\n\nNext: verify the candidate.\n\n## Evidence\n\nFinal proof.\n'
@@ -91,12 +100,38 @@ class ActionRouting(unittest.TestCase):
         path.write_text(document)
         for heading, expected in [('Resume here', after), ('Absent heading', document), ('', document)]:
             with self.subTest(heading=heading):
-                env = dict(os.environ, MD_PREVIEW_FROM_HEADING=heading,
-                           PATH=str(binaries) + os.pathsep + os.environ.get('PATH', ''))
                 result = subprocess.run([str(ROOT / 'bin/md-preview'), str(path)],
-                                        input='x', capture_output=True, text=True, env=env, timeout=5)
+                                        input='x', capture_output=True, text=True,
+                                        env=self.preview_env(heading), timeout=5)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout.split('\033', 1)[0], expected + '\n')
+                self.assertFalse((self.base / 'less.jsonl').exists())
+
+    def test_md_preview_pages_long_heading_suffix_from_top_only_in_terminal(self):
+        path = self.base / 'long run plan.md'
+        suffix = '## Resume here\n' + 'Evidence\n' * 60
+        path.write_text('# Old status\nBefore resume\n\n' + suffix)
+        for heading in ('Resume here', ''):
+            with self.subTest(heading=heading):
+                master, slave = pty.openpty()
+                try:
+                    # The suffix is ten times taller than the overlay viewport.
+                    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 6, 80, 0, 0))
+                    result = subprocess.run([str(ROOT / 'bin/md-preview'), str(path)],
+                                            input='x', stdout=slave, stderr=subprocess.PIPE,
+                                            text=True, env=self.preview_env(heading), timeout=5)
+                finally:
+                    os.close(slave)
+                    os.close(master)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                if heading:
+                    calls = self.calls('less')
+                    self.assertEqual(len(calls), 1)
+                    self.assertEqual(calls[0]['argv'], ['-R', '+0'])
+                    self.assertEqual(calls[0]['stdin'], suffix)
+                    (self.base / 'less.jsonl').unlink()
+                else:
+                    self.assertFalse((self.base / 'less.jsonl').exists())
 
     def test_orca_actions_use_host_environment(self):
         for hosting, host in [('orca', 'local'), ('orca', 'laptop2'),
