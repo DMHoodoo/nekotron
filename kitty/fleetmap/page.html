@@ -13,6 +13,7 @@ body { margin: 0; height: 100vh; display: grid; grid-template-rows: 58px auto mi
 header { display: flex; align-items: center; gap: 20px; padding: 0 22px; border-bottom: 1px solid #303548; }
 h1 { font-size: 18px; margin: 0; font-weight: 650; }
 #status { color: #a0a8be; font-size: 12px; }
+#legend-toggle { margin-left: auto; }
 main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; min-height: 0; }
 #map-scroll { overflow: auto; position: relative; }
 #map { display: block; min-width: 100%; min-height: 100%; }
@@ -53,6 +54,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospac
 .region-label { fill: #e4e7f0; font-size: 15px; font-weight: 650; }
 .cluster-label { fill: #bfc9e0; font-size: 12px; }
 .node-label { fill: #bfc6d9; font-size: 10px; pointer-events: none; }
+.edge-badge { fill: #e4e7f0; stroke: #161924; stroke-width: 4px; paint-order: stroke; font-size: 10px; font-weight: 650; pointer-events: none; }
 .node { cursor: pointer; outline: none; }
 .node .selection { stroke: transparent; }
 .node[aria-pressed="true"] .selection, .node:focus-visible .selection { stroke: #fff; }
@@ -99,7 +101,7 @@ input[type=checkbox] { width: auto; }
 </style>
 </head>
 <body>
-<header><h1>Fleet map</h1><span id="status" role="status">Connecting…</span></header>
+<header><h1>Fleet map</h1><span id="status" role="status">Connecting…</span><button id="legend-toggle" type="button" aria-label="Toggle legend" aria-controls="legend" aria-expanded="false">?</button></header>
 <nav id="decisions" aria-label="Decision strip"></nav>
 <main>
   <div id="map-scroll"><svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="Agent sessions grouped by host and cluster"><defs><pattern id="stalled-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#f3d18a" stroke-width="2"/></pattern></defs><g id="regions"></g><g id="edges" pointer-events="none"></g><g id="clusters"></g></svg></div>
@@ -145,7 +147,7 @@ input[type=checkbox] { width: auto; }
     </section>
   </aside>
 </main>
-<footer aria-label="Legend">
+<footer id="legend" aria-label="Legend" hidden>
   <strong>Legend</strong>
   <div id="legend-lines">
     <p><strong>States:</strong> <span class="swatch" style="background:#4f8ef7"></span>Working <span class="swatch" style="background:#4cc38a"></span>Done <span class="swatch" style="background:#f0803c"></span>Needs you (glow) <span class="swatch" style="background:#6b7394"></span>Idle.</p>
@@ -157,6 +159,7 @@ input[type=checkbox] { width: auto; }
     <p><strong>Dotted ring:</strong> Never addressed; 2px marks with 3px gaps.</p>
     <p><strong>Subagents:</strong> Radius 6, joined to a parent by a 20px line when space allows; overflow uses free grid slots with longer parent links.</p>
     <p><strong>Edge kinds:</strong> Solid = message, dashed = dispatch, thin gray = subagent.</p>
+    <p><strong>Traffic:</strong> Select or hover a node to see its message and dispatch edges. Other nodes show an edge count, capped at 9+.</p>
     <p><strong>Edge age:</strong> Full opacity under 10m; fades linearly to 25% at 60m, then stays at 25%.</p>
     <p><strong>Stepper:</strong> Seven dots: Goal, Design, Plan (readiness), Implementing, Review, Delivery, Accepted. Blue through current stage; outlined dot is current. Stage is not verified progress.</p>
     <p><strong>Package segments:</strong> Width S=1, M=2, L=3. Planned gray, assigned violet, running blue, returned teal, verified green, blocked orange. Only verified units count.</p>
@@ -190,7 +193,7 @@ const MIN_REGION = 420, CELL = 70, GAP = 16;
 let layoutSignature = '', layoutModeSignature = '';
 let regionOrder = [];
 let snapshot = {hosts: [], nodes: [], edges: []};
-let nodes = new Map(), selectedId = null, dialogNodeId = null, closeToken = null;
+let nodes = new Map(), selectedId = null, hoveredId = null, dialogNodeId = null, closeToken = null;
 let timer = null, pollSeconds = 3, loading = false, actionBusy = false;
 let gradientId = 0, assignmentChoices = '';
 const stages = ['goal', 'design', 'plan', 'implementing', 'review', 'delivery', 'accepted'];
@@ -202,6 +205,15 @@ let overlayVersion = 0;
 let miniViews = [];
 let decisionSignature = '';
 
+function toggleLegend(open = $('legend').hidden) {
+  $('legend').hidden = !open;
+  $('legend-toggle').setAttribute('aria-expanded', String(open));
+  try { localStorage['fleetmap.legend'] = open ? '1' : '0'; } catch (_) {}
+}
+let legendOpen = false;
+try { legendOpen = localStorage['fleetmap.legend'] === '1'; } catch (_) {}
+toggleLegend(legendOpen);
+$('legend-toggle').addEventListener('click', () => toggleLegend());
 
 function svg(tag, attributes = {}, text) {
   const element = document.createElementNS(NS, tag);
@@ -424,15 +436,20 @@ function makeNode(node, register = true) {
   const ringBackground = svg('circle', {r: 17, fill: 'none', stroke: 'rgba(127,127,127,.25)', 'stroke-width': 3});
   const ring = svg('circle', {r: 17, fill: 'none', 'stroke-width': 3, transform: 'rotate(-90)'});
   const label = svg('text', {y: 36, 'text-anchor': 'middle', class: 'node-label'});
+  const badge = svg('text', {x: small ? 10 : 16, y: small ? -9 : -13, 'text-anchor': 'middle', class: 'edge-badge'});
   // Decorative rings can cross a short parent attachment, but must not steal clicks.
   for (const decoration of [selection, ringBackground, ring, pulse]) decoration.setAttribute('pointer-events', 'none');
-  group.append(defs, title, hit, selection, ringBackground, ring, pulse, body, hatch, label);
+  group.append(defs, title, hit, selection, ringBackground, ring, pulse, body, hatch, label, badge);
   if (small) label.style.display = 'none';
   group.addEventListener('click', () => selectNode(node.id));
   group.addEventListener('keydown', event => {
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectNode(node.id); }
   });
-  const view = {group, title, center, rim, pulse, body, hatch, ring, label};
+  group.addEventListener('mouseenter', () => { hoveredId = node.id; paintFocus(); });
+  group.addEventListener('mouseleave', () => {
+    if (hoveredId === node.id) { hoveredId = null; paintFocus(); }
+  });
+  const view = {group, title, center, rim, pulse, body, hatch, ring, label, badge};
   if (register) nodeViews.set(node.id, view);
   return view;
 }
@@ -447,6 +464,10 @@ function updateNode(node) {
 function paintNode(node, view) {
   view.hatch.style.display = node.stalled ? '' : 'none';
   view.group.setAttribute('aria-pressed', String(selectedId === node.id));
+  const edgeCount = snapshot.edges.filter(edge => edge.kind !== 'subagent' &&
+    (edge.src === node.id || edge.dst === node.id)).length;
+  view.badge.textContent = edgeCount > 9 ? '9+' : String(edgeCount);
+  view.badge.style.display = !edgeCount || selectedId === node.id || hoveredId === node.id ? 'none' : '';
   const title = node.title || node.purpose || node.id;
   view.group.setAttribute('aria-label', `${title}, ${node.state}, ${node.kind}`);
   view.group.setAttribute('title', title);
@@ -488,18 +509,26 @@ function endpoint(id) {
 function drawEdges() {
   const fragment = document.createDocumentFragment();
   for (const edge of snapshot.edges) {
+    if (edge.kind !== 'subagent' && ![selectedId, hoveredId].some(id =>
+      id !== null && (edge.src === id || edge.dst === id))) continue;
     const src = endpoint(edge.src), dst = endpoint(edge.dst);
     if (!src || !dst) continue;
     const minutes = (secondsSince(edge.newest) ?? 3600) / 60;
     const opacity = 1 - .75 * Math.min(1, Math.max(0, (minutes - 10) / 50));
-    const line = svg('line', {x1: src.x, y1: src.y, x2: dst.x, y2: dst.y, stroke: edge.kind === 'subagent' ? '#9aa0b4' : '#7a9acb', 'stroke-width': edge.kind === 'subagent' ? 1 : 1.5, 'stroke-opacity': opacity});
+    const line = svg('line', {class: edge.kind === 'subagent' ? 'parent-link' : 'edge', x1: src.x, y1: src.y, x2: dst.x, y2: dst.y, stroke: edge.kind === 'subagent' ? '#9aa0b4' : '#7a9acb', 'stroke-width': edge.kind === 'subagent' ? 1 : 1.5, 'stroke-opacity': opacity});
     if (edge.kind === 'dispatch') line.setAttribute('stroke-dasharray', '6 4');
     fragment.append(line);
   }
   $('edges').replaceChildren(fragment);
 }
+function paintFocus() {
+  for (const [id, view] of [...nodeViews, ...miniViews])
+    if (nodes.has(id)) paintNode(nodes.get(id), view);
+  drawEdges();
+}
 function render() {
   nodes = new Map(snapshot.nodes.map(node => [node.id, node]));
+  if (!nodes.has(hoveredId)) hoveredId = null;
   for (const region of regions.values()) region.group.style.display = 'none';
   const hostMap = new Map(snapshot.hosts.map(host => [host.name, host]));
   for (const node of snapshot.nodes) if (!hostMap.has(node.host)) hostMap.set(node.host, {name: node.host});
@@ -554,8 +583,7 @@ function selectNode(id) {
   $('action-error').hidden = true;
   $('action-status').textContent = '';
   $('rail').scrollTop = 0;
-  for (const [nodeId, view] of nodeViews) view.group.setAttribute('aria-pressed', String(id === nodeId));
-  for (const [nodeId, view] of miniViews) view.group.setAttribute('aria-pressed', String(id === nodeId));
+  paintFocus();
   renderRail();
 }
 function selectCluster(id) {
@@ -567,7 +595,7 @@ function selectCluster(id) {
   $('action-error').hidden = true;
   $('action-status').textContent = '';
   $('rail').scrollTop = 0;
-  for (const [, view] of [...nodeViews, ...miniViews]) view.group.setAttribute('aria-pressed', 'false');
+  paintFocus();
   renderRail();
 }
 function renderRail() {
@@ -760,7 +788,7 @@ function miniNode(id) {
 function showContext(context, nodeId = null) {
   selectedCluster = null; selectedContext = context; selectedId = nodeId; assignmentChoices = '';
   $('rail').scrollTop = 0; renderRail();
-  for (const [id, view] of [...nodeViews, ...miniViews]) view.group.setAttribute('aria-pressed', String(id === nodeId));
+  paintFocus();
 }
 function openRun(runId) {
   const run = snapshot.runs?.[runId]; if (!run) return;

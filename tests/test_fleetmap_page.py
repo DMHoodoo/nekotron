@@ -50,7 +50,39 @@ const document = {createElement: tag => new Element(tag), createTextNode: text =
   createDocumentFragment: () => new Element()};
 const text = element => typeof element === 'string' ? element : element.textContent + element.children.map(text).join(' ');
 const descendants = element => [element, ...(element.children || []).flatMap(descendants)];
-const byClass = (element, name) => descendants(element).filter(child => (child.className || '').split(' ').includes(name));
+const byClass = (element, name) => descendants(element).filter(child => (child.className || child.attributes?.class || '').split(' ').includes(name));
+"""
+
+
+def run_page_js(source, storage="{}"):
+    page = (ROOT / 'kitty/fleetmap/page.html').read_text()
+    script = re.search(r'<script>(.*?)</script>', page, re.DOTALL).group(1)
+    script = script.replace("const $ = id => document.getElementById(id);", "")
+    return run_js(DOM + """
+document.createElementNS = (_, tag) => new Element(tag);
+document.addEventListener = () => {};
+document.visibilityState = 'hidden';
+const location = {search: ''};
+const ResizeObserver = class { observe() {} };
+$('empty').lastElementChild = new Element('p');
+const Option = class extends Element {
+  constructor(label, value) { super('option'); this.textContent = label; this.value = value; }
+};
+""" + f"let localStorage = {storage};\n" + script + source)
+
+
+EDGE_FIXTURE = """
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, nodes:
+  ['a', 'b', 'c'].map(id => ({id, title: id, state: 'idle', kind: 'claude',
+    host: 'local', cluster: 'Traffic'})),
+  edges: [
+    {src: 'a', dst: 'b', kind: 'message', count: 8, newest: Date.now() / 1000},
+    {src: 'b', dst: 'c', kind: 'dispatch', count: 3, newest: Date.now() / 1000 - 3600}
+  ]};
+$('map-scroll').clientWidth = 1200;
+render();
+const traffic = () => byClass($('edges'), 'edge').filter(line => line.tagName === 'line');
+const drawn = () => traffic().map(line => [line.attributes.x1, line.attributes.x2]);
 """
 
 
@@ -70,7 +102,7 @@ const run = {run: 'run_test', title: 'Review run', now: 'Checking the next deliv
   rows: [makeRow('1'), makeRow('2'), makeRow('3')],
   proofs: [{id: 'E1', status: 'pass'}], chief_node: null};
 const info = {run: 'run_test', matrix_host: 'local', waiting: 0, stalled: 0};
-const snapshot = {clusters: {'Review run': info}, runs: {run_test: run}, nodes: []};
+const snapshot = {clusters: {'Review run': info}, runs: {run_test: run}, nodes: [], edges: []};
 const cluster = {id: 'cluster', name: 'Review run', host: 'local', panel: new Element()};
 const expanded = new Set(), nodes = new Map();
 let selectedId = null, selectedContext = null, miniViews = [];
@@ -80,6 +112,96 @@ function showContext(context, node) { selections.push({context, node}); }
 
 
 class FleetMapPage(unittest.TestCase):
+    def test_legend_closed_by_default_and_toggle_persists(self):
+        page = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        self.assertRegex(page, r'<footer\b[^>]*\bhidden\b')
+        self.assertRegex(page, r'<header>.*<button\b[^>]*>\?</button>.*</header>')
+        output = run_page_js("""
+const initial = $('legend').hidden;
+toggleLegend();
+const opened = {hidden: $('legend').hidden, saved: localStorage['fleetmap.legend'],
+  expanded: $('legend-toggle').attributes['aria-expanded']};
+$('legend-toggle').click();
+console.log(JSON.stringify({initial, opened, closed: $('legend').hidden,
+  saved: localStorage['fleetmap.legend']}));
+""")
+        self.assertEqual(output, {'initial': True, 'opened': {
+            'hidden': False, 'saved': '1', 'expanded': 'true'},
+            'closed': True, 'saved': '0'})
+        self.assertEqual(run_page_js("""
+console.log(JSON.stringify($('legend').hidden));
+""", storage="{'fleetmap.legend': '1'}"), False)
+        self.assertEqual(run_page_js("""
+const initial = $('legend').hidden;
+toggleLegend(true); toggleLegend(false);
+console.log(JSON.stringify([initial, $('legend').hidden]));
+""", storage="""new Proxy({}, {
+  get() { throw new Error('Storage blocked'); },
+  set() { throw new Error('Storage blocked'); }
+})"""), [True, True])
+
+    def test_edges_drawn_only_for_selected_or_hovered(self):
+        output = run_page_js(EDGE_FIXTURE + """
+const initial = drawn();
+const before = [...positions];
+selectNode('b');
+const incomingAndOutgoing = drawn();
+selectNode('a');
+const selected = drawn();
+nodeViews.get('c').group.listeners.mouseenter();
+const both = drawn();
+selectCluster(positions.get('a').cluster);
+const hovered = drawn();
+const fadedDispatch = traffic()[0]?.attributes;
+nodeViews.get('c').group.listeners.mouseleave();
+const cleared = drawn();
+snapshot.edges.push({src: 'a', dst: 'c', kind: 'subagent', newest: Date.now() / 1000});
+drawEdges();
+console.log(JSON.stringify({initial, selected, both, hovered, cleared,
+  incomingAndOutgoing, positionsStable: JSON.stringify(before) === JSON.stringify([...positions]),
+  points: ['a', 'b', 'c'].map(id => endpoint(id).x), fadedDispatch,
+  parentLines: descendants($('edges')).filter(item => item.tagName === 'line').length}));
+""")
+        a, b, c = output['points']
+        self.assertEqual(output['initial'], [])
+        self.assertEqual(output['incomingAndOutgoing'], [[a, b], [b, c]])
+        self.assertTrue(output['positionsStable'])
+        self.assertEqual(output['selected'], [[a, b]])
+        self.assertEqual(output['both'], [[a, b], [b, c]])
+        self.assertEqual(output['hovered'], [[b, c]])
+        self.assertEqual(output['cleared'], [])
+        self.assertEqual(output['fadedDispatch']['stroke-dasharray'], '6 4')
+        self.assertEqual(output['fadedDispatch']['stroke-opacity'], .25)
+        self.assertEqual(output['parentLines'], 1)
+
+    def test_edge_badges_count_and_hide_on_focus(self):
+        output = run_page_js(EDGE_FIXTURE + """
+const badge = id => byClass(nodeViews.get(id).group, 'edge-badge')[0];
+const visible = id => badge(id).style.display !== 'none';
+const initial = {text: badge('b').textContent, visible: visible('b')};
+selectNode('b');
+const selected = visible('b');
+showContext({cluster: 'Traffic'});
+const deselected = visible('b');
+nodeViews.get('b').group.listeners.mouseenter();
+const hovered = visible('b');
+nodeViews.get('b').group.listeners.mouseleave();
+const left = visible('b');
+snapshot.edges = Array.from({length: 10}, (_, i) =>
+  ({src: 'b', dst: 'peer' + i, kind: 'message', count: 20}));
+render();
+const capped = badge('b').textContent;
+const noEdges = visible('a');
+snapshot.edges = [{src: 'a', dst: 'b', kind: 'subagent'}];
+render();
+console.log(JSON.stringify({initial, selected, deselected, hovered, left, capped,
+  noEdges, parentOnly: visible('b')}));
+""")
+        self.assertEqual(output, {'initial': {'text': '2', 'visible': True},
+                                 'selected': False, 'deselected': True,
+                                 'hovered': False, 'left': True, 'capped': '9+',
+                                 'noEdges': False, 'parentOnly': False})
+
     def test_heading_has_only_caret_and_name(self):
         output = self.run_cluster_js("""
 renderCluster(cluster);
@@ -93,7 +215,8 @@ console.log(JSON.stringify({children: heading.children.map(text),
         return self.run_cluster_js(page_functions(
             'selectCluster', 'renderRail', 'renderContext', 'openBroadcast',
             'openOverlay', 'updateBroadcastCount', 'broadcastTargets',
-            'selectNode', 'showContext', 'setText', 'age', 'secondsSince') + """
+            'selectNode', 'showContext', 'setText', 'age', 'secondsSince',
+            'paintFocus', 'drawEdges') + """
 const clusters = new Map([[cluster.id, cluster]]), nodeViews = new Map();
 let selectedCluster = null, assignmentChoices = '', overlayVersion = 0;
 let dialogNodeId = null, closeToken = null, broadcastCluster = null;
@@ -232,9 +355,10 @@ const svg = (tag, attrs = {}) => {
   for (const [key, value] of Object.entries(attrs)) element.setAttribute(key, value);
   return element;
 };
-const selectedId = null, colors = {idle: '#888'}, secondsSince = () => 0;
+const selectedId = null, hoveredId = null, snapshot = {edges: []};
+const colors = {idle: '#888'}, secondsSince = () => 0;
 const view = Object.fromEntries(['hatch', 'group', 'title', 'label', 'center',
-  'rim', 'body', 'pulse', 'ring'].map(key => [key, new Element()]));
+  'rim', 'body', 'pulse', 'ring', 'badge'].map(key => [key, new Element()]));
 const titles = ['Handoff scheduling engineering OS run', 'Report-task-four',
   'Short', 'Eleven chars', 'One two three four five', 'Longfirstword second'];
 const results = titles.map(title => {
