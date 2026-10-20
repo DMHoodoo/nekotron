@@ -203,6 +203,20 @@ PR with "6962 ready, green". Five sessions you never prompted sit at Asked with 
 The builder reads this part. Each item is the authoritative statement of the
 mechanism named above.
 
+**Where each part lives**
+
+- A: `kitty/fleetmap/page.html`.
+- B: `kitty/fleetmap/transcript.py`.
+- C: `kitty/fleetmap/registry.py` and `kitty/fleetmap/orca.py`.
+- D: `kitty/fleetmap/clusters.py`.
+- E: `kitty/fleetmap/edges.py`.
+- F: `kitty/fleetmap/actions.py`.
+- G: `kitty/fleetmap/server.py` and `bin/fleet-map`.
+- Decision 7: `hooks/kitty-tab-status.sh`.
+- Host reachability degradation and the subagent window (Tasks 7b, 7c): `kitty/fleetmap/model.py`.
+- Full-width layout (Task 10b): `kitty/fleetmap/page.html`.
+- Orca binary fallback: `kitty/fleetmap/orca.py` and `bin/fleet-map`.
+
 ### A. Node and line encoding
 
 - Fill color is state, the fleet board's four: working blue, done green, needs you orange with a glow, idle gray.
