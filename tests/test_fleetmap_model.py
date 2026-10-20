@@ -302,6 +302,14 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertEqual(len({name for name, c in snap['clusters'].items()
                               if c.get('retired_workers')}), 1)
 
+    def test_retired_worker_without_output_stamp_has_unknown_retention(self):
+        handles = self.retire('released')
+        self.orca.put('terminal list', 'terminals', [
+            terminal(), dict(terminal(handles[0]), title='Retired', lastOutputAt=None)])
+        snap = self.collector().snapshot()
+        retired = [r for c in snap['clusters'].values() for r in c.get('retired_workers', [])]
+        self.assertEqual([r['retainedFor'] for r in retired], [None])
+
     def test_live_agent_terminal_is_never_retired(self):
         self.orca.put('orchestration worker-list', 'workers', [
             {'dispatchId': 'd1', 'agentTerminalHandle': 'term_a',

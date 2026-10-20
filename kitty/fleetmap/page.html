@@ -382,6 +382,10 @@ function layoutFleet(hosts) {
   for (const info of Object.values(snapshot.clusters || {})) {
     if (info.run && !members.has(JSON.stringify([info.matrix_host, info.name])))
       members.set(JSON.stringify([info.matrix_host, info.name]), []);
+    for (const worker of info.retired_workers || []) {
+      const key = JSON.stringify([worker.host, info.name]);
+      if (!members.has(key)) members.set(key, []);
+    }
   }
   // Membership changes never redistribute established host widths or cluster boxes.
   if (repack) {
@@ -415,7 +419,7 @@ function layoutFleet(hosts) {
       const baseWidth = saved?.baseWidth ?? Math.min(available, Math.max(340, Math.ceil(Math.sqrt(items.length)) * CELL + 20));
       const clusterWidth = saved?.width ?? (open ? available : baseWidth);
       const info = clusterInfo(cluster);
-      if (items.length || (info.run && info.matrix_host === host.name)) renderCluster(cluster);
+      if (items.length || (info.run && info.matrix_host === host.name) || clusterRetired(cluster).length) renderCluster(cluster);
       const contentHeight = open ? 0 : panelContentHeight(cluster.panel, clusterWidth);
       const baseHeader = saved?.baseHeader ?? (125 + (run?.rows.length || 0) * 60);
       const headerHeight = Math.max(baseHeader, contentHeight);
@@ -807,7 +811,7 @@ function render() {
   miniViews = [];
   for (const cluster of clusters.values()) {
     const info = clusterInfo(cluster);
-    if (clusterItems(cluster).length || (info.run && info.matrix_host === cluster.host)) {
+    if (clusterItems(cluster).length || (info.run && info.matrix_host === cluster.host) || clusterRetired(cluster).length) {
       cluster.group.style.display = ''; renderCluster(cluster);
       miniViews.push(...(cluster.miniViews || []));
     }
@@ -1258,7 +1262,7 @@ function renderRetiredList(cluster, details) {
   const list = cluster ? clusterRetired(cluster) : [];
   $('context-title').textContent = `${list.length} retired worker${list.length === 1 ? '' : 's'}`;
   for (const worker of list)
-    detailLine(details, worker.title || worker.dispatchId, `${worker.state} · retained ${age(Date.now() / 1000 - worker.retainedFor)}`);
+    detailLine(details, worker.title || worker.dispatchId, `${worker.state} · retained ${worker.retainedFor == null ? '—' : age(Date.now() / 1000 - worker.retainedFor)}`);
 }
 function renderContext() {
   const node = nodes.get(selectedId);

@@ -569,7 +569,7 @@ class Collector:
                         branch=terminal.get('branch') or branch,
                         dispatchId=worker.get('dispatchId') or worker.get('id') or '',
                         state=worker['workerState'],
-                        retainedFor=max(0, int(now - stamp)) if stamp is not None else 0))
+                        retainedFor=max(0, int(now - stamp)) if stamp and stamp > 0 else None))
                     continue
                 if (handle not in records['screens'] or (host == 'local' and
                         any(t['handle'] == handle for t in local_matches.values()))):

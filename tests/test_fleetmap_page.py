@@ -1027,6 +1027,24 @@ console.log(JSON.stringify({after, reload: {nodes: drawnNodes().length, chips: c
         self.assertEqual(output['after'], {'nodes': 3, 'chips': 0})
         self.assertEqual(output['reload'], {'nodes': 3, 'chips': 0})
 
+    def test_retired_only_cluster_renders_box_and_chip(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+const retired = ['a', 'b', 'c', 'd', 'e'].map(n => ({title: 'Worker ' + n, dispatchId: 'd' + n,
+  state: 'released', retainedFor: 600, host: 'local'}));
+snapshot = {generated_at: Date.now() / 1000, hosts: [{name: 'local'}],
+  clusters: {Past: {name: 'Past', full_name: 'Past', short_name: 'Past', retired_workers: retired}},
+  runs: {}, nodes: [], edges: []};
+render(); renderStatus();
+const box = [...clusters.values()].filter(c => c.group.style.display !== 'none').length;
+const shown = unique(byClass(cluster().grid, 'retired-chip')).filter(g => g.style.display !== 'none');
+shown[0].click();
+console.log(JSON.stringify({box, shown: shown.map(text), rail: text($('context-details'))}));
+""")
+        self.assertEqual(output['box'], 1)
+        self.assertEqual([c.strip() for c in output['shown']], ['5 retired workers'])
+        for title in ('Worker a', 'Worker b', 'Worker c', 'Worker d', 'Worker e'):
+            self.assertIn(title, output['rail'])
+
     def test_unfolding_restores_node_positions(self):
         output = run_page_js(self.FOLD_FIXTURE + """
 const list = [mk('a', 'idle', 1), mk('b', 'idle', 1), mk('c', 'idle', 1)];
