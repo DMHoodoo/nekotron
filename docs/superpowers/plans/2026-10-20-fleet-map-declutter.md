@@ -206,6 +206,7 @@ Branch `fleet-map-declutter-3` from master. Same global constraints. One commit 
 **Files:** `kitty/fleetmap/page.html`; `tests/test_fleetmap_page.py`.
 
 - [ ] Failing tests: `test_cluster_height_fits_one_node_row` (a box with no panel content and four nodes is at most heading + one node row + padding tall), `test_clusters_pack_by_actual_height` (a short box and a tall box in one region: the next box starts below the short one, not below a fixed slot), `test_long_name_wraps_beside_caret` (the caret and the name's first line share a top coordinate), plus the existing position stability tests passing.
+- [ ] Also fix: a subagent dot must never overlap a neighboring node (it is drawn on top of `Random PF` in the live glow-core box); add `test_subagent_dots_never_overlap_sibling_nodes`.
 - [ ] Implement per Decisions 37 and 38. Both suites. Commit `feat(declutter3): boxes fit their contents; caret and name on one line`.
 
 ### Task 39: Short ids, decision chip, large screens
