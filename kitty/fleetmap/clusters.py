@@ -166,8 +166,9 @@ def stage_for(node_id: str, config: ClusterConfig) -> str | None:
 
 def cluster_for(node_id: str, *, run_objective: str | None, title: str,
                 purpose: str | None, worktree: str, branch: str,
-                config: ClusterConfig, projection_cluster: str | None = None) -> str:
-    """Resolve projection, pin/project, run objective, match, worktree, Unsorted.
+                config: ClusterConfig, projection_cluster: str | None = None,
+                repository: str | None = None) -> str:
+    """Resolve projection, pin/project, run objective, match, repository, Unsorted.
 
     A None purpose means no human prompt, so worktree inference is skipped.
     The legacy run-objective fallback remains for runs without a projection.
@@ -190,6 +191,6 @@ def cluster_for(node_id: str, *, run_objective: str | None, title: str,
     for name, patterns in config.initiatives:
         if any(pattern.casefold() in value for pattern in patterns for value in fields):
             return name
-    if purpose is not None and worktree and branch:
-        return branch.removeprefix('refs/heads/').rsplit('/', 1)[-1]
+    if purpose is not None and repository:
+        return repository
     return 'Unsorted'

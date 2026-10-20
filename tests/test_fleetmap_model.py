@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -15,7 +16,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'kitty'))
 from fleetmap.providers.directory import DirectoryProvider
-from fleetmap.model import Collector
+from fleetmap.model import Collector, repository_name
 from fleetmap.clusters import load
 from fleetmap.orca import OrcaClient, OrcaError
 from fleetmap.registry import LocalSession, Subagent
@@ -214,6 +215,55 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertNotEqual(self.node(first)['last_said'], self.node(second)['last_said'])
         self.assertEqual(self.node(second)['last_said'], 'New local text')
 
+    def make_repository(self, name='glow-core'):
+        repo = self.base / name
+        repo.mkdir()
+        env = dict(os.environ, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t', GIT_COMMITTER_NAME='t',
+                   GIT_COMMITTER_EMAIL='t@t')
+        def git(*args):
+            subprocess.run(['git', '-C', str(repo), *args], check=True, capture_output=True, env=env)
+        git('init', '-q', '-b', 'main')
+        git('commit', '-q', '--allow-empty', '-m', 'init')
+        git('worktree', 'add', '-q', '-b', 'feature', str(self.base / (name + '-wt')))
+        return repo, self.base / (name + '-wt')
+
+    def test_repository_name_from_common_dir(self):
+        repo, wt = self.make_repository()
+        self.assertEqual(repository_name(str(repo)), 'glow-core')
+        self.assertEqual(repository_name(str(wt)), 'glow-core')
+        plain = self.base / 'plain'
+        plain.mkdir()
+        self.assertIsNone(repository_name(str(plain)))
+
+    def test_worktrees_of_one_repository_share_a_cluster_and_keep_branches(self):
+        repo, wt = self.make_repository()
+        self.local[0] = replace(self.local[0], cwd=str(repo))
+        second = replace(self.local[0], session_id='s2', cwd=str(wt))
+        self.local.append(second)
+        snapshot = PrimedCollector(self.orca, config_path=self.config, sessions=lambda: self.local,
+                                   tmux_sessions=lambda: {}).snapshot()
+        first, other = self.node(snapshot, 'local:sid:s1'), self.node(snapshot, 'local:sid:s2')
+        self.assertEqual((first['cluster'], other['cluster']), ('glow-core', 'glow-core'))
+        self.assertEqual((first['repository'], other['repository']), ('glow-core', 'glow-core'))
+        self.assertEqual((first['branch'], other['branch']), ('main', 'feature'))
+
+    def test_repository_lookup_runs_in_slow_thread_and_is_cached(self):
+        collector = Collector(self.orca, config_path=self.config, sessions=lambda: [],
+                              tmux_sessions=lambda: {}, providers=[DirectoryProvider(self.base / 'progress')])
+        collector._local_input = ([], {'/work/project'}, [])
+        with patch('fleetmap.model._git_metadata', return_value=('/work/project', 'main')), \
+                patch('fleetmap.model.repository_name', return_value='glow-core') as lookup:
+            collector.refresh_sources()
+            collector.refresh_sources()
+            self.assertEqual(lookup.call_count, 1)
+            stamp, value = collector._slow['repository']['/work/project']
+            collector._slow['repository']['/work/project'] = (stamp - 61, value)
+            collector.refresh_sources()
+            self.assertEqual(lookup.call_count, 2)
+        with patch('fleetmap.model.repository_name', side_effect=AssertionError('foreground git')), \
+                patch('fleetmap.model._git_metadata', side_effect=AssertionError('foreground git')):
+            collector.snapshot()
+
     def test_screen_and_git_cache_ttls(self):
         self.local.clear()
         self.orca.put('terminal list', 'terminals', [terminal()])
@@ -366,12 +416,11 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertEqual(matrix['packages'][0]['id'], 'P1')
         self.assertEqual(matrix['run_plan']['path'], 'plan.md')
 
-    def test_terminal_without_transcript_keeps_worktree_cluster(self):
+    def test_terminal_without_transcript_on_remote_host_has_no_repository(self):
         self.orca.put('terminal list', 'terminals', [dict(terminal('term_worker'),
             branch='refs/heads/hok/handoff-l2-p06-outcomes')], 'laptop2')
         node = self.node(self.collector().snapshot(), 'env:laptop2:term:term_worker')
-        self.assertEqual((node['cluster'], node['cluster_source']),
-                         ('handoff-l2-p06-outcomes', 'worktree'))
+        self.assertEqual((node['cluster'], node['cluster_source']), ('Unsorted', 'unsorted'))
         self.assertIsNone(node['you_at'])
 
     def test_projected_dispatch_joins_remote_terminal_from_any_hosts_scoped_list(self):
@@ -554,7 +603,7 @@ class SnapshotAssembler(unittest.TestCase):
         node = self.node(snap)
         self.assertEqual(set(node), {
             'id', 'host', 'kind', 'parent', 'title', 'purpose', 'doing', 'last_said',
-            'state', 'you_at', 'it_at', 'never_addressed', 'never_prompted', 'cluster', 'repo',
+            'state', 'you_at', 'it_at', 'never_addressed', 'never_prompted', 'cluster', 'repo', 'repository',
             'worktree', 'branch', 'hosting', 'model', 'ctx_pct', 'cost', 'moves',
             'terminal', 'tmux', 'kitty_window', 'kitty_pid', 'subagents_total', 'subagents_shown',
             'stalled', 'ladder', 'stage', 'cluster_source', 'activity_changed_at',
@@ -609,7 +658,7 @@ class SnapshotAssembler(unittest.TestCase):
         node = self.node(collector.snapshot())
         self.assertEqual(node['you_at'], NOW)
         self.assertFalse(node['never_addressed'])
-        self.assertEqual(node['cluster'], 'review')
+        self.assertEqual(node['cluster'], 'Unsorted')
 
     def test_dispatched_worker_run_objective_applies_before_human_follow_up(self):
         self.orca.put('orchestration worker-list', 'workers',
@@ -862,7 +911,7 @@ class SnapshotAssembler(unittest.TestCase):
         self.orca.put('terminal list', 'terminals', [])
         node = self.node(self.collector().snapshot())
         self.assertEqual((node['repo'], node['worktree'], node['branch'], node['cluster']),
-                         ('project-root', str(repo.resolve()), 'feature/git-branch', 'git-branch'))
+                         ('project-root', str(repo.resolve()), 'feature/git-branch', 'project-root'))
 
     def test_missing_transcript_is_an_unprompted_node(self):
         self.transcript.unlink()
@@ -899,7 +948,7 @@ class SnapshotAssembler(unittest.TestCase):
 
     def test_config_is_reloaded_and_new_transcript_path_resets_facts(self):
         collector = self.collector()
-        self.assertEqual(self.node(collector.snapshot())['cluster'], 'review')
+        self.assertEqual(self.node(collector.snapshot())['cluster'], 'Unsorted')
         self.config.write_text(json.dumps({'assign': {'s1': 'Pinned'}}))
         self.assertEqual(self.node(collector.snapshot())['cluster'], 'Pinned')
         replacement = self.base / 'replacement.jsonl'

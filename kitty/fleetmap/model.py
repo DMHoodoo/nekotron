@@ -73,13 +73,28 @@ def _git_metadata(cwd):
         return '', ''
 
 
+def repository_name(worktree_root):
+    """Name of the repository owning a worktree: the directory holding its common git directory."""
+    if not worktree_root:
+        return None
+    try:
+        out = subprocess.run(['git', '-C', worktree_root, 'rev-parse', '--path-format=absolute',
+                              '--git-common-dir'], capture_output=True, text=True, timeout=5)
+        if out.returncode or not out.stdout.strip():
+            return None
+        common = Path(out.stdout.strip()).resolve()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return common.parent.name or None
+
+
 def _node(node_id, host, kind, facts=None):
     facts = facts or TranscriptFacts.empty()
     return dict(
         id=node_id, host=host, kind=kind, parent=None, title=facts.title or '',
         purpose=facts.purpose or '', doing=facts.doing or '', last_said=facts.last_said or '',
         state='idle', you_at=facts.you_at, it_at=facts.it_at,
-        never_addressed=facts.you_at is None, cluster='Unsorted', repo='', worktree='',
+        never_addressed=facts.you_at is None, cluster='Unsorted', repo='', repository='', worktree='',
         branch='', hosting='unknown', model=None, ctx_pct=None, cost=None,
         stalled=False, ladder=None, stage=None, cluster_source='unsorted',
         activity_changed_at=None, transcript_offset=facts.offset, last_output_at=None,
@@ -120,7 +135,8 @@ class Collector:
         self._slow_lock = threading.Lock()
         self._slow_input = None
         self._slow = {'ladders': {}, 'memory': {}, 'stale': {}, 'hosts': {},
-                      'environments': [], 'environment_error': None, 'git': {}, 'tmux': {}}
+                      'environments': [], 'environment_error': None, 'git': {}, 'tmux': {},
+                      'repository': {}}
         self._local_input = ([], set(), [])
         self._host_threads = {}
         self._screens = {}
@@ -195,6 +211,7 @@ class Collector:
             sessions, paths, configured = self._local_input
             environments = list(self._slow['environments'])
             git = dict(self._slow['git'])
+            repositories = dict(self._slow['repository'])
         names = list(dict.fromkeys(['local'] + environments + configured))
         deadline = time.monotonic() + 5
         threads = self._start_hosts(names, sessions)
@@ -214,9 +231,13 @@ class Collector:
                 break
             if path not in git or now - git[path][0] >= 60:
                 git[path] = (now, _git_metadata(path))
+        for root in sorted({value[0] for _, value in git.values() if value[0]}):
+            now = time.monotonic()
+            if root not in repositories or now - repositories[root][0] >= 60:
+                repositories[root] = (now, repository_name(root))
         tmux = self.tmux_sessions() if sessions else {}
         with self._slow_lock:
-            self._slow.update(git=git, tmux=tmux)
+            self._slow.update(git=git, tmux=tmux, repository=repositories)
 
     def refresh_slow(self):
         """All Orca, screen, tmux and git probes live outside snapshot publication."""
@@ -332,6 +353,7 @@ class Collector:
             binding = bindings.get(worker['id'])
             name = cluster_for(
                 worker['id'], run_objective=objectives.get(worker['handle']),
+                repository=slow['repository'].get(worker['worktree'], (0, None))[1],
                 projection_cluster=binding[0].title if binding else None,
                 title=worker['title'], purpose='', worktree=worker['worktree'],
                 branch=worker['branch'], config=config)
@@ -355,8 +377,9 @@ class Collector:
                     binding or pinned or objective):
                 node['cluster'] = 'Unsorted'
             else:
+                node['repository'] = slow['repository'].get(node['worktree'], (0, None))[1] or ''
                 node['cluster'] = cluster_for(
-                    node_id, run_objective=objective, projection_cluster=projection_cluster,
+                    node_id, run_objective=objective, repository=node['repository'] or None, projection_cluster=projection_cluster,
                     title=node['title'], purpose=(node['purpose'] if node['kind'] == 'terminal'
                                                  or node['you_at'] is not None else None),
                     worktree=node['worktree'], branch=node['branch'], config=config)
@@ -548,7 +571,7 @@ class Collector:
                 child = _node(child_id, 'local', 'subagent', child_facts)
                 child.update(parent=node_id, title=child_facts.title or agent.agent_id,
                              state='working' if now - agent.mtime < 120 else 'done')
-                for key in ('cluster', 'repo', 'worktree', 'branch', 'hosting'):
+                for key in ('cluster', 'repo', 'repository', 'worktree', 'branch', 'hosting'):
                     child[key] = node[key]
                 nodes.append(child)
                 subagent_edges.append(Edge(node_id, child_id, 1, agent.mtime, 'subagent'))
