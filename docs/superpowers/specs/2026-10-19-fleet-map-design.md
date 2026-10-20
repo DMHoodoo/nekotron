@@ -212,7 +212,16 @@ mechanism named above.
 - E: `kitty/fleetmap/edges.py`.
 - F: `kitty/fleetmap/actions.py`.
 - G: `kitty/fleetmap/server.py` and `bin/fleet-map`.
+- H: `kitty/fleetmap/projection.py` and `tools/render-progress.py` in the `engineering-os-lab` repository, branch `fleet-map-progress`, commit `221b5c8` (Decision 21).
+- I: `kitty/fleetmap/ladder.py`.
+- J: `kitty/fleetmap/clusters.py`.
 - Decision 7: `hooks/kitty-tab-status.sh`.
+- Decision 12: `kitty/fleetmap/matrix.py`.
+- Decisions 15 to 18: `kitty/fleetmap/signals.py`.
+- Decisions 19 and 20: `kitty/fleetmap/actions.py` and `kitty/fleetmap/page.html`.
+- Decision 22: `claude/skills/fleet-map/SKILL.md`.
+- Per-run worker collection and Resume here paging (Task 18 fix rounds): `kitty/fleetmap/model.py` and `bin/md-preview`, respectively.
+- Stage-only route and `never_prompted` flag (Task 19 fix rounds): `kitty/fleetmap/server.py` and `kitty/fleetmap/model.py`, respectively.
 - Host reachability degradation and the subagent window (Tasks 7b, 7c): `kitty/fleetmap/model.py`.
 - Full-width layout (Task 10b): `kitty/fleetmap/page.html`.
 - Orca binary fallback: `kitty/fleetmap/orca.py` and `bin/fleet-map`.
