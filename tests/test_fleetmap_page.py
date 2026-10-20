@@ -68,6 +68,35 @@ console.log(JSON.stringify([text(cluster.panel), text($('context-details'))]));
             self.assertIn('Handoff scheduling: wave 1 running; waiting for approval | full objective', rendered)
             self.assertIn('projection v1, Chief must re-render', rendered)
 
+    def test_fallback_renders_beside_projected_matrix(self):
+        source = DOM + page_functions('html', 'button', 'clusterInfo', 'clusterRun',
+                                     'clusterItems', 'renderCluster', 'detailLine',
+                                     'renderFallback', 'matrixTable', 'miniNode')
+        output = run_js(source + """
+const objective = 'Review run: legacy work; waiting';
+const info = {run: 'run_test', matrix_host: 'laptop2', fallbacks: [
+  {run: 'run_legacy', now: objective, note: 'projection v1, Chief must re-render'}]};
+const run = {run: 'run_test', title: 'Review run', rows: [], proofs: [], chief_node: null};
+const snapshot = {clusters: {'Review run': info}, runs: {run_test: run}, nodes: []};
+const cluster = {id: 'cluster', name: 'Review run', host: 'laptop2', panel: new Element()};
+const expanded = new Set(), nodes = new Map(), stageLabels = ['Goal', 'Review'];
+let selectedId = null, selectedContext = null, miniViews = [];
+renderCluster(cluster);
+const collapsed = text(cluster.panel);
+expanded.add(cluster.id); renderCluster(cluster);
+console.log(JSON.stringify({collapsed, expanded: text(cluster.panel),
+  matrices: cluster.panel.children.filter(child => child.className === 'matrix').length,
+  run: clusterRun(cluster).run}));
+""")
+        self.assertEqual(output['run'], 'run_test')
+        self.assertEqual(output['matrices'], 1)
+        self.assertIn('Chief:', output['expanded'])
+        for rendered in (output['collapsed'], output['expanded']):
+            self.assertIn('Open run plan', rendered)
+            self.assertIn('run_legacy', rendered)
+            self.assertIn('Review run: legacy work; waiting', rendered)
+            self.assertIn('projection v1, Chief must re-render', rendered)
+
     def test_layout_preserves_positions_across_membership_thresholds_and_hosts(self):
         source = DOM + page_functions('ensureRegion', 'ensureCluster', 'clusterInfo',
                                      'clusterRun', 'layoutFleet', 'endpoint')

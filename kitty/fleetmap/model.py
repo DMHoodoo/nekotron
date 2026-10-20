@@ -291,8 +291,9 @@ class Collector:
                 record = cluster_record(name)
                 record['notes'].append(reason)
                 record['fallbacks'].append(dict(run=run_id, now=run['objective'], note=reason))
-                record.update(run=run_id, matrix_host=next(
-                    (host for host, records in data.items() if run in records['runs']), 'local'))
+                if record['run'] not in matrices:
+                    record.update(run=run_id, matrix_host=next(
+                        (host for host, records in data.items() if run in records['runs']), 'local'))
         ladders = set()
         by_node = {node['id']: node for node in nodes}
         activity = {}

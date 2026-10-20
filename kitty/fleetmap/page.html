@@ -767,6 +767,7 @@ function renderCluster(cluster) {
   })));
   panel.append(heading);
   panel.append(html('p', `waiting on you: ${info.waiting || 0} · ${info.stalled || 0} stalled`, 'cluster-summary'));
+  renderFallback(panel, info);
   if (run) {
     for (const row of run.rows) panel.append(stepper(row));
     const proofs = html('div', `Proofs: ${run.proofs.map(proof => `${proof.id} ${proof.status}`).join(' · ') || '—'}`, 'cluster-summary');
@@ -777,7 +778,6 @@ function renderCluster(cluster) {
       panel.append(matrixTable(run));
     }
   } else {
-    renderFallback(panel, info);
     if (open) panel.append(ladderTable(cluster));
   }
   cluster.miniViews = miniViews; miniViews = priorViews;

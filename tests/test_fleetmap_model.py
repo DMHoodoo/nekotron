@@ -273,6 +273,21 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertEqual(snap['clusters']['Handoff scheduling']['fallbacks'], [
             {'run': 'run_test', 'now': objective, 'note': 'projection v1, Chief must re-render'}])
 
+    def test_fallback_run_preserves_matching_projected_cluster_binding(self):
+        self.write_projection(projection())
+        self.orca.put('terminal list', 'terminals', [terminal('term_chief')], 'laptop2')
+        objective = 'Review run: legacy work; waiting'
+        self.orca.put('orchestration run-list', 'runs', [
+            {'id': 'run_test', 'objective': 'Projected review', 'coordinator_handle': 'term_chief'},
+            {'id': 'run_legacy', 'objective': objective, 'coordinator_handle': 'term_a'}])
+        snapshot = self.collector().snapshot()
+        cluster = snapshot['clusters']['Review run']
+        self.assertEqual(cluster['run'], 'run_test')
+        self.assertEqual(cluster['matrix_host'], 'laptop2')
+        self.assertIn(cluster['run'], snapshot['runs'])
+        self.assertEqual(cluster['fallbacks'], [
+            {'run': 'run_legacy', 'now': objective, 'note': 'projection v1, Chief must re-render'}])
+
     def test_projection_package_binds_even_when_not_listed_in_a_slice(self):
         self.write_projection(projection(slices=[slice_row(stage='review')],
             packages=[package('P1', dispatchId='d1')]))
