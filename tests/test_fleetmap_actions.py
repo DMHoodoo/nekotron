@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -67,10 +68,35 @@ class ActionRouting(unittest.TestCase):
         path = '/work/tree with spaces/plan.md'
         self.assertIsNone(self.actions.open_plan(path))
         self.assertEqual(self.argv('kitten'), ['@', '--to', f'unix:{self.sock}',
-            'launch', '--type=overlay', os.path.expanduser('~/bin/md-preview'), path])
+            'launch', '--type=overlay', '--env', 'MD_PREVIEW_FROM_HEADING=Resume here',
+            os.path.expanduser('~/bin/md-preview'), path])
         with patch('fleetmap.actions.glob.glob', return_value=[]):
             with self.assertRaises(ActionError):
                 self.actions.open_plan(path)
+
+    def test_md_preview_starts_at_middle_heading_and_falls_back_to_whole_document(self):
+        # Exercise both real preview scripts; only glow's rendering is replaced.
+        binaries = self.base / 'bin'
+        binaries.mkdir()
+        for name, source in {
+                'glow': '#!/bin/sh\ncat\n',
+                'python3': '#!/bin/sh\nexec ' + shlex.quote(sys.executable) + ' "$@"\n'}.items():
+            script = binaries / name
+            script.write_text(source)
+            script.chmod(0o755)
+        path = self.base / 'run plan.md'
+        before = '# Run plan\n\nOld status\n\n```markdown\n## Resume here\nexample only\n```\n\n'
+        after = '## Resume here\n\nNext: verify the candidate.\n\n## Evidence\n\nFinal proof.\n'
+        document = before + after
+        path.write_text(document)
+        for heading, expected in [('Resume here', after), ('Absent heading', document), ('', document)]:
+            with self.subTest(heading=heading):
+                env = dict(os.environ, MD_PREVIEW_FROM_HEADING=heading,
+                           PATH=str(binaries) + os.pathsep + os.environ.get('PATH', ''))
+                result = subprocess.run([str(ROOT / 'bin/md-preview'), str(path)],
+                                        input='x', capture_output=True, text=True, env=env, timeout=5)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.split('\033', 1)[0], expected + '\n')
 
     def test_orca_actions_use_host_environment(self):
         for hosting, host in [('orca', 'local'), ('orca', 'laptop2'),

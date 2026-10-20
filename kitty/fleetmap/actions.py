@@ -126,8 +126,8 @@ class Actions:
         return results
 
     def open_plan(self, path) -> None:
-        self._kitty('launch', '--type=overlay', os.path.expanduser('~/bin/md-preview'),
-                    os.fspath(path))
+        self._kitty('launch', '--type=overlay', '--env', 'MD_PREVIEW_FROM_HEADING=Resume here',
+                    os.path.expanduser('~/bin/md-preview'), os.fspath(path))
 
     def close(self, node) -> None:
         route, target = self._target(node)

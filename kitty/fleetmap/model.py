@@ -235,7 +235,8 @@ class Collector:
             else:
                 node['cluster'] = cluster_for(
                     node_id, run_objective=objective, projection_cluster=projection_cluster,
-                    title=node['title'], purpose=node['purpose'] if node['you_at'] is not None else None,
+                    title=node['title'], purpose=(node['purpose'] if node['kind'] == 'terminal'
+                                                 or node['you_at'] is not None else None),
                     worktree=node['worktree'], branch=node['branch'], config=config)
                 fields = [str(node[key] or '').casefold()
                           for key in ('title', 'purpose', 'worktree', 'branch')]
@@ -305,7 +306,7 @@ class Collector:
                 return fallback
 
         for source in ('runs', 'workers', 'inbox'):
-            records[source] = optional(source, getattr(self.orca, source), [])
+            records[source] = list(optional(source, getattr(self.orca, source), []))
         records['tasks'] = []
         for run in records['runs']:
             records['tasks'].extend(optional('tasks', self.orca.tasks, [], run_id=run['id']))
@@ -337,10 +338,21 @@ class Collector:
                 data[host['name']] = self._poll_host(host['name'], sessions)
             except OrcaError as error:
                 host.update(reachable=False, error=str(error))
-            else:
-                degraded = data[host['name']]['degraded']
-                if degraded:
-                    host.setdefault('degraded', []).extend(degraded)
+        # Unscoped worker-list inherits the launcher's run. A run and its
+        # dispatch records can live on different runtimes, so query every known
+        # run on each reachable host before resolving package dispatch IDs.
+        run_ids = dict.fromkeys(run['id'] for records in data.values() for run in records['runs'])
+        for name, records in data.items():
+            for run_id in run_ids:
+                try:
+                    records['workers'].extend(self.orca.workers(
+                        env=None if name == 'local' else name, run_id=run_id))
+                except OrcaError as error:
+                    records['degraded'].append(f'workers: {error}')
+        for host in hosts:
+            degraded = data.get(host['name'], {}).get('degraded', [])
+            if degraded:
+                host.setdefault('degraded', []).extend(degraded)
         if 'local' not in data:
             sessions = []
         tmux = self.tmux_sessions() if sessions else {}

@@ -126,6 +126,43 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertEqual(matrix['packages'][0]['id'], 'P1')
         self.assertEqual(matrix['run_plan']['path'], 'plan.md')
 
+    def test_terminal_without_transcript_keeps_worktree_cluster(self):
+        self.orca.put('terminal list', 'terminals', [dict(terminal('term_worker'),
+            branch='refs/heads/hok/handoff-l2-p06-outcomes')], 'laptop2')
+        node = self.node(self.collector().snapshot(), 'env:laptop2:term:term_worker')
+        self.assertEqual((node['cluster'], node['cluster_source']),
+                         ('handoff-l2-p06-outcomes', 'worktree'))
+        self.assertIsNone(node['you_at'])
+
+    def test_projected_dispatch_joins_remote_terminal_from_any_hosts_scoped_list(self):
+        self.write_projection(projection(chiefTerminal='term_a',
+            slices=[slice_row(stage='review', packages=['P1'])],
+            packages=[package('P1', dispatchId='d_remote', machine='laptop2')]))
+        self.orca.put('terminal list', 'terminals', [terminal('term_worker')], 'laptop2')
+        original = self.orca.call
+        for storage_host in (None, 'laptop2'):
+            with self.subTest(storage_host=storage_host):
+                def call(args, env=None):
+                    if args[:2] == ['orchestration', 'worker-list']:
+                        # Unscoped calls inherit the map launcher's unrelated run.
+                        if env == storage_host and '--run' in args and args[3] == 'run_test':
+                            if '--cursor' not in args:
+                                return {'workers': [], 'page': {'nextCursor': 'opaque cursor'}}
+                            self.assertEqual(args[-2:], ['--cursor', 'opaque cursor'])
+                            return {'workers': [{'dispatchId': 'd_remote', 'runId': 'run_test',
+                                'agentTerminalHandle': 'term_worker', 'host': 'local',
+                                'workerState': 'running'}]}
+                        return {'workers': []}
+                    return original(args, env)
+                with patch.object(self.orca, 'call', side_effect=call):
+                    snap = self.collector().snapshot()
+                node_id = 'env:laptop2:term:term_worker'
+                node = self.node(snap, node_id)
+                self.assertEqual((node['cluster'], node['cluster_source'], node['stage']),
+                                 ('Review run', 'run', 'review'))
+                self.assertEqual(snap['runs']['run_test']['rows'][0]['live'], [node_id])
+                self.assertEqual(snap['hosts'][1]['workers'], 1)
+
     def test_rejected_and_missing_projection_notes_are_on_run_clusters(self):
         self.write_projection(projection(chiefTerminal='term_a'))
         (self.base / 'progress/run_test.json').write_text('{"schemaVersion": 1}')

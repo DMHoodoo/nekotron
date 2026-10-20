@@ -3,6 +3,8 @@
 # Markdown gets glow's pager; anything else falls back to less.
 # hints hands text over verbatim, gluing prose around real paths:
 # "(...path.md)" and tool-call renders like "Update(~/path/file.md)".
+# MD_PREVIEW_FROM_HEADING starts Markdown at that heading; absent headings
+# fall back to the whole document. Keep the original path for relative images.
 resolve() {
     local x="${1/#\~/$HOME}"
     while [ ! -e "$x" ]; do
@@ -21,7 +23,11 @@ fi
 GLOW="$(command -v glow || echo /opt/homebrew/bin/glow)"
 case "$f" in
     *.md|*.markdown|*.mdx)
-        "$HOME/Documents/GlowDevelopment/nekotron/bin/mdv" "$f"
+        mdv_args=()
+        if [ -n "${MD_PREVIEW_FROM_HEADING:-}" ]; then
+            mdv_args=(--from-heading "$MD_PREVIEW_FROM_HEADING")
+        fi
+        "$(dirname "${BASH_SOURCE[0]}")/mdv" "${mdv_args[@]}" "$f"
         if [ -d "/Applications/SMD.app" ]; then
             printf '\n\033[38;2;107;115;148m— o opens in SMD · any other key closes (wheel scrolls) —\033[0m'
             IFS= read -rsn1 k

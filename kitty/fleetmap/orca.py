@@ -80,8 +80,21 @@ class OrcaClient:
     def inbox(self, env: str | None = None) -> list[dict]:
         return self.call(['orchestration', 'inbox'], env)['messages']
 
-    def workers(self, env: str | None = None) -> list[dict]:
-        return self.call(['orchestration', 'worker-list'], env)['workers']
+    def workers(self, env: str | None = None, run_id: str | None = None) -> list[dict]:
+        args = ['orchestration', 'worker-list']
+        if run_id is not None:
+            args.extend(['--run', run_id])
+        workers, seen = [], set()
+        cursor = None
+        while True:
+            result = self.call(args + (['--cursor', cursor] if cursor else []), env)
+            workers.extend(result['workers'])
+            cursor = result.get('page', {}).get('nextCursor')
+            if not cursor:
+                return workers
+            if cursor in seen:
+                raise OrcaError('worker-list repeated a page cursor')
+            seen.add(cursor)
 
     def tasks(self, env: str | None = None, run_id: str | None = None) -> list[dict]:
         args = ['orchestration', 'task-list']
