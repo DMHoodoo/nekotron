@@ -243,7 +243,6 @@ class Collector:
                 break
             if path not in git or now - git[path][0] >= 60:
                 git[path] = (now, _git_metadata(path))
-        deadline = time.monotonic() + 5
         for root in sorted({value[0] for _, value in git.values() if value[0]}):
             now = time.monotonic()
             if now >= deadline:
