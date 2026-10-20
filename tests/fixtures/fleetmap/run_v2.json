@@ -1,0 +1,497 @@
+{
+  "schemaVersion": 2,
+  "run": "run_4d94eb181d65",
+  "title": "Handoff scheduling",
+  "updatedAt": "2026-10-20T00:25:43Z",
+  "runPlan": {
+    "path": "engineering-os/20261015-handoff-scheduling/run-plan.md",
+    "commit": "c88827630c",
+    "worktree": "/Users/hassankhan/Documents/GlowDevelopment/glow-core/.claude/worktrees/handoff-scheduling"
+  },
+  "pr": {
+    "repo": "TuleInc/glow-core",
+    "number": null
+  },
+  "acceptance": {
+    "state": "pending",
+    "at": null,
+    "by": null
+  },
+  "chiefTerminal": "term_c585d3a9-91d2-4e9e-a368-2016d2b3b47b",
+  "now": "P09 building guarded writes on the approved D2 design; P06 Held-exit change, settings hotfix and slice 2 integration running on laptop2",
+  "statusCard": {
+    "done": "requirements, schema, designs and plan approved; P00-P05, P07, P08, P13a verified; D2 approved",
+    "running": "P09 production writes, P06 F2 change, slice 2 integration and browser test, settings hotfix, Fable closure of P06",
+    "blockedOn": "nothing; live E3 calendar witness (Hassan) before release",
+    "nextCheckpoint": "slice 2 candidate branch and P09 first writer passing D2"
+  },
+  "decisions": [
+    {
+      "id": "E3",
+      "class": "C",
+      "text": "Hassan runs the live calendar identity check on a throwaway calendar before release",
+      "packet": "run-plan decision log 2026-10-19",
+      "applyAt": null
+    }
+  ],
+  "gates": [
+    {
+      "id": "goal",
+      "verdict": "pass",
+      "at": "2026-10-16",
+      "ref": "goal-verify-12"
+    },
+    {
+      "id": "design",
+      "verdict": "pass",
+      "at": "2026-10-19",
+      "ref": "design-verify-2.md"
+    },
+    {
+      "id": "plan",
+      "verdict": "pass",
+      "at": "2026-10-19",
+      "ref": "implementation-readiness-verify-2.md"
+    }
+  ],
+  "mergeGate": {
+    "ready": false,
+    "classDOpen": 0,
+    "classBUnratified": 0
+  },
+  "proofs": [
+    {
+      "id": "E3",
+      "status": "pending"
+    },
+    {
+      "id": "E1",
+      "status": "pending"
+    },
+    {
+      "id": "E5",
+      "status": "pass"
+    },
+    {
+      "id": "E4",
+      "status": "pass"
+    },
+    {
+      "id": "E2",
+      "status": "pending"
+    }
+  ],
+  "caps": {
+    "laptop2": 7
+  },
+  "slices": [
+    {
+      "id": "1",
+      "name": "Statuses and history",
+      "stage": "implementing",
+      "gates": [
+        {
+          "id": "design",
+          "verdict": "pass",
+          "at": "2026-10-19",
+          "ref": "design-slice1.md"
+        }
+      ],
+      "packages": [
+        "P00",
+        "P01",
+        "P06",
+        "P13a",
+        "P13b",
+        "P14",
+        "P15",
+        "P16"
+      ]
+    },
+    {
+      "id": "2",
+      "name": "AE settings",
+      "stage": "review",
+      "gates": [
+        {
+          "id": "design",
+          "verdict": "pass",
+          "at": "2026-10-19",
+          "ref": "design-slice2.md"
+        },
+        {
+          "id": "general-code",
+          "verdict": "pass",
+          "at": "2026-10-19",
+          "ref": "closure-s2-verification.md"
+        }
+      ],
+      "packages": [
+        "P02",
+        "P03",
+        "P07"
+      ],
+      "branch": "hok/handoff-l2-slice2-integration"
+    },
+    {
+      "id": "3",
+      "name": "Automatic AE assignment",
+      "stage": "implementing",
+      "gates": [
+        {
+          "id": "design",
+          "verdict": "pass",
+          "at": "2026-10-19",
+          "ref": "design-slice3.md"
+        }
+      ],
+      "packages": [
+        "P04",
+        "P05",
+        "P08",
+        "P09",
+        "P10",
+        "P11",
+        "P12"
+      ]
+    }
+  ],
+  "packages": [
+    {
+      "id": "P00",
+      "slice": "1",
+      "title": "Contracts",
+      "size": "S",
+      "state": "verified",
+      "dispatchId": "ctx_39129d9df0a8",
+      "machine": "laptop2",
+      "branch": "hok/handoff-l2-p00-contracts",
+      "blockedBy": [],
+      "proofs": [],
+      "checkpointEvidence": "contract fixtures and tests",
+      "verifier": "independent verification",
+      "headSha": "8a979a9a93",
+      "lastEvent": "Independent verification Pass (7660316956)",
+      "lastEventAt": "2026-10-19T21:06:10Z"
+    },
+    {
+      "id": "P01",
+      "slice": "1",
+      "title": "Single meeting-AE identity",
+      "size": "M",
+      "state": "verified",
+      "dispatchId": "ctx_988f94fefd96",
+      "machine": "laptop2",
+      "branch": "hok/handoff-l2-p01-meeting-ae",
+      "blockedBy": [
+        "P00"
+      ],
+      "proofs": [],
+      "checkpointEvidence": "meeting-AE read integration tests",
+      "verifier": "independent verification",
+      "headSha": "ab20e73eea",
+      "lastEvent": "W2A-01 closed (73de64a8e5)",
+      "lastEventAt": "2026-10-19T22:39:25Z"
+    },
+    {
+      "id": "P02",
+      "slice": "2",
+      "title": "Atomic settings storage",
+      "size": "M",
+      "state": "verified",
+      "dispatchId": "ctx_9a9ea69434c1",
+      "machine": "laptop2",
+      "branch": "hok/handoff-l2-p02-settings-storage",
+      "blockedBy": [],
+      "proofs": [],
+      "checkpointEvidence": "concurrent first-write integration test",
+      "verifier": "independent verification",
+      "headSha": "ef42d13f4f",
+      "lastEvent": "Independent verification Pass (7660316956)",
+      "lastEventAt": "2026-10-19T21:06:10Z"
+    },
+    {
+      "id": "P03",
+      "slice": "2",
+      "title": "Typed effective settings profiles",
+      "size": "L",
+      "state": "verified",
+      "dispatchId": "ctx_85c9f893cd4a",
+      "machine": "laptop2",
+      "branch": "hok/handoff-l2-p03-settings-profiles",
+      "blockedBy": [
+        "P00",
+        "P02"
+      ],
+      "proofs": [],
+      "checkpointEvidence": "real IAM/Sales composition tests",
+      "verifier": "independent verification",
+      "headSha": "d7846904a6",
+      "lastEvent": "S2-01 closed (bf20ea984c)",
+      "lastEventAt": "2026-10-19T23:46:09Z"
+    },
+    {
+      "id": "P04",
+      "slice": "3",
+      "title": "Calendar normalization and retry",
+      "size": "M",
+      "state": "verified",
+      "dispatchId": "ctx_4915e5e05d7d",
+      "machine": "laptop2",
+      "branch": "hok/handoff-l2-p04-calendar",
+      "blockedBy": [],
+      "proofs": [
+        "E3"
+      ],
+      "checkpointEvidence": "adapter tests; E3 live witness pending",
+      "verifier": "independent verification",
+      "headSha": "98e2a33a33",
+      "lastEvent": "W2B-01 closed (ee16563ac4)",
+      "lastEventAt": "2026-10-19T23:03:16Z"
+    },
+    {
+      "id": "P05",
+      "slice": "3",
+      "title": "Owned renewable AE leases",
+      "size": "M",
+      "state": "verified",
+      "dispatchId": "ctx_1600ef2b26d3",
+      "machine": "laptop2",
+      "branch": "hok/handoff-l2-p05-ae-lease",
+      "blockedBy": [],
+      "proofs": [
+        "E1"
+      ],
+      "checkpointEvidence": "provisioned Redis lease suite",
+      "verifier": "independent verification",
+      "headSha": "6bbd144dbc",
+      "lastEvent": "Independent verification Pass (7660316956)",
+      "lastEventAt": "2026-10-19T21:06:10Z"
+    },
+    {
+      "id": "P06",
+      "slice": "1",
+      "title": "Outcomes and ownership",
+      "size": "L",
+      "state": "returned",
+      "dispatchId": "ctx_fce473ec1573",
+      "machine": "laptop2",
+      "branch": "hok/handoff-l2-p06-outcomes",
+      "blockedBy": [
+        "P00",
+        "P04"
+      ],
+      "proofs": [
+        "E5"
+      ],
+      "checkpointEvidence": "E5 ownership chain proof",
+      "verifier": "Fable review before merge",
+      "headSha": "16edf205ce",
+      "lastEvent": "Fable F1/F3/F4 fixed (16edf205ce); Fable closure running; F2 decision open",
+      "lastEventAt": "2026-10-20T00:17:13Z"
+    },
+    {
+      "id": "P07",
+      "slice": "2",
+      "title": "Admin settings editor",
+      "size": "M",
+      "state": "verified",
+      "dispatchId": "ctx_a8b538e35493",
+      "machine": "laptop2",
+      "branch": "hok/handoff-l2-p07-settings-editor",
+      "blockedBy": [
+        "P03"
+      ],
+      "proofs": [],
+      "checkpointEvidence": "editor tests; browser acceptance B",
+      "verifier": "independent verification",
+      "headSha": "f2378b68b4",
+      "lastEvent": "S2-02 closed (bf20ea984c); browser acceptance pending",
+      "lastEventAt": "2026-10-19T23:46:09Z"
+    },
+    {
+      "id": "P08",
+      "slice": "3",
+      "title": "Routing and availability",
+      "size": "L",
+      "state": "verified",
+      "dispatchId": "ctx_1bbee2ee5a25",
+      "machine": "laptop2",
+      "branch": "hok/handoff-l2-p08-routing",
+      "blockedBy": [
+        "P00",
+        "P04"
+      ],
+      "proofs": [
+        "E4"
+      ],
+      "checkpointEvidence": "E4 DST proof; availability integration",
+      "verifier": "independent verification",
+      "headSha": "6e1a99d406",
+      "lastEvent": "V08-1/2/3 closed (d32305ed7b)",
+      "lastEventAt": "2026-10-19T23:51:29Z"
+    },
+    {
+      "id": "P09",
+      "slice": "3",
+      "title": "Guarded booking writes",
+      "size": "L",
+      "state": "running",
+      "dispatchId": "ctx_51b6a2fe07bc",
+      "machine": "laptop2",
+      "branch": "hok/handoff-l2-p09-guarded-writes",
+      "blockedBy": [
+        "P01",
+        "P03",
+        "P05",
+        "P06",
+        "P08"
+      ],
+      "proofs": [
+        "E1",
+        "E2"
+      ],
+      "checkpointEvidence": "E1 (D2) and E2 proofs",
+      "verifier": "Fable review before merge",
+      "headSha": "7aecc7e478",
+      "lastEvent": "Production guarded writes on D2; prerequisites merged",
+      "lastEventAt": "2026-10-20T00:25:43Z"
+    },
+    {
+      "id": "P10",
+      "slice": "3",
+      "title": "Calendar reconciliation",
+      "size": "M",
+      "state": "planned",
+      "dispatchId": null,
+      "machine": null,
+      "branch": null,
+      "blockedBy": [
+        "P09"
+      ],
+      "proofs": [],
+      "checkpointEvidence": "",
+      "verifier": "independent verification"
+    },
+    {
+      "id": "P11",
+      "slice": "3",
+      "title": "Booking screens",
+      "size": "M",
+      "state": "planned",
+      "dispatchId": null,
+      "machine": null,
+      "branch": null,
+      "blockedBy": [
+        "P09"
+      ],
+      "proofs": [],
+      "checkpointEvidence": "",
+      "verifier": "independent verification"
+    },
+    {
+      "id": "P12",
+      "slice": "3",
+      "title": "Release backfill",
+      "size": "M",
+      "state": "planned",
+      "dispatchId": null,
+      "machine": null,
+      "branch": null,
+      "blockedBy": [
+        "P09"
+      ],
+      "proofs": [],
+      "checkpointEvidence": "",
+      "verifier": "independent verification"
+    },
+    {
+      "id": "P13a",
+      "slice": "1",
+      "title": "History ledger foundation",
+      "size": "M",
+      "state": "verified",
+      "dispatchId": "ctx_a9e8057ec65b",
+      "machine": "laptop2",
+      "branch": "hok/handoff-l2-p13a-history",
+      "blockedBy": [
+        "P00"
+      ],
+      "proofs": [],
+      "checkpointEvidence": "ledger ordering, immutability and baseline proofs",
+      "verifier": "Fable review before merge",
+      "headSha": "74a5d44787",
+      "lastEvent": "Codex Pass + Fable Pass (9c00044fb6)",
+      "lastEventAt": "2026-10-20T00:03:28Z"
+    },
+    {
+      "id": "P13b",
+      "slice": "1",
+      "title": "History writers and API",
+      "size": "M",
+      "state": "planned",
+      "dispatchId": null,
+      "machine": null,
+      "branch": null,
+      "blockedBy": [
+        "P09",
+        "P10",
+        "P13a"
+      ],
+      "proofs": [],
+      "checkpointEvidence": "",
+      "verifier": "Fable review before merge"
+    },
+    {
+      "id": "P14",
+      "slice": "1",
+      "title": "History badge UI",
+      "size": "M",
+      "state": "planned",
+      "dispatchId": null,
+      "machine": null,
+      "branch": null,
+      "blockedBy": [
+        "P11",
+        "P13b"
+      ],
+      "proofs": [],
+      "checkpointEvidence": "",
+      "verifier": "independent verification"
+    },
+    {
+      "id": "P15",
+      "slice": "1",
+      "title": "Grafana readers",
+      "size": "M",
+      "state": "planned",
+      "dispatchId": null,
+      "machine": null,
+      "branch": null,
+      "blockedBy": [
+        "P13a",
+        "P09"
+      ],
+      "proofs": [],
+      "checkpointEvidence": "",
+      "verifier": "independent verification"
+    },
+    {
+      "id": "P16",
+      "slice": "1",
+      "title": "Airtable sync",
+      "size": "M",
+      "state": "planned",
+      "dispatchId": null,
+      "machine": null,
+      "branch": null,
+      "blockedBy": [
+        "P13a",
+        "P09"
+      ],
+      "proofs": [],
+      "checkpointEvidence": "",
+      "verifier": "independent verification"
+    }
+  ]
+}
