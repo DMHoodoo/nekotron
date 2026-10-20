@@ -651,8 +651,7 @@ function paintNode(node, view) {
   view.badge.textContent = edgeCount > 9 ? '9+' : String(edgeCount);
   view.badge.style.display = !edgeCount || selectedId === node.id || hoveredId === node.id ? 'none' : '';
   const title = node.title || node.purpose || node.id;
-  view.group.setAttribute('aria-label', `${title}, ${node.state}, ${node.kind}`);
-  view.group.setAttribute('title', title);
+  view.group.setAttribute('aria-label', `${node.title || node.id}, ${node.state}, ${node.kind}`);
   view.title.textContent = hoverText(node);
   let split = title.lastIndexOf(' ', 11);
   if (split < 1) split = title.slice(0, 22).indexOf(' ');

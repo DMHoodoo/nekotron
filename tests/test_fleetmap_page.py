@@ -550,7 +550,7 @@ const titles = ['Handoff scheduling engineering OS run', 'Report-task-four',
 const results = titles.map(title => {
   paintNode({id: 'node', title, state: 'idle', kind: 'claude'}, view);
   return {lines: view.label.children.length ? view.label.children.map(child => child.textContent)
-    : [view.label.textContent], title: view.group.attributes.title,
+    : [view.label.textContent], aria: view.group.attributes['aria-label'],
     positions: view.label.children.map(child => [child.attributes.x, child.attributes.dy])};
 });
 console.log(JSON.stringify(results));
@@ -562,7 +562,7 @@ console.log(JSON.stringify(results));
                 ['Eleven', 'chars'], ['One two', 'three four…'],
                 ['Longfirstw…', 'second']]):
             self.assertEqual(result['lines'], lines)
-            self.assertEqual(result['title'], title)
+            self.assertEqual(result['aria'], title + ', idle, claude')
             if len(lines) == 2:
                 self.assertEqual(result['positions'], [[0, 0], [0, 12]])
 
@@ -1152,6 +1152,23 @@ console.log(JSON.stringify({lines: card.split('\\n'), hasPrompt: card.includes('
 """)
         self.assertEqual(output['lines'], ['Fix it', 'You: 1m · It: 5s', 'wt · b'])
         self.assertFalse(output['hasPrompt'])
+
+    def test_rendered_node_hover_never_contains_prompt(self):
+        output = run_page_js("""
+const now = 1000000;
+const node = {id: 'untitled-1', title: '', purpose: 'SECRET '.repeat(1430), state: 'idle', kind: 'claude'};
+snapshot = {hosts: [], clusters: {}, runs: {}, nodes: [node], edges: []};
+const view = makeNode(node);
+paintNode(node, view);
+console.log(JSON.stringify({title: view.title.textContent, expected: hoverText(node, now),
+  attr: view.group.attributes.title ?? null, aria: view.group.attributes['aria-label']}));
+""")
+        self.assertEqual(output['title'], output['expected'])
+        self.assertEqual(output['title'], 'untitled-1')
+        self.assertIsNone(output['attr'])
+        self.assertEqual(output['aria'], 'untitled-1, idle, claude')
+        for text in (output['title'], output['aria']):
+            self.assertNotIn('SECRET', text)
 
     def test_escape_in_dialog_leaves_search_alone(self):
         output = run_page_js(self.SEARCH_FIXTURE + """
