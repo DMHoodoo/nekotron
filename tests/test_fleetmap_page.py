@@ -697,7 +697,6 @@ console.log(JSON.stringify({collapsed, expanded: text(cluster.panel),
         output = run_js(source + """
 const svg = () => new Element();
 const positions = new Map(), regions = new Map(), clusters = new Map(), expanded = new Set(), unfolded = new Set();
-const secondsSince = epoch => epoch == null ? null : Math.max(0, Date.now() / 1000 - epoch);
 const MIN_REGION = 420, CELL = 70, GAP = 16;
 let layoutSignature = '', layoutModeSignature = '';
 function renderCluster() {}
@@ -1005,6 +1004,32 @@ console.log(JSON.stringify({before, folded, after: Object.fromEntries(list.map(n
 """)
         self.assertEqual(output['folded'], {'nodes': 1, 'chips': 1, 'c': output['before']['c']})
         self.assertEqual(output['after'], output['before'])
+    def test_chip_never_shares_a_slot_with_a_reactivated_node(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+const list = [mk('a', 'idle', 1), mk('b', 'idle', 1), mk('c', 'idle', 1)];
+load(list);
+for (const node of list) node.you_at = node.it_at = hours(30);
+load(list);
+list[0].state = 'working'; list[0].you_at = list[0].it_at = hours(0);
+load(list);
+const chip = chips()[0].attributes.transform;
+console.log(JSON.stringify({chip, chips: chips().map(text), drawn: drawnNodes().length,
+  node: nodeViews.get('a').group.attributes.transform}));
+""")
+        self.assertEqual([c.strip() for c in output['chips']], ['2 idle'])
+        self.assertEqual(output['drawn'], 1)
+        self.assertNotEqual(output['chip'], output['node'])
+
+    def test_chip_dims_with_the_state_filter(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([mk('a', 'idle', 30), mk('b', 'working', 1)]);
+const opacity = () => chips()[0].style.opacity;
+const none = opacity();
+setStateFilter('working'); const working = opacity();
+setStateFilter('working'); setStateFilter('idle'); const idle = opacity();
+console.log(JSON.stringify({none, working, idle}));
+""")
+        self.assertEqual(output, {'none': 1, 'working': 0.25, 'idle': 1})
 
     def test_header_counts_include_folded(self):
         output = run_page_js(self.FOLD_FIXTURE + """

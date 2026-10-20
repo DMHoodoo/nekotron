@@ -408,6 +408,9 @@ function layoutFleet(hosts) {
         const old = positions.get(node.id);
         if (old?.cluster === id && old.columns === columns) { slots.set(node.id, old.slot); preserved.add(node.id); }
       }
+      // A node that is drawn again must not share its slot with the chip.
+      if (preserved.has(chipId) && sorted.some(node => node.id !== chipId && preserved.has(node.id) &&
+          slots.get(node.id) === slots.get(chipId))) { preserved.delete(chipId); slots.delete(chipId); }
       if (foldedNodes.length && !preserved.has(chipId) && heldSlots.length) {
         slots.set(chipId, slots.get(heldSlots[0][0].id)); slots.delete(heldSlots[0][0].id);
       }
@@ -486,7 +489,11 @@ function layoutFleet(hosts) {
     regionX += regionWidth;
     width = Math.max(width, regionX);
   }
-  for (const id of positions.keys()) if (!nodes.has(id) && !id.startsWith('fold:')) positions.delete(id);
+  const foldedKeys = new Set(ordered.filter(isFolded).map(clusterKey));
+  for (const id of positions.keys()) {
+    if (id.startsWith('fold:["')) { if (!foldedKeys.has(id.slice(5))) positions.delete(id); }
+    else if (!nodes.has(id)) positions.delete(id);
+  }
   $('map').setAttribute('width', width);
   $('map').setAttribute('height', height);
 }
@@ -554,6 +561,7 @@ function paintFoldChips() {
     chip.setAttribute('transform', `translate(${position.x} ${position.y})`);
     if (chip.parentNode !== cluster.grid) cluster.grid.append(chip);
     chip.style.display = '';
+    chip.style.opacity = clusterItems(cluster).filter(isFolded).every(nodeDimmed) ? .25 : 1;
   }
 }
 function nodeState(node) { return node.state === 'done' ? 'idle' : node.state; }
@@ -564,6 +572,7 @@ function setStateFilter(state) {
   for (const [id, view] of nodeViews) if (nodes.has(id)) paintNode(nodes.get(id), view);
   for (const [id, view] of miniViews) if (nodes.has(id)) paintNode(nodes.get(id), view);
   dimClusters();
+  paintFoldChips();
 }
 function dimClusters() {
   for (const cluster of clusters.values()) {
