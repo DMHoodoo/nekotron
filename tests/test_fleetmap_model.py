@@ -142,6 +142,50 @@ class SnapshotAssembler(unittest.TestCase):
             collector.refresh_sources()
             self.assertEqual(git.call_count, 2)
 
+    def test_screen_timeout_does_not_starve_healthy_terminal_across_cycles(self):
+        self.config.write_text(json.dumps({'hosts': {'laptop2': {}}}))
+        self.orca.put('terminal list', 'terminals',
+                      [terminal('term_bad'), terminal('term_good')], 'laptop2')
+        original = self.orca.call
+        for cached in (False, True):
+            with self.subTest(cached=cached):
+                collector = Collector(self.orca, config_path=self.config, sessions=lambda: [],
+                                      projection_dir=self.base / 'progress')
+                clock = [100.0]
+                reads = []
+                if cached:
+                    collector._screens[('laptop2', 'term_bad')] = (1.0, 'Last good screen')
+                    collector._screens[('laptop2', 'term_good')] = (2.0, 'Old healthy screen')
+
+                def call(args, env=None):
+                    if args[:2] == ['terminal', 'read']:
+                        self.orca.remaining_timeout()
+                        handle = args[args.index('--terminal') + 1]
+                        reads.append(handle)
+                        if handle == 'term_bad':
+                            clock[0] += 5
+                            raise OrcaError('timeout')
+                        return {'screen': 'Healthy screen published'}
+                    return original(args, env)
+
+                snapshots = []
+                with patch('fleetmap.model.time.monotonic', side_effect=lambda: clock[0]), \
+                        patch.object(self.orca, 'call', side_effect=call):
+                    for _ in range(3):
+                        collector._refresh_host('laptop2', [])
+                        snapshots.append(collector.snapshot())
+                        clock[0] += 3
+                self.assertIn('term_good', reads)
+                self.assertLess(reads.count('term_bad'), 3)
+                self.assertEqual(self.node(snapshots[-1], 'env:laptop2:term:term_good')
+                                 ['last_said'], 'Healthy screen published')
+                for snapshot in snapshots:
+                    self.assertEqual(self.node(snapshot, 'env:laptop2:term:term_bad')
+                                     ['last_said'], 'Last good screen' if cached else '')
+                if cached:
+                    self.assertEqual(collector._screens[('laptop2', 'term_bad')],
+                                     (1.0, 'Last good screen'))
+
     def test_projection_joins_remote_chief_and_local_worker_over_pin(self):
         self.config.write_text(json.dumps({'assign': {'s1': 'Pinned'}, 'projects': [
             {'name': 'Pinned', 'slices': [{'name': 'Manual', 'stage': 'goal',

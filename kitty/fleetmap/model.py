@@ -104,6 +104,7 @@ class Collector:
         self._local_input = ([], set(), [])
         self._host_threads = {}
         self._screens = {}
+        self._screen_attempts = {}
 
     @staticmethod
     def _gates(projection):
@@ -404,15 +405,27 @@ class Collector:
             handle = terminal['handle']
             key = (host, handle)
             stamp, screen = self._screens.get(key, (0, ''))
+            attempted_at, backoff, failure = self._screen_attempts.get(key, (0, 0, None))
             now = time.monotonic()
-            if now - stamp >= 30:
+            if (key not in self._screens or now - stamp >= 30) and now - attempted_at >= backoff:
                 try:
                     self.orca.remaining_timeout()
-                    screen = self.orca.screen(handle, env=None if host == 'local' else host)
                 except OrcaError as error:
                     records['degraded'].append(f'screen: {error}')
                 else:
-                    self._screens[key] = (now, screen)
+                    # Budget exhaustion before a read is not a terminal failure.
+                    # Keep retry timing separate from the last successful data.
+                    try:
+                        screen = self.orca.screen(handle, env=None if host == 'local' else host)
+                    except OrcaError as error:
+                        failure = str(error)
+                        self._screen_attempts[key] = (now, min(120, max(10, backoff * 2)), failure)
+                    else:
+                        failure = None
+                        self._screen_attempts[key] = (now, 0, None)
+                        self._screens[key] = (now, screen)
+            if failure is not None:
+                records['degraded'].append(f'screen: {failure}')
             records['screens'][handle] = screen
 
     def snapshot(self) -> dict:
