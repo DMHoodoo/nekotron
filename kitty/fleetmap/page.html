@@ -56,8 +56,6 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospac
 .node { cursor: pointer; outline: none; }
 .node .selection { stroke: transparent; }
 .node[aria-pressed="true"] .selection, .node:focus-visible .selection { stroke: #fff; }
-.cluster-scroll { height: 100%; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #46516e transparent; }
-.cluster-scroll svg { display: block; }
 .attention { filter: drop-shadow(0 0 6px #f0803c); }
 </style>
 </head>
@@ -125,11 +123,12 @@ const $ = id => document.getElementById(id);
 const NS = 'http://www.w3.org/2000/svg';
 const colors = {working: '#4f8ef7', done: '#4cc38a', attention: '#f0803c', idle: '#6b7394'};
 const key = new URLSearchParams(location.search).get('key') || '';
-const positions = new Map(); // Retained for this page's life, including temporarily absent nodes.
+const positions = new Map(); // Keyed by node id; ordinary polls retain the layout.
 const regions = new Map();
 const clusters = new Map();
 const nodeViews = new Map();
-const COLUMN = 380, GRID_COLUMNS = 3, CELL_X = 110, CELL_Y = 94;
+const MIN_REGION = 320, CELL = 70, GAP = 16;
+let layoutSignature = '';
 let snapshot = {hosts: [], nodes: [], edges: []};
 let nodes = new Map(), selectedId = null, dialogNodeId = null;
 let timer = null, pollSeconds = 3, loading = false, actionBusy = false;
@@ -176,75 +175,121 @@ function clusterKey(node) { return JSON.stringify([node.host, node.cluster || 'U
 
 function ensureRegion(host) {
   if (regions.has(host.name)) return regions.get(host.name);
-  const x = regions.size * COLUMN;
   const group = svg('g');
-  const background = svg('rect', {x: x + 8, y: 10, width: COLUMN - 16, height: 280, rx: 12, fill: '#141824'});
-  const label = svg('text', {x: x + 24, y: 38, class: 'region-label'}, host.label || host.name);
+  const background = svg('rect', {y: 10, rx: 12, fill: '#141824'});
+  const label = svg('text', {y: 38, class: 'region-label'});
   const badge = svg('g');
-  badge.append(svg('rect', {x: x + COLUMN - 124, y: 22, width: 99, height: 22, rx: 5, fill: '#702e38'}), svg('text', {x: x + COLUMN - 114, y: 37, fill: '#ffd2d7', 'font-size': 11}, 'unreachable'));
+  badge.append(svg('rect', {y: 22, width: 99, height: 22, rx: 5, fill: '#702e38'}), svg('text', {x: 10, y: 37, fill: '#ffd2d7', 'font-size': 11}, 'unreachable'));
   group.append(background, label, badge);
   $('regions').append(group);
-  const region = {x, nextY: 62, group, background, label, badge};
+  const region = {group, background, label, badge};
   regions.set(host.name, region);
   return region;
 }
 function ensureCluster(node) {
   const id = clusterKey(node);
   if (clusters.has(id)) return clusters.get(id);
-  const region = regions.get(node.host) || ensureRegion({name: node.host});
-  const count = snapshot.nodes.filter(item => clusterKey(item) === id && item.kind !== 'subagent').length;
-  const height = Math.max(2, Math.min(4, Math.ceil(count / GRID_COLUMNS))) * CELL_Y + 40;
-  const x = region.x + 18, y = region.nextY;
-  region.nextY += height + 18;
   const group = svg('g');
-  group.append(svg('rect', {x, y, width: COLUMN - 36, height, rx: 10, fill: 'none', stroke: '#4b546d', 'stroke-dasharray': '5 5'}));
+  const background = svg('rect', {rx: 10, fill: 'none', stroke: '#4b546d', 'stroke-dasharray': '5 5'});
   const name = node.cluster || 'Unsorted';
-  const label = svg('text', {x: x + 14, y: y + 24, class: 'cluster-label'}, name.length > 40 ? `${name.slice(0, 39)}…` : name);
-  label.append(svg('title', {}, name));
-  group.append(label);
-  const viewport = svg('foreignObject', {x: x + 5, y: y + 34, width: COLUMN - 46, height: height - 40});
-  const scroller = document.createElement('div');
-  scroller.className = 'cluster-scroll';
-  scroller.setAttribute('aria-label', `${name} sessions`);
-  const grid = svg('svg', {width: COLUMN - 60, height: height - 40});
-  scroller.append(grid);
-  viewport.append(scroller);
-  group.append(viewport);
+  const label = svg('text', {x: 14, y: 24, class: 'cluster-label'});
+  const grid = svg('g', {transform: 'translate(10 34)'});
+  group.append(background, label, grid);
   $('clusters').append(group);
-  const cluster = {id, x: x + 5, y: y + 34, height: height - 40, group, grid, scroller, slots: new Map()};
+  const cluster = {id, name, group, background, label, grid};
   clusters.set(id, cluster);
-  scroller.addEventListener('scroll', drawEdges);
   return cluster;
 }
-function placeNode(node) {
-  const cluster = ensureCluster(node);
-  const previous = positions.get(node.id);
-  if (previous && previous.cluster === cluster.id) return previous;
-  // An explicit cluster change rehomes a node; ordinary polls never repack it.
-  if (node.kind === 'subagent' && nodes.has(node.parent)) {
-    const parent = placeNode(nodes.get(node.parent));
-    // Reserve room for each radius-17 age ring, including absent nodes that may return.
-    // Once the short attachments are full, use the same unbounded grid as sessions.
-    for (let direction = 0; direction < 8; direction++) {
-      const angle = direction * Math.PI / 4;
-      const position = {cluster: parent.cluster, x: parent.x + 20 * Math.cos(angle), y: parent.y + 20 * Math.sin(angle)};
-      if (position.x < 20 || position.y < 20) continue;
-      const occupied = [...positions].some(([id, other]) =>
-        id !== node.id && id !== node.parent && other.cluster === position.cluster &&
-        Math.hypot(other.x - position.x, other.y - position.y) < 40);
-      if (!occupied) {
-        positions.set(node.id, position);
-        return position;
-      }
-    }
+function layoutFleet(hosts) {
+  const ordered = [...snapshot.nodes].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const width = Math.max($('map-scroll').clientWidth, hosts.length * MIN_REGION);
+  const signature = JSON.stringify([width, hosts.map(host => host.name),
+    ordered.map(node => [node.id, clusterKey(node), node.kind, node.parent])]);
+  if (signature === layoutSignature) return;
+  layoutSignature = signature;
+  positions.clear();
+  const counts = new Map(hosts.map(host => [host.name, 0]));
+  const members = new Map();
+  for (const node of ordered) {
+    counts.set(node.host, counts.get(node.host) + 1);
+    const id = clusterKey(node);
+    if (!members.has(id)) members.set(id, []);
+    members.get(id).push(node);
   }
-  let slot = 0;
-  while (cluster.slots.has(slot) && cluster.slots.get(slot) !== node.id) slot++;
-  cluster.slots.set(slot, node.id);
-  const position = {cluster: cluster.id, x: 54 + (slot % GRID_COLUMNS) * CELL_X, y: 36 + Math.floor(slot / GRID_COLUMNS) * CELL_Y};
-  positions.set(node.id, position);
-  cluster.grid.setAttribute('height', Math.max(Number(cluster.grid.getAttribute('height')), position.y + 58));
-  return position;
+  // Clamp small regions first, then divide the remaining width proportionally.
+  const widths = new Map();
+  let remaining = width, pending = [...hosts];
+  while (pending.length) {
+    const total = pending.reduce((sum, host) => sum + counts.get(host.name), 0);
+    const share = host => total ? remaining * counts.get(host.name) / total : remaining / pending.length;
+    const small = pending.filter(host => share(host) < MIN_REGION);
+    if (!small.length) {
+      for (const host of pending) widths.set(host.name, share(host));
+      break;
+    }
+    for (const host of small) { widths.set(host.name, MIN_REGION); remaining -= MIN_REGION; }
+    pending = pending.filter(host => !widths.has(host.name));
+  }
+  let regionX = 0, height = 100;
+  for (const host of hosts) {
+    const region = ensureRegion(host), regionWidth = widths.get(host.name);
+    const available = regionWidth - 36;
+    region.background.setAttribute('x', regionX + 8);
+    region.background.setAttribute('width', regionWidth - 16);
+    region.label.setAttribute('x', regionX + 24);
+    region.badge.setAttribute('transform', `translate(${regionX + regionWidth - 124} 0)`);
+    const groups = [...members.values()].filter(items => items[0].host === host.name)
+      .sort((a, b) => b.length - a.length || clusterKey(a[0]).localeCompare(clusterKey(b[0])));
+    let x = 0, y = 62, rowHeight = 0;
+    for (const items of groups) {
+      const cluster = ensureCluster(items[0]);
+      let clusterWidth = Math.min(available, Math.max(160, Math.ceil(Math.sqrt(items.length)) * CELL + 20));
+      const room = available - x;
+      // Use the rest of a row when it still offers a useful node grid.
+      if (x && room < clusterWidth && room >= Math.max(160, clusterWidth / 2)) clusterWidth = room;
+      if (x && x + clusterWidth > available) { x = 0; y += rowHeight + GAP; rowHeight = 0; }
+      const columns = Math.max(1, Math.floor((clusterWidth - 20) / CELL));
+      const sorted = [...items].sort((a, b) => (a.kind === 'subagent') - (b.kind === 'subagent'));
+      sorted.forEach((node, slot) => positions.set(node.id, {
+        cluster: cluster.id, x: CELL / 2 + (slot % columns) * CELL,
+        y: 28 + Math.floor(slot / columns) * CELL
+      }));
+      // Keep short parent links where they fit; overflow retains its grid slot.
+      for (const node of sorted) {
+        if (node.kind !== 'subagent') continue;
+        const parent = positions.get(node.parent);
+        if (!parent || parent.cluster !== cluster.id) continue;
+        for (let direction = 0; direction < 8; direction++) {
+          const angle = direction * Math.PI / 4;
+          const position = {cluster: cluster.id, x: parent.x + 20 * Math.cos(angle), y: parent.y + 20 * Math.sin(angle)};
+          if (position.x < 20 || position.x > clusterWidth - 40 || position.y < 20) continue;
+          const occupied = sorted.some(other => {
+            if (other.id === node.id || other.id === node.parent) return false;
+            const point = positions.get(other.id);
+            return Math.hypot(point.x - position.x, point.y - position.y) < 40;
+          });
+          if (!occupied) { positions.set(node.id, position); break; }
+        }
+      }
+      const clusterHeight = Math.max(...items.map(node => positions.get(node.id).y + 42)) + 40;
+      cluster.x = regionX + 18 + x + 10;
+      cluster.y = y + 34;
+      cluster.group.setAttribute('transform', `translate(${regionX + 18 + x} ${y})`);
+      cluster.background.setAttribute('width', clusterWidth);
+      cluster.background.setAttribute('height', clusterHeight);
+      const labelLength = Math.max(8, Math.floor((clusterWidth - 28) / 7));
+      cluster.label.textContent = cluster.name.length > labelLength ? `${cluster.name.slice(0, labelLength - 1)}…` : cluster.name;
+      cluster.label.append(svg('title', {}, cluster.name));
+      x += clusterWidth + GAP;
+      rowHeight = Math.max(rowHeight, clusterHeight);
+    }
+    const bottom = y + rowHeight + 18;
+    region.background.setAttribute('height', bottom - 10);
+    height = Math.max(height, bottom + 10);
+    regionX += regionWidth;
+  }
+  $('map').setAttribute('width', width);
+  $('map').setAttribute('height', height);
 }
 function makeNode(node) {
   const small = node.kind === 'subagent';
@@ -262,7 +307,7 @@ function makeNode(node) {
   const body = svg('circle', {r: small ? 6 : 11, fill: `url(#${gradient.id})`});
   const ringBackground = svg('circle', {r: 17, fill: 'none', stroke: 'rgba(127,127,127,.25)', 'stroke-width': 3});
   const ring = svg('circle', {r: 17, fill: 'none', 'stroke-width': 3, transform: 'rotate(-90)'});
-  const label = svg('text', {y: 52, 'text-anchor': 'middle', class: 'node-label'});
+  const label = svg('text', {y: 36, 'text-anchor': 'middle', class: 'node-label'});
   // Decorative rings can cross a short parent attachment, but must not steal clicks.
   for (const decoration of [selection, ringBackground, ring, pulse]) decoration.setAttribute('pointer-events', 'none');
   group.append(defs, title, hit, selection, ringBackground, ring, pulse, body, label);
@@ -276,7 +321,7 @@ function makeNode(node) {
   return view;
 }
 function updateNode(node) {
-  const position = placeNode(node), cluster = clusters.get(position.cluster);
+  const position = positions.get(node.id), cluster = clusters.get(position.cluster);
   const view = nodeViews.get(node.id) || makeNode(node);
   if (view.group.parentNode !== cluster.grid) cluster.grid.append(view.group);
   view.group.style.display = '';
@@ -285,7 +330,7 @@ function updateNode(node) {
   const title = node.title || node.id;
   view.group.setAttribute('aria-label', `${title}, ${node.state}, ${node.kind}`);
   view.title.textContent = `${title}\n${node.purpose || node.doing || ''}`;
-  view.label.textContent = title.length > 16 ? `${title.slice(0, 15)}…` : title;
+  view.label.textContent = title.length > 11 ? `${title.slice(0, 10)}…` : title;
   const color = colors[node.state] || colors.idle;
   const hours = (secondsSince(node.it_at) || 0) / 3600;
   const centerOpacity = 1 - .85 * Math.min(1, Math.max(0, (hours - 1) / 47));
@@ -309,9 +354,7 @@ function endpoint(id) {
   const position = positions.get(id);
   if (!position) return null;
   const cluster = clusters.get(position.cluster);
-  const y = position.y - cluster.scroller.scrollTop;
-  if (y < 0 || y > cluster.height) return null;
-  return {x: cluster.x + position.x, y: cluster.y + y};
+  return {x: cluster.x + position.x, y: cluster.y + position.y};
 }
 function drawEdges() {
   const fragment = document.createDocumentFragment();
@@ -329,7 +372,11 @@ function drawEdges() {
 function render() {
   nodes = new Map(snapshot.nodes.map(node => [node.id, node]));
   for (const region of regions.values()) region.group.style.display = 'none';
-  for (const host of snapshot.hosts) {
+  const hostMap = new Map(snapshot.hosts.map(host => [host.name, host]));
+  for (const node of snapshot.nodes) if (!hostMap.has(node.host)) hostMap.set(node.host, {name: node.host});
+  const hosts = [...hostMap.values()].sort((a, b) => a.name.localeCompare(b.name));
+  layoutFleet(hosts);
+  for (const host of hosts) {
     const region = ensureRegion(host);
     region.group.style.display = '';
     region.label.textContent = host.label || host.name;
@@ -343,13 +390,6 @@ function render() {
     cluster.group.style.display = '';
     updateNode(node);
   }
-  let height = 340;
-  for (const region of regions.values()) {
-    region.background.setAttribute('height', region.nextY);
-    height = Math.max(height, region.nextY + 20);
-  }
-  $('map').setAttribute('width', Math.max(COLUMN, regions.size * COLUMN));
-  $('map').setAttribute('height', height);
   drawEdges();
   renderRail();
 }
@@ -516,6 +556,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') refresh();
   else $('status').textContent = 'Paused while hidden';
 });
+new ResizeObserver(() => render()).observe($('map-scroll'));
 startPolling();
 refresh();
 </script>
