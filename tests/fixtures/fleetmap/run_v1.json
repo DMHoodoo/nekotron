@@ -1,0 +1,110 @@
+{
+  "run": "run_4d94eb181d65",
+  "title": "Handoff scheduling",
+  "updatedAt": "2026-10-20T00:17:13Z",
+  "weights": {
+    "size": {
+      "S": 1,
+      "M": 2,
+      "L": 3
+    },
+    "status": {
+      "not_started": 0,
+      "blocked": 0,
+      "running": 0.4,
+      "checks": 0.7,
+      "pushed": 0.8,
+      "verifying": 0.9,
+      "verified": 1,
+      "merged": 1
+    }
+  },
+  "slices": [
+    {
+      "id": "1",
+      "name": "Statuses and history",
+      "asanaTaskId": "1219669455278378",
+      "packages": [
+        "P00",
+        "P01",
+        "P06"
+      ],
+      "progress": 0.481,
+      "failedProof": false
+    },
+    {
+      "id": "2",
+      "name": "AE settings",
+      "asanaTaskId": "1219669276513958",
+      "packages": [
+        "P02",
+        "P03",
+        "P07"
+      ],
+      "progress": 1.0,
+      "failedProof": false
+    },
+    {
+      "id": "3",
+      "name": "Automatic AE assignment",
+      "asanaTaskId": "1219669353168227",
+      "packages": [
+        "P04",
+        "P05",
+        "P08"
+      ],
+      "progress": 0.438,
+      "failedProof": true
+    }
+  ],
+  "packages": [
+    {
+      "id": "P00",
+      "slice": "1",
+      "title": "Contracts",
+      "size": "S",
+      "status": "verified",
+      "dispatchId": "ctx_39129d9df0a8",
+      "machine": "laptop2",
+      "branch": "hok/handoff-l2-p00-contracts",
+      "headSha": "8a979a9a93",
+      "blockedBy": [],
+      "proofs": [],
+      "lastEvent": "Independent verification Pass (7660316956)",
+      "lastEventAt": "2026-10-19T21:06:10Z"
+    },
+    {
+      "id": "P01",
+      "slice": "1",
+      "title": "Single meeting-AE identity",
+      "size": "M",
+      "status": "verified",
+      "dispatchId": "ctx_988f94fefd96",
+      "machine": "laptop2",
+      "branch": "hok/handoff-l2-p01-meeting-ae",
+      "headSha": "ab20e73eea",
+      "blockedBy": [
+        "P00"
+      ],
+      "proofs": [],
+      "lastEvent": "W2A-01 closed (73de64a8e5)",
+      "lastEventAt": "2026-10-19T22:39:25Z"
+    },
+    {
+      "id": "P02",
+      "slice": "2",
+      "title": "Atomic settings storage",
+      "size": "M",
+      "status": "verified",
+      "dispatchId": "ctx_9a9ea69434c1",
+      "machine": "laptop2",
+      "branch": "hok/handoff-l2-p02-settings-storage",
+      "headSha": "ef42d13f4f",
+      "blockedBy": [],
+      "proofs": [],
+      "lastEvent": "Independent verification Pass (7660316956)",
+      "lastEventAt": "2026-10-19T21:06:10Z"
+    }
+  ],
+  "schemaVersion": 1
+}

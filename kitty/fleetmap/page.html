@@ -1,0 +1,1009 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<link rel="icon" href="data:,">
+<title>Fleet map</title>
+<style>
+:root { color-scheme: dark; font: 14px/1.5 system-ui, sans-serif; background: #10121a; color: #e4e7f0; }
+* { box-sizing: border-box; }
+body { margin: 0; height: 100vh; display: grid; grid-template-rows: 58px auto minmax(0, 1fr) auto; }
+header { display: flex; align-items: center; gap: 20px; padding: 0 22px; border-bottom: 1px solid #303548; }
+h1 { font-size: 18px; margin: 0; font-weight: 650; }
+#status { color: #a0a8be; font-size: 12px; }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; min-height: 0; }
+#map-scroll { overflow: auto; position: relative; }
+#map { display: block; min-width: 100%; min-height: 100%; }
+#rail { overflow: auto; padding: 20px; border-left: 1px solid #303548; background: #161924; }
+h2 { font-size: 17px; line-height: 1.4; margin: 0 0 10px; overflow-wrap: anywhere; }
+p { margin: 8px 0; }
+.muted, dt { color: #a0a8be; }
+#node-kind { font-size: 12px; color: #a0a8be; }
+dl { margin: 20px 0; }
+dt { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; margin-top: 15px; }
+dd { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+#partners, #moves { padding-left: 18px; margin: 6px 0; }
+#partners li, #moves li { margin-bottom: 6px; }
+button, input, select { font: inherit; border: 1px solid #464e68; border-radius: 6px; padding: 7px 10px; background: #22283a; color: inherit; }
+button { cursor: pointer; }
+button:hover { background: #303a53; }
+button:disabled { cursor: wait; opacity: .55; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #9dbdff; outline-offset: 2px; }
+.link { padding: 0; border: 0; background: none; color: #acc8ff; text-align: left; }
+.danger { color: #ffc1b8; border-color: #a15e58; }
+#actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 20px; }
+.error { background: #59252b; color: #ffd5d9; border: 1px solid #b75a67; border-radius: 5px; padding: 8px; margin-top: 10px; overflow-wrap: anywhere; }
+[hidden] { display: none !important; }
+form { margin-top: 18px; }
+label { display: block; margin: 8px 0 5px; color: #bfc6d9; font-size: 12px; }
+input, select { width: 100%; min-width: 0; }
+form button { margin-top: 8px; }
+footer { padding: 10px 22px; border-top: 1px solid #303548; background: #161924; max-height: 27vh; overflow: auto; font-size: 11px; color: #b3bcd0; }
+footer strong { color: #e4e7f0; }
+#legend-lines { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 3px 22px; margin-top: 5px; }
+#legend-lines p { margin: 0; }
+.swatch { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 3px 0 6px; }
+.swatch:first-child { margin-left: 0; }
+dialog { width: min(820px, 90vw); max-height: 85vh; border: 1px solid #555f7a; border-radius: 12px; padding: 22px; background: #191e2b; color: #e4e7f0; }
+dialog::backdrop { background: #05070bd9; }
+.dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; background: #0e1119; padding: 16px; max-height: 60vh; overflow: auto; }
+.region-label { fill: #e4e7f0; font-size: 15px; font-weight: 650; }
+.cluster-label { fill: #bfc9e0; font-size: 12px; }
+.node-label { fill: #bfc6d9; font-size: 10px; pointer-events: none; }
+.node { cursor: pointer; outline: none; }
+.node .selection { stroke: transparent; }
+.node[aria-pressed="true"] .selection, .node:focus-visible .selection { stroke: #fff; }
+.attention { filter: drop-shadow(0 0 6px #f0803c); }
+#decisions { padding: 8px 22px; display: flex; gap: 8px; overflow: auto; max-height: 130px; border-bottom: 1px solid #303548; }
+#decisions button { min-width: 260px; text-align: left; font-size: 12px; }
+.cluster-content { font-size: 12px; padding: 10px; overflow: auto; height: 100%; }
+.cluster-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cluster-heading button { font-size: 12px; padding: 3px 6px; }
+.cluster-heading .cluster-toggle { font-weight: 650; font-size: 14px; }
+.stepper { display: flex; align-items: center; gap: 5px; margin-top: 6px; }
+.stepper span:first-child { width: 145px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stepper i { width: 8px; height: 8px; border-radius: 50%; border: 1px solid #77839e; }
+.stepper i.reached { background: #4f8ef7; }
+.stepper i.current { outline: 2px solid #d2e1ff; outline-offset: 2px; }
+.cluster-summary { margin: 6px 0; color: #bfc6d9; }
+table { border-collapse: collapse; font-size: 11px; margin-top: 12px; width: 100%; }
+.matrix { min-width: 1130px; table-layout: fixed; }
+th, td { text-align: left; border: 1px solid #374058; padding: 8px; vertical-align: top; overflow-wrap: anywhere; }
+th { color: #bfc9e0; }
+.matrix th:first-child { width: 130px; }
+.matrix th:nth-child(5) { width: 180px; }
+.matrix th:nth-child(6) { width: 150px; }
+.matrix th:last-child { width: 165px; }
+.chip { display: block; margin: 3px 0; padding: 2px 4px; border: 1px solid #555f7a; border-radius: 4px; font-size: 10px; }
+.pass, .accepted, .merged { color: #4cc38a; }
+.revise, .stale { color: #ffba71; }
+.pending { color: #a0a8be; }
+.stale { display: block; margin-top: 4px; }
+.segments { display: flex; gap: 2px; height: 26px; margin: 5px 0; }
+.segments button { min-width: 0; border: 0; white-space: nowrap; padding: 0; border-radius: 2px; font-size: 9px; color: #fff; overflow: hidden; }
+.live-node { display: inline-flex; flex-direction: column; align-items: center; width: 66px; vertical-align: top; }
+.live-node span { font-size: 10px; text-align: center; overflow-wrap: anywhere; }
+input[type=checkbox] { width: auto; }
+#overlay-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+#context-details { white-space: pre-wrap; overflow-wrap: anywhere; }
+#context-rail { margin-bottom: 20px; }
+</style>
+</head>
+<body>
+<header><h1>Fleet map</h1><span id="status" role="status">Connecting…</span></header>
+<nav id="decisions" aria-label="Decision strip"></nav>
+<main>
+  <div id="map-scroll"><svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="Agent sessions grouped by host and cluster"><defs><pattern id="stalled-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#f3d18a" stroke-width="2"/></pattern></defs><g id="regions"></g><g id="edges" pointer-events="none"></g><g id="clusters"></g></svg></div>
+  <aside id="rail" aria-label="Session details">
+      <div id="action-error" class="error" role="alert" hidden></div>
+      <p id="action-status" class="muted" role="status"></p>
+    <section id="context-rail" hidden><h2 id="context-title"></h2><div id="context-details"></div></section>
+    <div id="empty"><h2>Your fleet, at a glance</h2><p class="muted">Select a session to see its purpose, recent work, and terminal actions.</p></div>
+    <section id="details" hidden>
+      <h2 id="node-title"></h2><p id="node-kind"></p>
+      <dl>
+        <dt>Purpose</dt><dd id="purpose"></dd>
+        <dt>Doing now</dt><dd id="doing"></dd>
+        <dt>You · last addressed</dt><dd id="you-age"></dd>
+        <dt>It · last activity</dt><dd id="it-age"></dd>
+        <dt>Repo</dt><dd id="repo"></dd>
+        <dt>Worktree</dt><dd id="worktree"></dd>
+        <dt>Branch</dt><dd id="branch"></dd>
+        <dt>Host</dt><dd id="host"></dd>
+        <dt>Model</dt><dd id="model"></dd>
+        <dt>Context</dt><dd id="context"></dd>
+        <dt>Cost</dt><dd id="cost"></dd>
+        <dt>Partners</dt><dd><ul id="partners"></ul></dd>
+        <dt>Last five moves</dt><dd><ol id="moves"></ol></dd>
+      </dl>
+      <div id="parent-row" hidden><button id="parent-link" class="link" type="button">Open parent session</button></div>
+      <div id="actions" hidden>
+        <button type="button" data-action="peek">Peek</button><button type="button" data-action="jump">Jump</button><button type="button" data-action="send">Send</button><button type="button" data-action="close" class="danger">Close</button>
+      </div>
+      <p id="pin-note" class="muted"></p>
+      <form id="promote-form">
+        <h2 id="promotion-title">Make a slice</h2>
+        <div id="slice-identity"><label for="project-name">Project</label><input id="project-name" required maxlength="200">
+        <label for="slice-name">Slice</label><input id="slice-name" required maxlength="200"></div>
+        <label for="slice-stage">Stage</label><select id="slice-stage"><option value="goal">Goal</option><option value="design">Design</option><option value="plan">Plan (readiness)</option><option value="implementing">Implementing</option><option value="review">Review</option><option value="delivery">Delivery</option><option value="accepted">Accepted</option></select>
+        <button type="submit">Save slice / stage</button>
+      </form>
+      <form id="assign-form">
+        <label for="cluster-choice">Move to…</label><select id="cluster-choice"></select>
+        <div id="new-cluster-row" hidden><label for="new-cluster">New cluster name</label><input id="new-cluster" maxlength="200" autocomplete="off"></div>
+        <button type="submit">Move session</button>
+      </form>
+    </section>
+  </aside>
+</main>
+<footer aria-label="Legend">
+  <strong>Legend</strong>
+  <div id="legend-lines">
+    <p><strong>States:</strong> <span class="swatch" style="background:#4f8ef7"></span>Working <span class="swatch" style="background:#4cc38a"></span>Done <span class="swatch" style="background:#f0803c"></span>Needs you (glow) <span class="swatch" style="background:#6b7394"></span>Idle.</p>
+    <p><strong>Pulse:</strong> Working nodes pulse from radius 11 to 16 every 1.6 seconds.</p>
+    <p><strong>Hollowing · it:</strong> Solid under 1h; center opacity falls linearly to 15% at 48h. Unknown activity stays solid.</p>
+    <p><strong>Ring fill · you:</strong> White fills clockwise over 24h since your last message; radius 17, width 3, muted background.</p>
+    <p><strong>Gray ring:</strong> Solid gray after 24h.</p>
+    <p><strong>Dashed ring:</strong> After 7d, gray dashes of 3px with 3px gaps.</p>
+    <p><strong>Dotted ring:</strong> Never addressed; 2px marks with 3px gaps.</p>
+    <p><strong>Subagents:</strong> Radius 6, joined to a parent by a 20px line when space allows; overflow uses free grid slots with longer parent links.</p>
+    <p><strong>Edge kinds:</strong> Solid = message, dashed = dispatch, thin gray = subagent.</p>
+    <p><strong>Edge age:</strong> Full opacity under 10m; fades linearly to 25% at 60m, then stays at 25%.</p>
+    <p><strong>Stepper:</strong> Seven dots: Goal, Design, Plan (readiness), Implementing, Review, Delivery, Accepted. Blue through current stage; outlined dot is current. Stage is not verified progress.</p>
+    <p><strong>Package segments:</strong> Width S=1, M=2, L=3. Planned gray, assigned violet, running blue, returned teal, verified green, blocked orange. Only verified units count.</p>
+    <p><strong>Review chips:</strong> Test quality, code standards, commenting, general code; green pass, amber revise, gray pending. Gate cells show verdict and date.</p>
+    <p><strong>Evidence stale:</strong> Amber marker means the head moved after passed evidence; select it for commits when available.</p>
+    <p><strong>Stalled hatch:</strong> Diagonal stripes over a working node mean transcript and terminal output have not changed for 10 minutes.</p>
+    <p><strong>Regions:</strong> Free memory, swap used, workers/cap. Amber when free memory is below 40% or workers exceed cap. Unreachable probes show blanks.</p>
+    <p><strong>Ladder:</strong> Asked → Working (commits ahead) → PR (number, draft and checks) → Merged. Hand-set project stages are labeled separately.</p>
+    <p><strong>Decisions:</strong> Open C/D items and unratified B defaults; B ordered by apply-by. Live nodes use map encodings with host tags.</p>
+  </div>
+</footer>
+<dialog id="overlay" aria-labelledby="overlay-title">
+  <h2 id="overlay-title"></h2><p id="overlay-text"></p><pre id="screen" tabindex="0" hidden></pre>
+  <form id="send-form" hidden><label for="send-text">Line to send</label><input id="send-text" autocomplete="off" required><button id="send-submit" type="submit">Send line</button></form>
+  <form id="broadcast-form" hidden><label for="broadcast-text">Line to send</label><input id="broadcast-text" required autocomplete="off"><label><input id="include-terminals" type="checkbox"> Include terminal-only nodes</label><p id="broadcast-count"></p><button type="submit">Confirm send to all</button></form>
+  <button id="confirm-batch" class="danger" type="button" hidden>Close all</button>
+  <div id="overlay-error" class="error" role="alert" hidden></div>
+  <div class="dialog-buttons"><button id="cancel-overlay" type="button">Cancel</button><button id="confirm-close" type="button" class="danger" hidden>Close it</button></div>
+</dialog>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const NS = 'http://www.w3.org/2000/svg';
+const colors = {working: '#4f8ef7', done: '#4cc38a', attention: '#f0803c', idle: '#6b7394'};
+const key = new URLSearchParams(location.search).get('key') || '';
+const positions = new Map(); // Keyed by node id; ordinary polls retain the layout.
+const regions = new Map();
+const clusters = new Map();
+const nodeViews = new Map();
+const MIN_REGION = 420, CELL = 70, GAP = 16;
+let layoutSignature = '', layoutModeSignature = '';
+let regionOrder = [];
+let snapshot = {hosts: [], nodes: [], edges: []};
+let nodes = new Map(), selectedId = null, dialogNodeId = null, closeToken = null;
+let timer = null, pollSeconds = 3, loading = false, actionBusy = false;
+let gradientId = 0, assignmentChoices = '';
+const stages = ['goal', 'design', 'plan', 'implementing', 'review', 'delivery', 'accepted'];
+const stageLabels = ['Goal', 'Design', 'Plan (readiness)', 'Implementing', 'Review', 'Delivery', 'Accepted'];
+const packageColors = {planned: '#6b7394', assigned: '#8567b4', running: '#4f8ef7', returned: '#277c8b', verified: '#298456', blocked: '#a95b28'};
+const expanded = new Set();
+let selectedContext = null, broadcastCluster = null, closeBatch = [];
+let overlayVersion = 0;
+let miniViews = [];
+let decisionSignature = '';
+
+
+function svg(tag, attributes = {}, text) {
+  const element = document.createElementNS(NS, tag);
+  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
+  if (text !== undefined) element.textContent = text;
+  return element;
+}
+function setText(id, value) { $(id).textContent = value === null || value === undefined || value === '' ? 'Unknown' : value; }
+function secondsSince(epoch) { return epoch == null ? null : Math.max(0, Date.now() / 1000 - epoch); }
+function age(epoch) {
+  const seconds = secondsSince(epoch);
+  if (seconds === null) return 'Unknown';
+  if (seconds < 60) return `${Math.floor(seconds)}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+  return `${Math.floor(seconds / 86400)}d`;
+}
+async function request(path, body) {
+  const options = {headers: {'X-Fleet-Key': key}, cache: 'no-store'};
+  if (body !== undefined) {
+    options.method = 'POST';
+    options.headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(path, options);
+  const value = await response.json();
+  if (!response.ok || value.ok === false) throw new Error(value.error || `Request failed (${response.status})`);
+  return value;
+}
+function showError(error, inDialog = false) {
+  const message = error.message || String(error);
+  $('action-error').textContent = message;
+  $('action-error').hidden = false;
+  if (inDialog) {
+    $('overlay-error').textContent = message;
+    $('overlay-error').hidden = false;
+  }
+}
+function clusterKey(node) { return JSON.stringify([node.host, node.cluster || 'Unsorted']); }
+
+function ensureRegion(host) {
+  if (regions.has(host.name)) return regions.get(host.name);
+  const group = svg('g');
+  const background = svg('rect', {y: 10, rx: 12, fill: '#141824'});
+  const label = svg('text', {y: 38, class: 'region-label'});
+  const metrics = svg('text', {y: 62, fill: '#a0a8be', 'font-size': 12});
+  const badge = svg('g');
+  badge.append(svg('rect', {y: 22, width: 99, height: 22, rx: 5, fill: '#702e38'}), svg('text', {x: 10, y: 37, fill: '#ffd2d7', 'font-size': 11}, 'unreachable'));
+  group.append(background, label, metrics, badge);
+  $('regions').append(group);
+  const region = {group, background, label, metrics, badge};
+  regions.set(host.name, region);
+  return region;
+}
+function ensureCluster(node) {
+  const id = clusterKey(node);
+  if (clusters.has(id)) return clusters.get(id);
+  const group = svg('g');
+  const background = svg('rect', {rx: 10, fill: 'none', stroke: '#4b546d', 'stroke-dasharray': '5 5'});
+  const content = svg('foreignObject', {x: 0, y: 0});
+  const panel = document.createElement('div'); panel.className = 'cluster-content';
+  content.append(panel);
+  const grid = svg('g');
+  group.append(background, content, grid);
+  $('clusters').append(group);
+  const cluster = {id, name: node.cluster || 'Unsorted', host: node.host, group, background, content, panel, grid};
+  clusters.set(id, cluster);
+  return cluster;
+}
+function clusterInfo(cluster) { return snapshot.clusters?.[cluster.name] || {}; }
+function clusterRun(cluster) { return snapshot.runs?.[clusterInfo(cluster).run]; }
+function clusterItems(cluster) { return snapshot.nodes.filter(node => clusterKey(node) === cluster.id); }
+function layoutFleet(hosts) {
+  const ordered = [...snapshot.nodes].sort((a, b) => a.id.localeCompare(b.id));
+  const viewport = $('map-scroll').clientWidth;
+  const mode = JSON.stringify([viewport, [...expanded].sort()]);
+  const repack = mode !== layoutModeSignature;
+  layoutModeSignature = mode;
+  let width = Math.max(viewport, hosts.length * MIN_REGION);
+  const signature = JSON.stringify([width, hosts.map(host => host.name), [...expanded],
+    ordered.map(node => [node.id, clusterKey(node), node.kind, node.parent]),
+    Object.values(snapshot.runs || {}).map(run => [run.run, run.rows.map(row => [row.id, row.live])]),
+    Object.values(snapshot.clusters || {}).map(info => [info.name, info.run, info.matrix_host])]);
+  if (signature === layoutSignature && !repack) return;
+  layoutSignature = signature;
+  const members = new Map();
+  for (const node of ordered) {
+    const id = clusterKey(node);
+    if (!members.has(id)) members.set(id, []);
+    members.get(id).push(node);
+  }
+  // A projection can outlive its Chief session. Keep its matrix accessible.
+  for (const info of Object.values(snapshot.clusters || {})) {
+    if (info.run && !members.has(JSON.stringify([info.matrix_host, info.name])))
+      members.set(JSON.stringify([info.matrix_host, info.name]), []);
+  }
+  // Membership changes never redistribute established host widths or cluster boxes.
+  if (repack) {
+    positions.clear();
+    for (const cluster of clusters.values()) delete cluster.geometry;
+    for (const region of regions.values()) delete region.geometry;
+  }
+  const initialRegionWidth = width / Math.max(1, hosts.length);
+  let regionX = 0, height = 100;
+  for (const host of hosts) {
+    const region = ensureRegion(host);
+    if (!region.geometry) {
+      regionX = Math.max(regionX, ...[...regions.values()].map(r => r.geometry ? r.geometry.x + r.geometry.width : 0));
+      region.geometry = {x: regionX, width: repack ? initialRegionWidth : MIN_REGION};
+    }
+    regionX = region.geometry.x;
+    const regionWidth = region.geometry.width, available = regionWidth - 36;
+    region.background.setAttribute('x', regionX + 8);
+    region.background.setAttribute('width', regionWidth - 16);
+    region.label.setAttribute('x', regionX + 24);
+    region.metrics.setAttribute('x', regionX + 24);
+    region.badge.setAttribute('transform', `translate(${regionX + regionWidth - 124} 0)`);
+    const groups = [...members.entries()].filter(([id]) => JSON.parse(id)[0] === host.name)
+      .sort(([a], [b]) => a.localeCompare(b));
+    let x = 0, y = 82, rowHeight = 0;
+    for (const [id, items] of groups) {
+      const cluster = ensureCluster({host: host.name, cluster: JSON.parse(id)[1]});
+      const run = clusterRun(cluster), open = expanded.has(id);
+      const saved = cluster.geometry;
+      const headerHeight = saved?.headerHeight ?? (125 + (run?.rows.length || 0) * 24);
+      const baseWidth = saved?.baseWidth ?? Math.min(available, Math.max(340, Math.ceil(Math.sqrt(items.length)) * CELL + 20));
+      const clusterWidth = saved?.width ?? (open ? available : baseWidth);
+      if (saved) { x = saved.left; y = saved.top; }
+      else if (!repack) {
+        x = 0;
+        y = Math.max(82, ...[...clusters.values()].filter(c => c.host === host.name && c.geometry)
+          .map(c => c.geometry.top + c.geometry.height + GAP));
+      } else if (x && x + clusterWidth > available) { x = 0; y += rowHeight + GAP; rowHeight = 0; }
+      const columns = Math.max(1, Math.floor((baseWidth - 20) / CELL));
+      // Slots belong to node IDs, so expansion never rearranges untouched grids.
+      const sorted = [...items].sort((a, b) => (a.kind === 'subagent') - (b.kind === 'subagent'));
+      const slots = new Map(), preserved = new Set();
+      for (const node of sorted) {
+        const old = positions.get(node.id);
+        if (old?.cluster === id && old.columns === columns) { slots.set(node.id, old.slot); preserved.add(node.id); }
+      }
+      for (const node of sorted) {
+        let slot = slots.get(node.id);
+        if (preserved.has(node.id)) continue;
+        if (slot === undefined) {
+          slot = 0;
+          const blocked = candidate => {
+            const px = regionX + 28 + x + CELL / 2 + candidate % columns * CELL;
+            const py = y + headerHeight + 28 + Math.floor(candidate / columns) * CELL;
+            return [...clusters.values()].some(other => {
+              const box = other.geometry;
+              return other.id !== id && box && other.host === host.name &&
+                px + 30 > regionX + 18 + box.left && px - 30 < regionX + 18 + box.left + box.width &&
+                py + 40 > box.top && py - 30 < box.top + box.height;
+            });
+          };
+          while ([...slots.values()].includes(slot) || blocked(slot)) slot++;
+          slots.set(node.id, slot);
+        }
+        positions.set(node.id, {cluster: id, slot, columns,
+          x: CELL / 2 + slot % columns * CELL, y: 28 + Math.floor(slot / columns) * CELL});
+      }
+      // Retain the map's short parent attachments without changing reserved slots.
+      for (const node of sorted) {
+        if (node.kind !== 'subagent' || preserved.has(node.id)) continue;
+        const parent = positions.get(node.parent), point = positions.get(node.id);
+        if (!parent || parent.cluster !== id) continue;
+        for (let direction = 0; direction < 8; direction++) {
+          const angle = direction * Math.PI / 4;
+          const candidate = {x: parent.x + 20 * Math.cos(angle), y: parent.y + 20 * Math.sin(angle)};
+          if (candidate.x < 20 || candidate.x > baseWidth - 40 || candidate.y < 20) continue;
+          if (sorted.some(other => {
+            if (other.id === node.id || other.id === node.parent) return false;
+            const occupied = positions.get(other.id);
+            return Math.hypot(occupied.x - candidate.x, occupied.y - candidate.y) < 40;
+          })) continue;
+          Object.assign(point, candidate); break;
+        }
+      }
+      const bodyHeight = open ? (run ? 75 + run.rows.reduce((sum, row) => sum + Math.max(150, Math.ceil(row.live.length / 2) * 76 + 20), 0) : 85 + items.length * 78)
+        : Math.max(50, ...items.map(node => positions.get(node.id).y + 42));
+      const clusterHeight = Math.max(saved?.height || 0, headerHeight + bodyHeight + 20);
+      cluster.geometry = {left: x, top: y, width: clusterWidth, baseWidth, headerHeight, height: clusterHeight};
+      Object.assign(cluster, {x: regionX + 28 + x, y: y + headerHeight, headerHeight});
+      cluster.group.setAttribute('transform', `translate(${regionX + 18 + x} ${y})`);
+      cluster.background.setAttribute('width', clusterWidth);
+      cluster.background.setAttribute('height', clusterHeight);
+      cluster.content.setAttribute('width', clusterWidth);
+      cluster.content.setAttribute('height', open ? clusterHeight : headerHeight);
+      cluster.grid.setAttribute('transform', `translate(10 ${headerHeight})`);
+      cluster.grid.style.display = open ? 'none' : '';
+      x += clusterWidth + GAP; rowHeight = Math.max(rowHeight, clusterHeight);
+    }
+    const bottom = Math.max(82, ...[...clusters.values()].filter(c => c.host === host.name && c.geometry)
+      .map(c => c.geometry.top + c.geometry.height));
+    region.background.setAttribute('height', bottom + 16);
+    height = Math.max(height, bottom + 26);
+    regionX += regionWidth;
+    width = Math.max(width, regionX);
+  }
+  for (const id of positions.keys()) if (!nodes.has(id)) positions.delete(id);
+  $('map').setAttribute('width', width);
+  $('map').setAttribute('height', height);
+}
+function makeNode(node, register = true) {
+  const small = node.kind === 'subagent';
+  const group = svg('g', {class: 'node', role: 'button', tabindex: 0});
+  const title = svg('title');
+  const hit = svg('circle', {r: small ? 8 : 24, fill: 'transparent'});
+  const selection = svg('circle', {r: small ? 9 : 22, fill: 'none', 'stroke-width': 1, class: 'selection'});
+  const gradient = svg('radialGradient', {id: `age-${++gradientId}`});
+  const center = svg('stop', {offset: '0%'}), rim = svg('stop', {offset: '100%'});
+  gradient.append(center, rim);
+  const defs = svg('defs');
+  defs.append(gradient);
+  const pulse = svg('circle', {r: 11, fill: 'none', 'stroke-width': 1.5, opacity: .6});
+  pulse.append(svg('animate', {attributeName: 'r', values: '11;16', dur: '1.6s', repeatCount: 'indefinite'}), svg('animate', {attributeName: 'opacity', values: '.6;0', dur: '1.6s', repeatCount: 'indefinite'}));
+  const body = svg('circle', {r: small ? 6 : 11, fill: `url(#${gradient.id})`});
+  const hatch = svg('circle', {r: small ? 6 : 11, fill: 'url(#stalled-hatch)', 'pointer-events': 'none'});
+  const ringBackground = svg('circle', {r: 17, fill: 'none', stroke: 'rgba(127,127,127,.25)', 'stroke-width': 3});
+  const ring = svg('circle', {r: 17, fill: 'none', 'stroke-width': 3, transform: 'rotate(-90)'});
+  const label = svg('text', {y: 36, 'text-anchor': 'middle', class: 'node-label'});
+  // Decorative rings can cross a short parent attachment, but must not steal clicks.
+  for (const decoration of [selection, ringBackground, ring, pulse]) decoration.setAttribute('pointer-events', 'none');
+  group.append(defs, title, hit, selection, ringBackground, ring, pulse, body, hatch, label);
+  if (small) label.style.display = 'none';
+  group.addEventListener('click', () => selectNode(node.id));
+  group.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectNode(node.id); }
+  });
+  const view = {group, title, center, rim, pulse, body, hatch, ring, label};
+  if (register) nodeViews.set(node.id, view);
+  return view;
+}
+function updateNode(node) {
+  const position = positions.get(node.id), cluster = clusters.get(position.cluster);
+  const view = nodeViews.get(node.id) || makeNode(node);
+  if (view.group.parentNode !== cluster.grid) cluster.grid.append(view.group);
+  view.group.style.display = '';
+  view.group.setAttribute('transform', `translate(${position.x} ${position.y})`);
+  paintNode(node, view);
+}
+function paintNode(node, view) {
+  view.hatch.style.display = node.stalled ? '' : 'none';
+  view.group.setAttribute('aria-pressed', String(selectedId === node.id));
+  const title = node.title || node.id;
+  view.group.setAttribute('aria-label', `${title}, ${node.state}, ${node.kind}`);
+  view.title.textContent = `${title}\n${node.purpose || node.doing || ''}`;
+  view.label.textContent = title.length > 11 ? `${title.slice(0, 10)}…` : title;
+  const color = colors[node.state] || colors.idle;
+  const hours = (secondsSince(node.it_at) || 0) / 3600;
+  const centerOpacity = 1 - .85 * Math.min(1, Math.max(0, (hours - 1) / 47));
+  view.center.setAttribute('stop-color', color);
+  view.center.setAttribute('stop-opacity', centerOpacity);
+  view.rim.setAttribute('stop-color', color);
+  view.body.setAttribute('class', node.state === 'attention' ? 'attention' : '');
+  view.pulse.style.display = node.state === 'working' ? '' : 'none';
+  view.pulse.setAttribute('stroke', color);
+  const youHours = (secondsSince(node.you_at) || 0) / 3600;
+  const circumference = 2 * Math.PI * 17;
+  view.ring.setAttribute('stroke', youHours > 24 && !node.never_addressed ? '#9aa0b4' : '#ffffff');
+  let dash = `${circumference * Math.min(1, youHours / 24)} ${circumference}`;
+  if (youHours > 24) dash = 'none';
+  if (youHours > 7 * 24) dash = '3 3';
+  if (node.never_addressed) dash = '2 3';
+  view.ring.setAttribute('stroke-dasharray', dash);
+}
+function endpoint(id) {
+  if (!nodes.has(id)) return null;
+  const position = positions.get(id);
+  if (!position || expanded.has(position.cluster)) return null;
+  const cluster = clusters.get(position.cluster);
+  return {x: cluster.x + position.x, y: cluster.y + position.y};
+}
+function drawEdges() {
+  const fragment = document.createDocumentFragment();
+  for (const edge of snapshot.edges) {
+    const src = endpoint(edge.src), dst = endpoint(edge.dst);
+    if (!src || !dst) continue;
+    const minutes = (secondsSince(edge.newest) ?? 3600) / 60;
+    const opacity = 1 - .75 * Math.min(1, Math.max(0, (minutes - 10) / 50));
+    const line = svg('line', {x1: src.x, y1: src.y, x2: dst.x, y2: dst.y, stroke: edge.kind === 'subagent' ? '#9aa0b4' : '#7a9acb', 'stroke-width': edge.kind === 'subagent' ? 1 : 1.5, 'stroke-opacity': opacity});
+    if (edge.kind === 'dispatch') line.setAttribute('stroke-dasharray', '6 4');
+    fragment.append(line);
+  }
+  $('edges').replaceChildren(fragment);
+}
+function render() {
+  nodes = new Map(snapshot.nodes.map(node => [node.id, node]));
+  for (const region of regions.values()) region.group.style.display = 'none';
+  const hostMap = new Map(snapshot.hosts.map(host => [host.name, host]));
+  for (const node of snapshot.nodes) if (!hostMap.has(node.host)) hostMap.set(node.host, {name: node.host});
+  // Establish snapshot order once; order-only polls must not move regions.
+  regionOrder = regionOrder.filter(name => hostMap.has(name));
+  for (const name of hostMap.keys()) if (!regionOrder.includes(name)) regionOrder.push(name);
+  const hosts = regionOrder.map(name => hostMap.get(name));
+  for (const info of Object.values(snapshot.clusters || {})) {
+    if (info.run && !hostMap.has(info.matrix_host)) {
+      const host = {name: info.matrix_host}; hosts.push(host); hostMap.set(host.name, host);
+    }
+  }
+  layoutFleet(hosts);
+  for (const host of hosts) {
+    const region = ensureRegion(host);
+    region.group.style.display = '';
+    region.label.textContent = host.label || host.name;
+    const memory = host.memory || {};
+    region.metrics.textContent = `${memory.free_pct == null ? '—' : memory.free_pct.toFixed(1) + '%'} free · swap ${memory.swap_gb == null ? '—' : memory.swap_gb.toFixed(1) + ' GB'} · ${host.workers ?? '—'}/${host.cap ?? '—'} workers/cap`;
+    region.metrics.setAttribute('fill', host.amber ? '#ffba71' : '#a0a8be');
+    region.background.setAttribute('stroke', host.amber ? '#bb8445' : 'none');
+    region.badge.style.display = host.reachable === false ? '' : 'none';
+  }
+  for (const cluster of clusters.values()) cluster.group.style.display = 'none';
+  for (const view of nodeViews.values()) view.group.style.display = 'none';
+  // Parents get slots before their subagents, regardless of snapshot ordering.
+  for (const node of [...snapshot.nodes].sort((a, b) => (a.kind === 'subagent') - (b.kind === 'subagent'))) {
+    const cluster = ensureCluster(node);
+    cluster.group.style.display = '';
+    updateNode(node);
+  }
+  miniViews = [];
+  for (const cluster of clusters.values()) {
+    const info = clusterInfo(cluster);
+    if (clusterItems(cluster).length || (info.run && info.matrix_host === cluster.host)) {
+      cluster.group.style.display = ''; renderCluster(cluster);
+      miniViews.push(...(cluster.miniViews || []));
+    }
+  }
+  for (const [id, view] of miniViews) if (nodes.has(id)) paintNode(nodes.get(id), view);
+  renderDecisions();
+  if ($('overlay').open && !$('broadcast-form').hidden) updateBroadcastCount();
+  drawEdges();
+  renderRail();
+}
+function selectNode(id) {
+  if (!nodes.has(id)) return;
+  selectedId = id;
+  selectedContext = null;
+  assignmentChoices = '';
+  $('action-error').hidden = true;
+  $('action-status').textContent = '';
+  $('rail').scrollTop = 0;
+  for (const [nodeId, view] of nodeViews) view.group.setAttribute('aria-pressed', String(id === nodeId));
+  for (const [nodeId, view] of miniViews) view.group.setAttribute('aria-pressed', String(id === nodeId));
+  renderRail();
+}
+function renderRail() {
+  renderContext();
+  const node = nodes.get(selectedId);
+  $('empty').hidden = Boolean(node) || Boolean(selectedContext);
+  $('details').hidden = !node;
+  if (!node) {
+    $('empty').lastElementChild.textContent = selectedId ? 'This session is no longer in the current snapshot. Select another session.' : 'Select a session to see its purpose, recent work, and terminal actions.';
+    return;
+  }
+  setText('node-title', node.title || node.id);
+  $('pin-note').textContent = node.pin_overridden ? `Pin overridden: ${node.pin_overridden}. The run projection controls this session's cluster and stage.` : node.stage ? `Stage: ${node.stage}${node.run ? ' · run projection' : ' · hand-set'}` : '';
+  $('promote-form').hidden = Boolean(snapshot.runs?.[node.run]);
+  const editingStage = Boolean(node.stage);
+  $('slice-identity').hidden = editingStage;
+  $('project-name').disabled = editingStage;
+  $('slice-name').disabled = editingStage;
+  $('promotion-title').textContent = editingStage ? 'Edit current slice stage' : 'Make a slice';
+  $('promote-form').dataset.mode = editingStage ? 'stage' : 'promote';
+  const promotionIdentity = JSON.stringify([node.id, editingStage]);
+  if ($('promote-form').dataset.node !== promotionIdentity) {
+    $('project-name').value = '';
+    $('slice-name').value = editingStage ? '' : node.title || '';
+    $('slice-stage').value = node.stage || 'goal';
+    $('promote-form').dataset.node = promotionIdentity;
+  }
+  setText('node-kind', `${node.kind === 'terminal' ? 'Terminal only' : node.kind === 'subagent' ? 'Subagent' : 'Claude session'} · ${node.state === 'attention' ? 'Needs you' : node.state} · ${node.cluster || 'Unsorted'}${node.subagents_total > 0 ? ` · ${node.subagents_total} subagents, ${node.subagents_shown} shown` : ''}`);
+  for (const field of ['purpose', 'doing', 'repo', 'worktree', 'branch', 'model']) setText(field, node[field]);
+  setText('you-age', node.never_addressed ? 'Never addressed' : node.you_at == null ? 'Unknown' : `${age(node.you_at)} ago`);
+  setText('it-age', node.it_at == null ? 'Unknown' : `${age(node.it_at)} ago`);
+  const hosting = node.hosting === 'orca' ? 'Orca' : node.hosting;
+  setText('host', hosting && hosting !== node.host ? `${node.host} · ${hosting}` : node.host);
+  setText('context', node.ctx_pct == null ? 'Unknown' : `${node.ctx_pct}%`);
+  setText('cost', node.cost == null ? 'Unknown' : typeof node.cost === 'number' ? `$${node.cost.toFixed(2)}` : node.cost);
+  const partners = new Map();
+  for (const edge of snapshot.edges) {
+    const other = edge.src === node.id ? edge.dst : edge.dst === node.id ? edge.src : null;
+    if (other && edge.kind !== 'subagent') partners.set(other, (partners.get(other) || 0) + edge.count);
+  }
+  $('partners').replaceChildren();
+  for (const [id, count] of partners) {
+    const item = document.createElement('li'), button = document.createElement('button');
+    button.type = 'button'; button.className = 'link';
+    button.textContent = `${nodes.get(id)?.title || id} (${count} ${count === 1 ? 'message' : 'messages'})`;
+    button.addEventListener('click', () => selectNode(id));
+    item.append(button); $('partners').append(item);
+  }
+  if (!partners.size) $('partners').textContent = 'No recorded messages';
+  $('moves').replaceChildren();
+  for (const [at, description] of [...(node.moves || [])].sort((a, b) => b[0] - a[0]).slice(0, 5)) {
+    const item = document.createElement('li'); item.textContent = `${age(at)} ago · ${description}`; $('moves').append(item);
+  }
+  if (!node.moves?.length) $('moves').textContent = 'No recorded moves';
+  $('parent-row').hidden = node.kind !== 'subagent';
+  $('parent-link').textContent = `Open parent: ${nodes.get(node.parent)?.title || node.parent || 'unavailable'}`;
+  $('parent-link').disabled = !nodes.has(node.parent);
+  const hasTarget = [node.terminal, node.tmux, node.kitty_window].some(value => value !== null && value !== undefined && value !== '');
+  $('actions').hidden = node.kind === 'subagent' || !hasTarget;
+  const names = [...new Set(snapshot.nodes.map(item => item.cluster || 'Unsorted'))].sort();
+  const signature = JSON.stringify([selectedId, names]);
+  if (assignmentChoices !== signature) {
+    const previous = assignmentChoices ? $('cluster-choice').value : node.cluster || 'Unsorted';
+    $('cluster-choice').replaceChildren(...names.map(name => new Option(name, name)), new Option('New cluster…', ''));
+    $('cluster-choice').value = previous;
+    $('new-cluster-row').hidden = $('cluster-choice').value !== '';
+    assignmentChoices = signature;
+  }
+}
+function openOverlay(title, nodeId) {
+  overlayVersion++;
+  dialogNodeId = nodeId;
+  closeToken = null;
+  $('overlay-title').textContent = title;
+  $('overlay-text').textContent = '';
+  $('screen').hidden = true;
+  $('send-form').hidden = true;
+  $('confirm-close').hidden = true;
+  $('broadcast-form').hidden = true;
+  $('confirm-batch').hidden = true;
+  $('overlay-error').hidden = true;
+  $('cancel-overlay').textContent = 'Cancel';
+  $('overlay').showModal();
+}
+async function runAction(work) {
+  if (actionBusy) return;
+  actionBusy = true;
+  $('action-error').hidden = true;
+  $('overlay-error').hidden = true;
+  document.querySelectorAll('#actions button, #confirm-close, #send-submit, #confirm-batch, #broadcast-form button').forEach(button => button.disabled = true);
+  try { await work(); } catch (error) { showError(error, $('overlay').open); }
+  finally {
+    actionBusy = false;
+    document.querySelectorAll('#actions button, #confirm-close, #send-submit, #confirm-batch, #broadcast-form button').forEach(button => button.disabled = false);
+  }
+}
+$('actions').addEventListener('click', event => {
+  const action = event.target.dataset.action, id = selectedId;
+  if (!action || !nodes.has(id)) return;
+  runAction(async () => {
+    if (action === 'send') {
+      openOverlay(`Send to ${nodes.get(id).title || 'session'}`, id);
+      $('send-form').hidden = false; $('send-text').value = ''; $('send-text').focus();
+    } else if (action === 'close') {
+      const result = await request(`/api/confirm?node=${encodeURIComponent(id)}`);
+      openOverlay('Close this session?', id);
+      closeToken = result.token;
+      $('overlay-text').textContent = result.text;
+      $('confirm-close').hidden = false;
+      $('cancel-overlay').focus();
+    } else {
+      const result = await request('/api/action', {node: id, action});
+      if (action === 'peek') {
+        openOverlay(`Peek · ${nodes.get(id)?.title || 'session'}`, id);
+        $('screen').textContent = result.output || '(Screen is empty)'; $('screen').hidden = false;
+        $('cancel-overlay').textContent = 'Done'; $('screen').focus();
+      } else $('action-status').textContent = 'Jump requested.';
+    }
+  });
+});
+$('confirm-close').addEventListener('click', () => {
+  const id = dialogNodeId, token = closeToken;
+  runAction(async () => {
+    await request('/api/action', {node: id, action: 'close', token});
+    $('overlay').close(); $('action-status').textContent = 'Close requested.';
+    await refresh();
+  });
+});
+$('send-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const id = dialogNodeId, text = $('send-text').value;
+  runAction(async () => {
+    await request('/api/action', {node: id, action: 'send', text});
+    $('overlay').close(); $('action-status').textContent = 'Line sent.';
+  });
+});
+$('cancel-overlay').addEventListener('click', () => $('overlay').close());
+$('parent-link').addEventListener('click', () => selectNode(nodes.get(selectedId)?.parent));
+$('cluster-choice').addEventListener('change', () => { $('new-cluster-row').hidden = $('cluster-choice').value !== ''; });
+$('assign-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const id = selectedId, initiative = $('cluster-choice').value || $('new-cluster').value.trim();
+  if (!initiative) { showError(new Error('Enter a cluster name.')); return; }
+  const button = event.target.querySelector('button'); button.disabled = true;
+  $('action-error').hidden = true;
+  try {
+    // /api/assign remains supported by the server; /api/move also clears obsolete promotion.
+    await request('/api/move', {node: id, cluster: initiative});
+    $('action-status').textContent = `Move to ${initiative} saved. The next snapshot will show the assignment.`;
+  } catch (error) { showError(error); }
+  finally { button.disabled = false; }
+});
+function html(tag, text, className) {
+  const element = document.createElement(tag);
+  if (text !== undefined) element.textContent = text;
+  if (className) element.className = className;
+  return element;
+}
+function button(text, action, className = '') {
+  const element = html('button', text, className); element.type = 'button';
+  element.addEventListener('click', action); return element;
+}
+function miniNode(id) {
+  const node = nodes.get(id);
+  if (!node) return html('span', 'Session unavailable', 'muted');
+  const wrapper = html('span', undefined, 'live-node');
+  const drawing = svg('svg', {width: 46, height: 44, viewBox: '-25 -25 50 50'});
+  const view = makeNode(node, false); paintNode(node, view); view.label.style.display = 'none';
+  drawing.append(view.group); wrapper.append(drawing, html('span', node.host));
+  miniViews.push([id, view]); return wrapper;
+}
+function showContext(context, nodeId = null) {
+  selectedContext = context; selectedId = nodeId; assignmentChoices = '';
+  $('rail').scrollTop = 0; renderRail();
+  for (const [id, view] of [...nodeViews, ...miniViews]) view.group.setAttribute('aria-pressed', String(id === nodeId));
+}
+function openRun(runId) {
+  const run = snapshot.runs?.[runId]; if (!run) return;
+  const info = snapshot.clusters?.[run.title]; if (!info) return;
+  const id = JSON.stringify([info.matrix_host, run.title]);
+  expanded.add(id); selectedContext = {run: runId}; selectedId = run.chief_node;
+  render(); clusters.get(id)?.group.scrollIntoView({block: 'nearest', inline: 'nearest'});
+  $('rail').scrollTop = 0;
+}
+function renderDecisions() {
+  const signature = JSON.stringify(snapshot.decisions || []);
+  if (decisionSignature === signature) return;
+  decisionSignature = signature;
+  const strip = $('decisions'); strip.replaceChildren(html('strong', 'Decisions'));
+  for (const item of snapshot.decisions || []) {
+    strip.append(button(`${item.title} · Class ${item.class} · ${item.id}\n${item.text}\nPacket: ${item.packet || '—'} · apply-by: ${item.applyAt || '—'}`, () => openRun(item.run)));
+  }
+  if (!snapshot.decisions?.length) strip.append(html('span', 'No open decisions', 'muted'));
+}
+function stepper(row) {
+  const line = html('div', undefined, 'stepper'); line.append(html('span', row.name));
+  line.title = `${row.name}: ${stageLabels[stages.indexOf(row.stage)]}`;
+  line.setAttribute('aria-label', line.title);
+  stages.forEach((stage, index) => {
+    const dot = html('i', undefined, `${row.stepper[index] ? 'reached' : ''} ${row.stage === stage ? 'current' : ''}`);
+    dot.title = stageLabels[index]; line.append(dot);
+  });
+  return line;
+}
+function renderCluster(cluster) {
+  const panel = cluster.panel, info = clusterInfo(cluster), run = clusterRun(cluster);
+  const open = expanded.has(cluster.id), elsewhere = run && info.matrix_host !== cluster.host;
+  const signature = JSON.stringify([info, run, open, clusterItems(cluster).map(node => [node.id, node.title, node.stage, node.ladder, node.never_prompted, node.terminal, node.tmux, node.kitty_window])]);
+  if (cluster.renderSignature === signature) return;
+  cluster.renderSignature = signature;
+  const priorViews = miniViews; miniViews = [];
+  panel.replaceChildren();
+  const heading = html('div', undefined, 'cluster-heading');
+  const toggle = button(`${open ? '▾' : '▸'} ${cluster.name}`, () => {
+    if (elsewhere) { openRun(run.run); return; }
+    if (expanded.has(cluster.id)) expanded.delete(cluster.id); else expanded.add(cluster.id);
+    selectedContext = {cluster: cluster.name, run: run?.run}; selectedId = null;
+    render();
+  }, 'cluster-toggle');
+  toggle.setAttribute('aria-expanded', String(open));
+  heading.append(toggle, button('Send to all', () => openBroadcast(cluster.name)));
+  if (run) heading.append(button('Open run plan', () => runAction(async () => {
+    await request('/api/open-plan', {run: run.run});
+    showContext({run: run.run});
+  })));
+  panel.append(heading);
+  panel.append(html('p', `waiting on you: ${info.waiting || 0} · ${info.stalled || 0} stalled`, 'cluster-summary'));
+  renderFallback(panel, info);
+  if (run) {
+    for (const row of run.rows) panel.append(stepper(row));
+    const proofs = html('div', `Proofs: ${run.proofs.map(proof => `${proof.id} ${proof.status}`).join(' · ') || '—'}`, 'cluster-summary');
+    panel.append(proofs);
+    if (elsewhere) panel.append(button(`matrix on ${info.matrix_host}`, () => openRun(run.run), 'link'));
+    else if (open) {
+      const chief = html('div', 'Chief: '); chief.append(miniNode(run.chief_node)); panel.append(chief);
+      panel.append(matrixTable(run));
+    }
+  } else {
+    if (open) panel.append(ladderTable(cluster));
+  }
+  cluster.miniViews = miniViews; miniViews = priorViews;
+}
+function gateContent(run, row, stage, gate) {
+  const fragment = document.createDocumentFragment();
+  const verdict = gate.verdict || gate.state || 'pending';
+  const control = button(`${verdict}${gate.at ? ' ' + gate.at.slice(5, 10) : ''}`, () => showContext({run: run.run, row: row.id, gate: stage}), `link ${verdict}`);
+  fragment.append(control);
+  if (gate.stale?.moved) fragment.append(button('evidence stale', () => showContext({run: run.run, row: row.id, gate: stage}), 'link stale'));
+  return fragment;
+}
+function matrixTable(run) {
+  const table = html('table', undefined, 'matrix'); table.setAttribute('aria-label', `${run.title} gate matrix`);
+  const head = html('thead'), labels = html('tr');
+  for (const label of ['Slice', ...stageLabels, 'Live']) labels.append(html('th', label));
+  head.append(labels); table.append(head);
+  const body = html('tbody');
+  for (const row of run.rows) {
+    const tr = html('tr'); tr.append(html('th', row.name));
+    for (const stage of stages) {
+      const cell = row.cells[stage], td = html('td');
+      if (stage === 'implementing') {
+        td.append(html('div', `${cell.verified_units}/${cell.total_units} verified units`));
+        const segments = html('div', undefined, 'segments');
+        for (const segment of cell.segments) {
+          const part = button(segment.id, () => showContext({run: run.run, package: segment.id}, segment.node));
+          part.style.flex = `${segment.size} 1 0`; part.style.background = packageColors[segment.state];
+          part.title = `${segment.id}: ${segment.state}, ${['', 'S', 'M', 'L'][segment.size]} (${segment.size} units)`;
+          part.setAttribute('aria-label', part.title); segments.append(part);
+        }
+        td.append(segments);
+      } else if (stage === 'review') {
+        for (const chip of cell.chips) {
+          const badge = html('div', undefined, 'chip'); badge.append(html('div', chip.id), gateContent(run, row, chip.id, chip)); td.append(badge);
+        }
+      } else td.append(gateContent(run, row, stage, cell));
+      tr.append(td);
+    }
+    const live = html('td');
+    for (const id of row.live) live.append(miniNode(id));
+    if (!row.live.length) live.textContent = 'No live workers';
+    tr.append(live); body.append(tr);
+  }
+  table.append(body); return table;
+}
+function isNeverPrompted(node) { return node.kind === 'claude' && node.never_prompted === true; }
+function ladderTable(cluster) {
+  const table = html('table'); table.setAttribute('aria-label', `${cluster.name} ladder`);
+  const head = html('thead'), labels = html('tr');
+  for (const label of ['Session', 'Asked', 'Working', 'PR', 'Merged']) labels.append(html('th', label));
+  head.append(labels); table.append(head);
+  const body = html('tbody'), items = clusterItems(cluster).filter(node => node.kind !== 'subagent');
+  for (const node of items) {
+    const tr = html('tr'), name = html('th'); name.append(button(node.title || node.id, () => selectNode(node.id), 'link')); tr.append(name);
+    if (node.stage) {
+      const td = html('td', `Hand-set stage: ${node.stage}`); td.colSpan = 4; tr.append(td);
+    } else if (!node.ladder) {
+      const td = html('td', isNeverPrompted(node) ? 'Asked · never prompted' : node.kind === 'terminal' ? 'Terminal only · no inferred ladder' : 'Ladder pending'); td.colSpan = 4; tr.append(td);
+    } else {
+      for (const rung of ['asked', 'working', 'pr', 'merged']) {
+        const td = html('td');
+        if (node.ladder.rung === rung) {
+          const pr = node.ladder.pr;
+          td.textContent = pr && ['pr', 'merged'].includes(rung) ? `${pr.number} ${pr.isDraft ? 'draft' : 'ready'}, ${pr.checks === 'pass' ? 'green' : pr.checks}` : rung === 'working' ? `${node.ladder.ahead} commits ahead` : 'Asked';
+          td.className = rung === 'merged' ? 'merged' : '';
+        } else td.textContent = '—';
+        tr.append(td);
+      }
+    }
+    body.append(tr);
+  }
+  const never = items.filter(isNeverPrompted);
+  if (cluster.name === 'Unsorted' && never.length) {
+    const tr = html('tr'), td = html('td'); td.colSpan = 5;
+    td.append(button(`never prompted, close all ${never.length}`, () => {
+      if (!actionBusy) prepareBatchClose(never);
+    }, 'danger')); tr.append(td); body.append(tr);
+  }
+  table.append(body); return table;
+}
+function detailLine(container, label, value) {
+  const line = html('p'); line.append(html('strong', `${label}: `), document.createTextNode(value == null || value === '' ? '—' : String(value))); container.append(line);
+}
+function renderFallback(container, info) {
+  for (const fallback of info?.fallbacks || []) {
+    detailLine(container, 'Run', fallback.run);
+    detailLine(container, 'Now', fallback.now);
+    detailLine(container, 'Projection', fallback.note);
+  }
+}
+function renderContext() {
+  const node = nodes.get(selectedId);
+  const context = selectedContext || (node ? {cluster: node.cluster, run: node.run} : null);
+  $('context-rail').hidden = !context; if (!context) return;
+  const run = snapshot.runs?.[context.run];
+  const details = $('context-details'); details.replaceChildren();
+  $('context-title').textContent = run?.title || context.cluster || 'Run details';
+  if (!run) {
+    const info = snapshot.clusters?.[context.cluster];
+    renderFallback(details, info);
+    if (!info?.fallbacks?.length)
+      for (const note of info?.notes || []) detailLine(details, 'Projection', note);
+    return;
+  }
+  if (context.package) {
+    const pkg = run.packages.find(item => item.id === context.package);
+    if (pkg) {
+      $('context-title').textContent = `${pkg.id} · ${pkg.title}`;
+      for (const [label, value] of [['State', pkg.state], ['Branch', pkg.branch], ['Head', pkg.headSha], ['Checkpoint evidence', pkg.checkpointEvidence], ['Independent verifier', pkg.verifier], ['Blocked by', pkg.blockedBy.join(', ')], ['Holds', run.packages.filter(item => item.blockedBy.includes(pkg.id)).map(item => item.id).join(', ')], ['Package proofs', pkg.proofs.join(', ')], ['Last event', `${pkg.lastEvent || '—'} · ${pkg.lastEventAt || '—'}`], ['Session', node ? `${node.title || node.id} · ${node.host}` : 'No live session']]) detailLine(details, label, value);
+    }
+  }
+  if (context.gate) {
+    const row = run.rows.find(item => item.id === context.row);
+    const gate = row?.cells[context.gate] || row?.cells.review.chips.find(item => item.id === context.gate);
+    if (gate) {
+      detailLine(details, `${row.name} · ${context.gate}`, `${gate.verdict || gate.state} · ${gate.at || '—'}`);
+      detailLine(details, 'Evidence', gate.ref);
+      if (gate.stale?.moved) detailLine(details, 'Evidence stale', gate.stale.commits === null ? 'head moved, commits not fetched' : gate.stale.commits.join('\n') || 'Head moved; no additional commits listed');
+    }
+  }
+  detailLine(details, 'Now', run.now);
+  for (const [label, value] of Object.entries(run.status_card || {})) detailLine(details, label, value);
+  detailLine(details, 'Proofs', run.proofs.map(proof => `${proof.id}: ${proof.status}`).join('\n'));
+  detailLine(details, 'Merge gate', `${run.merge_gate.ready ? 'ready' : 'not ready'} · ${run.merge_gate.classDOpen} class D open · ${run.merge_gate.classBUnratified} class B unratified`);
+  detailLine(details, 'Run plan', `${run.run_plan.path} @ ${run.run_plan.commit}`);
+  for (const item of (snapshot.decisions || []).filter(item => item.run === run.run))
+    detailLine(details, `Decision ${item.id} · ${item.class}`, `${item.text}\nPacket: ${item.packet || '—'}\nApply-by: ${item.applyAt || '—'}`);
+  for (const note of run.notes || []) detailLine(details, 'Note', note);
+}
+function broadcastTargets() {
+  return snapshot.nodes.filter(node => node.cluster === broadcastCluster && (node.kind === 'claude' || ($('include-terminals').checked && node.kind === 'terminal')));
+}
+function updateBroadcastCount() {
+  const targets = broadcastTargets();
+  $('broadcast-count').textContent = `${targets.length} sessions on ${[...new Set(targets.map(node => node.host))].join(', ') || 'no hosts'}`;
+}
+function openBroadcast(name) {
+  broadcastCluster = name; openOverlay(`Send to all · ${name}`, null);
+  $('broadcast-form').hidden = false; $('broadcast-text').value = '';
+  $('include-terminals').checked = false; updateBroadcastCount();
+}
+$('include-terminals').addEventListener('change', updateBroadcastCount);
+$('broadcast-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const cluster = broadcastCluster, text = $('broadcast-text').value, include_terminals = $('include-terminals').checked;
+  runAction(async () => {
+    const result = await request('/api/broadcast', {cluster, text, include_terminals});
+    $('broadcast-form').hidden = true; $('screen').hidden = false;
+    $('screen').textContent = JSON.stringify(result.results, null, 2); $('cancel-overlay').textContent = 'Done';
+  });
+});
+async function prepareBatchClose(targets) {
+  closeBatch = [];
+  openOverlay(`Close all ${targets.length} never-prompted sessions?`, null);
+  const version = overlayVersion;
+  $('overlay-text').textContent = 'Loading every close destination…';
+  const descriptions = await Promise.all(targets.map(async node => {
+    // Each destination gets its own server-bound confirmation.
+    const destinations = [['terminal', node.terminal], ['tmux session', node.tmux], ['kitty window', node.kitty_window]]
+      .filter(([, target]) => target != null && target !== '').map(([kind, target]) => `${kind}: ${target}`).join(' · ');
+    const target = {id: node.id, label: `${node.title || node.id} · ${node.host} · ${destinations || 'destination unknown'}`};
+    try {
+      const result = await request(`/api/confirm?node=${encodeURIComponent(node.id)}`);
+      if (typeof result.text !== 'string' || !result.text.trim() || !result.token || !destinations) throw new Error('Missing destination description');
+      return {...target, description: result.text, token: result.token};
+    } catch (error) { return {...target, error: `Confirmation unavailable: ${error.message}`}; }
+  }));
+  if (!$('overlay').open || overlayVersion !== version) return;
+  closeBatch = descriptions;
+  $('overlay-text').textContent = descriptions.map(node => `${node.label}\n${node.description || node.error}`).join('\n\n');
+  const ready = closeBatch.length > 0 && closeBatch.every(node => node.description);
+  $('confirm-batch').hidden = !ready;
+  if (!ready) $('overlay-text').textContent += '\n\nNo sessions will close until every destination is available. Cancel and retry.';
+}
+$('confirm-batch').addEventListener('click', () => {
+  const batch = [...closeBatch];
+  if (!batch.length || !batch.every(node => node.description)) return;
+  runAction(async () => {
+    $('confirm-batch').hidden = true; $('screen').hidden = false; $('screen').textContent = '';
+    for (const node of batch) {
+      try { await request('/api/action', {node: node.id, action: 'close', token: node.token}); $('screen').textContent += `${node.label}: closed\n`; }
+      catch (error) { $('screen').textContent += `${node.label}: ${error.message}\n`; }
+    }
+    $('cancel-overlay').textContent = 'Done'; await refresh();
+  });
+});
+$('promote-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const editingStage = $('promote-form').dataset.mode === 'stage';
+  const body = {node: selectedId, stage: $('slice-stage').value};
+  if (!editingStage) Object.assign(body, {project: $('project-name').value.trim(), slice: $('slice-name').value.trim()});
+  runAction(async () => {
+    await request(editingStage ? '/api/stage' : '/api/promote', body);
+    $('action-status').textContent = 'Slice and stage saved. The next snapshot will show the assignment.';
+  });
+});
+
+function startPolling() {
+  clearInterval(timer);
+  timer = null;
+  if (document.visibilityState === 'visible') timer = setInterval(refresh, pollSeconds * 1000);
+}
+async function refresh() {
+  if (loading || document.visibilityState !== 'visible') return;
+  loading = true;
+  try {
+    snapshot = await request('/api/state');
+    const nextSeconds = Number(snapshot.poll_seconds);
+    if (Number.isFinite(nextSeconds) && nextSeconds > 0 && nextSeconds !== pollSeconds) { pollSeconds = nextSeconds; startPolling(); }
+    render();
+    $('status').textContent = snapshot.generated_at == null ? 'Waiting for the first snapshot…' : `${snapshot.nodes.length} sessions · updated ${age(snapshot.generated_at)} ago`;
+    $('status').style.color = '';
+  } catch (error) {
+    $('status').textContent = `Connection error: ${error.message}. Retrying…`;
+    $('status').style.color = '#ffafb9';
+  } finally { loading = false; }
+}
+document.addEventListener('visibilitychange', () => {
+  startPolling();
+  if (document.visibilityState === 'visible') refresh();
+  else $('status').textContent = 'Paused while hidden';
+});
+new ResizeObserver(() => render()).observe($('map-scroll'));
+startPolling();
+refresh();
+</script>
+</body>
+</html>

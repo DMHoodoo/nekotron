@@ -2,6 +2,7 @@
 # Publish this Claude Code session's state for the kitty tab bar (~/.config/kitty/tab_bar.py).
 #   usage: kitty-tab-status.sh done|attention|working|reset
 # Writes /tmp/claude-kitty-status/<kitty_pid>-<kitty_window_id>.
+# Also writes /tmp/claude-kitty-status/sid-<session_id> without kitty.
 #
 # Sessions running INSIDE tmux inherit stale KITTY_* env (from wherever the
 # tmux session was first created — possibly a dead kitty instance), so for
@@ -14,8 +15,34 @@
 state="$1"
 case "$state" in done|attention|working|reset) ;; *) exit 0 ;; esac
 
+payload=""
+if [ ! -t 0 ]; then
+    # Read to EOF with one total deadline, even if the writer keeps the pipe open.
+    # Bash 3.2 leaves payload empty on timeout; newer Bash returns a status >128.
+    IFS= read -r -d '' -t 2 payload
+    [ "$?" -gt 128 ] && payload=""
+fi
+sid=$(printf '%s' "$payload" | jq -r '.session_id // empty' 2>/dev/null) || sid=""
+
 dir=/tmp/claude-kitty-status
 mkdir -p "$dir" 2>/dev/null
+
+# Return success only on a transition, so kitty side-effects stay deduplicated.
+publish() {
+    local file="$1" prev
+    prev=$(cat "$file" 2>/dev/null)
+    # PostToolUse fires "working" on every tool call.
+    [ "$prev" = "$state" ] && return 1
+    # Late waiting-for-input notifications must not downgrade a finished turn.
+    [ "$state" = attention ] && [ "$prev" = done ] && return 1
+    if [ "$state" = reset ]; then
+        rm -f "$file"
+    else
+        printf '%s' "$state" > "$file"
+    fi
+}
+
+[ -n "$sid" ] && publish "$dir/sid-$sid"
 
 KITTEN=/Applications/kitty.app/Contents/MacOS/kitten
 [ -x "$KITTEN" ] || KITTEN="$(command -v kitten)"
@@ -68,18 +95,10 @@ fi
 [ -n "$wid" ] && [ -n "$kpid" ] || exit 0
 f="$dir/$kpid-$wid"
 
-# Dedupe: PostToolUse fires "working" on every tool call.
-prev="$(cat "$f" 2>/dev/null)"
-[ "$prev" = "$state" ] && exit 0
-
-# Never downgrade a finished turn. Claude Code fires a "waiting for your
-# input" Notification ~60s after every completed turn; real attention events
-# (permission prompts, questions) arrive MID-turn while state is "working".
-[ "$state" = attention ] && [ "$prev" = "done" ] && exit 0
+publish "$f" || exit 0
 if [ "$state" = reset ]; then
-    rm -f "$f" "$dir/provider-$kpid-$wid"
+    rm -f "$dir/provider-$kpid-$wid"
 else
-    printf '%s' "$state" > "$f"
     printf '%s' "${NEKOTRON_PROVIDER:-claude}" > "$dir/provider-$kpid-$wid"
 fi
 [ "$state" != attention ] && rm -f "$dir/.esc-$kpid-$wid" 2>/dev/null  # answered: clear escalation

@@ -1,0 +1,81 @@
+#!/bin/bash
+# fleet-map — open the running map, or start its loopback server on demand.
+set -e
+
+if ! command -v orca >/dev/null 2>&1; then
+    export PATH="$PATH:/Applications/Orca.app/Contents/Resources/bin"
+fi
+
+url=$(python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+from urllib.parse import urlencode
+
+try:
+    info = json.loads((Path.home() / '.config/nekotron/fleet-map.server.json').read_text())
+    pid, port, key = info['pid'], info['port'], info['key']
+    if (type(pid) is not int or pid <= 0 or type(port) is not int
+            or not 0 < port < 65536 or not isinstance(key, str) or not key):
+        raise ValueError('Invalid server info')
+    os.kill(pid, 0)
+except (OSError, ValueError, KeyError, TypeError, OverflowError):
+    pass
+else:
+    print(f'http://127.0.0.1:{port}/?{urlencode({"key": key})}')
+PY
+)
+
+if [ -z "$url" ]; then
+    log=$(mktemp "${TMPDIR:-/tmp}/fleet-map.XXXXXX")
+    trap 'rm -f "$log"' EXIT
+    if [ -n "${FLEET_MAP_SERVER:-}" ]; then
+        nohup python3 -u "$FLEET_MAP_SERVER" </dev/null >"$log" 2>&1 &
+    else
+        # Resolve the installed package symlink so relative imports work anywhere.
+        package_parent=$(python3 - <<'PY'
+from pathlib import Path
+print((Path.home() / '.config/kitty/fleetmap').resolve().parent)
+PY
+)
+        PYTHONPATH="$package_parent" nohup python3 -u -m fleetmap.server </dev/null >"$log" 2>&1 &
+    fi
+    server_pid=$!
+    if ! url=$(python3 - "$log" "$server_pid" <<'PY'
+import json
+import os
+import sys
+import time
+
+deadline = time.monotonic() + 10
+with open(sys.argv[1]) as output:
+    while time.monotonic() < deadline:
+        line = output.readline()
+        if line:
+            try:
+                url = json.loads(line)['url']
+                if isinstance(url, str) and url.startswith('http://127.0.0.1:'):
+                    print(url)
+                    sys.exit(0)
+            except (ValueError, KeyError, TypeError):
+                pass
+        else:
+            try:
+                os.kill(int(sys.argv[2]), 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+sys.exit('fleet-map: server did not provide a URL within 10 seconds')
+PY
+    ); then
+        kill "$server_pid" 2>/dev/null || true
+        cat "$log" >&2
+        exit 1
+    fi
+fi
+
+if [ "${FLEET_MAP_NO_OPEN:-}" = 1 ]; then
+    printf '%s\n' "$url"
+else
+    open "$url"
+fi

@@ -117,6 +117,7 @@ def main():
               f"bash={JUMP} param1={s['wid']} terminal=false refresh=true")
     print("---")
     print(f"Open Fleet Board | bash={JUMP} param1=board terminal=false")
+    print(f"Open Fleet Map | bash={os.path.expanduser('~/bin/fleet-map')} terminal=false")
     print(f"New Claude Tab | bash={JUMP} param1=new terminal=false")
 
 
