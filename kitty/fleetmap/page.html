@@ -743,7 +743,10 @@ function renderCluster(cluster) {
       const chief = html('div', 'Chief: '); chief.append(miniNode(run.chief_node)); panel.append(chief);
       panel.append(matrixTable(run));
     }
-  } else if (open) panel.append(ladderTable(cluster));
+  } else {
+    renderFallback(panel, info);
+    if (open) panel.append(ladderTable(cluster));
+  }
   cluster.miniViews = miniViews; miniViews = priorViews;
 }
 function gateContent(run, row, stage, gate) {
@@ -826,6 +829,13 @@ function ladderTable(cluster) {
 function detailLine(container, label, value) {
   const line = html('p'); line.append(html('strong', `${label}: `), document.createTextNode(value == null || value === '' ? '—' : String(value))); container.append(line);
 }
+function renderFallback(container, info) {
+  for (const fallback of info?.fallbacks || []) {
+    detailLine(container, 'Run', fallback.run);
+    detailLine(container, 'Now', fallback.now);
+    detailLine(container, 'Projection', fallback.note);
+  }
+}
 function renderContext() {
   const node = nodes.get(selectedId);
   const context = selectedContext || (node ? {cluster: node.cluster, run: node.run} : null);
@@ -835,7 +845,9 @@ function renderContext() {
   $('context-title').textContent = run?.title || context.cluster || 'Run details';
   if (!run) {
     const info = snapshot.clusters?.[context.cluster];
-    for (const note of info?.notes || []) detailLine(details, 'Projection', note);
+    renderFallback(details, info);
+    if (!info?.fallbacks?.length)
+      for (const note of info?.notes || []) detailLine(details, 'Projection', note);
     return;
   }
   if (context.package) {

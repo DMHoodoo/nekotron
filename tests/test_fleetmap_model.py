@@ -165,16 +165,23 @@ class SnapshotAssembler(unittest.TestCase):
 
     def test_rejected_and_missing_projection_notes_are_on_run_clusters(self):
         self.write_projection(projection(chiefTerminal='term_a'))
+        objective = 'Handoff scheduling: wave 1 running; waiting for approval | full objective'
+        self.orca.put('orchestration run-list', 'runs',
+                      [{'id': 'run_test', 'objective': objective, 'coordinator_handle': 'term_a'}])
         (self.base / 'progress/run_test.json').write_text('{"schemaVersion": 1}')
         collector = self.collector()
         snap = collector.snapshot()
         reason = snap['rejected_projections']['run_test.json']
-        self.assertIn(reason, snap['clusters']['Legacy objective']['notes'])
+        self.assertIn(reason, snap['clusters']['Handoff scheduling']['notes'])
+        self.assertEqual(snap['clusters']['Handoff scheduling']['fallbacks'], [
+            {'run': 'run_test', 'now': objective, 'note': reason}])
         (self.base / 'progress/run_test.json').unlink()
         snap = collector.snapshot()
         self.assertIn('projection v1, Chief must re-render',
-                      snap['clusters']['Legacy objective']['notes'])
+                      snap['clusters']['Handoff scheduling']['notes'])
         self.assertEqual(snap['runs'], {})
+        self.assertEqual(snap['clusters']['Handoff scheduling']['fallbacks'], [
+            {'run': 'run_test', 'now': objective, 'note': 'projection v1, Chief must re-render'}])
 
     def test_projection_package_binds_even_when_not_listed_in_a_slice(self):
         self.write_projection(projection(slices=[slice_row(stage='review')],

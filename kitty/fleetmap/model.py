@@ -173,7 +173,7 @@ class Collector:
 
         def cluster_record(name):
             return clusters.setdefault(name, dict(name=name, run=None, matrix_host=None,
-                                                  waiting=0, stalled=0, notes=[]))
+                                                  waiting=0, stalled=0, notes=[], fallbacks=[]))
 
         for p in projections:
             matrix = build_matrix(p, resolver)
@@ -213,8 +213,12 @@ class Collector:
             if run_id not in by_run and run.get('objective'):
                 name = cluster_for('', run_objective=run['objective'], title='', purpose=None,
                                    worktree='', branch='', config=config)
-                cluster_record(name)['notes'].append(
-                    rejected.get(run_id + '.json', 'projection v1, Chief must re-render'))
+                reason = rejected.get(run_id + '.json', 'projection v1, Chief must re-render')
+                record = cluster_record(name)
+                record['notes'].append(reason)
+                record['fallbacks'].append(dict(run=run_id, now=run['objective'], note=reason))
+                record.update(run=run_id, matrix_host=next(
+                    (host for host, records in data.items() if run in records['runs']), 'local'))
         ladders = set()
         by_node = {node['id']: node for node in nodes}
         activity = {}
