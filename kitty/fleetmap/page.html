@@ -714,8 +714,12 @@ function buildStatus() {
   $('status').replaceChildren(...children);
   return view;
 }
+function setStatusMessage(message) {
+  $('status').textContent = message;
+  statusView = null;
+}
 function renderStatus() {
-  if (snapshot.generated_at == null) { $('status').textContent = 'Waiting for the first snapshot…'; statusView = null; return; }
+  if (snapshot.generated_at == null) { setStatusMessage('Waiting for the first snapshot…'); return; }
   const tally = {working: 0, attention: 0, idle: 0};
   for (const node of snapshot.nodes) tally[nodeState(node)] = (tally[nodeState(node)] || 0) + 1;
   statusView = statusView || buildStatus();
@@ -1421,14 +1425,14 @@ async function refresh() {
     renderStatus();
     $('status').style.color = '';
   } catch (error) {
-    $('status').textContent = `Connection error: ${error.message}. Retrying…`;
+    setStatusMessage(`Connection error: ${error.message}. Retrying…`);
     $('status').style.color = '#ffafb9';
   } finally { loading = false; }
 }
 document.addEventListener('visibilitychange', () => {
   startPolling();
   if (document.visibilityState === 'visible') refresh();
-  else $('status').textContent = 'Paused while hidden';
+  else setStatusMessage('Paused while hidden');
 });
 new ResizeObserver(() => render()).observe($('map-scroll'));
 startPolling();

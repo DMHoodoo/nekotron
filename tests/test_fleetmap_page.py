@@ -1188,6 +1188,48 @@ console.log(JSON.stringify({same, status: statusText()}));
         self.assertTrue(output['same'])
         self.assertIn('· 1 match', output['status'])
 
+    def test_header_recovers_after_paused_and_error_states(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+const status = $('status');
+let content = '';
+Object.defineProperty(status, 'textContent', {
+  get: () => content, set: value => { content = value; status.children = []; }});
+const buttons = () => descendants(status).filter(el => el.tagName === 'button');
+const stage = {};
+const reply = JSON.parse(JSON.stringify(snapshot));
+const ok = async () => JSON.parse(JSON.stringify(reply));
+(async () => {
+  request = ok;
+  document.visibilityState = 'visible';
+  await refresh();
+  stage.initial = [buttons().length, statusText()];
+  document.visibilityState = 'hidden';
+  document.dispatch('visibilitychange', {});
+  stage.paused = [buttons().length, statusText()];
+  document.visibilityState = 'visible';
+  reply.nodes = reply.nodes.slice(0, 2);
+  await refresh();
+  stage.afterPause = [buttons().length, statusText()];
+  request = async () => { throw new Error('offline'); };
+  await refresh();
+  stage.error = [buttons().length, statusText()];
+  request = ok;
+  reply.nodes = reply.nodes.slice(0, 1);
+  await refresh();
+  stage.afterError = [buttons().length, statusText()];
+  console.log(JSON.stringify(stage)); process.exit(0);
+})();
+""")
+        self.assertEqual(output['initial'][0], 3)
+        self.assertIn('3 sessions', output['initial'][1])
+        self.assertEqual(output['paused'], [0, 'Paused while hidden'])
+        self.assertEqual(output['afterPause'][0], 3)
+        self.assertIn('2 sessions', output['afterPause'][1])
+        self.assertEqual(output['error'][0], 0)
+        self.assertIn('Connection error', output['error'][1])
+        self.assertEqual(output['afterError'][0], 3)
+        self.assertIn('1 sessions', output['afterError'][1])
+
     def test_search_matches_the_repository_name_as_well_as_the_worktree_name(self):
         output = run_page_js(self.SEARCH_FIXTURE + """
 const node = {title: 'T', repository: 'glow-core', repo: 'lookdown', branch: 'main'};
