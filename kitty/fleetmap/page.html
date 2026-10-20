@@ -695,22 +695,39 @@ function dimClusters() {
     cluster.content.style.opacity = opacity;
   }
 }
-function renderStatus() {
-  if (snapshot.generated_at == null) { $('status').textContent = 'Waiting for the first snapshot…'; return; }
-  const tally = {working: 0, attention: 0, idle: 0};
-  for (const node of snapshot.nodes) tally[nodeState(node)] = (tally[nodeState(node)] || 0) + 1;
-  const parts = [document.createTextNode(`${snapshot.nodes.length} sessions`)];
-  for (const [state, word] of [['working', 'working'], ['attention', 'need you'], ['idle', 'idle']]) {
+// Built once so keyboard focus and clicks on the count buttons survive each poll.
+const STATUS_BUTTONS = [['working', 'working'], ['attention', 'need you'], ['idle', 'idle']];
+let statusView = null;
+function buildStatus() {
+  const part = () => document.createElement('span');
+  const view = {count: part(), buttons: {}, updated: part(), match: part()};
+  const children = [view.count];
+  for (const [state] of STATUS_BUTTONS) {
     const button = document.createElement('button');
     button.type = 'button'; button.dataset.state = state;
+    button.addEventListener('click', () => setStateFilter(state));
+    view.buttons[state] = button;
+    const gap = part(); gap.textContent = ' · ';
+    children.push(gap, button);
+  }
+  children.push(view.updated, view.match);
+  $('status').replaceChildren(...children);
+  return view;
+}
+function renderStatus() {
+  if (snapshot.generated_at == null) { $('status').textContent = 'Waiting for the first snapshot…'; statusView = null; return; }
+  const tally = {working: 0, attention: 0, idle: 0};
+  for (const node of snapshot.nodes) tally[nodeState(node)] = (tally[nodeState(node)] || 0) + 1;
+  statusView = statusView || buildStatus();
+  statusView.count.textContent = `${snapshot.nodes.length} sessions`;
+  for (const [state, word] of STATUS_BUTTONS) {
+    const button = statusView.buttons[state];
     button.textContent = `${tally[state]} ${word}`;
     button.setAttribute('aria-pressed', String(stateFilter === state));
-    button.addEventListener('click', () => setStateFilter(state));
-    parts.push(document.createTextNode(' · '), button);
   }
-  parts.push(document.createTextNode(` · updated ${age(snapshot.generated_at)} ago`));
-  if (searchQuery) parts.push(document.createTextNode(` · ${snapshot.nodes.filter(node => nodeMatches(node, searchQuery)).length} match`));
-  $('status').replaceChildren(...parts);
+  statusView.updated.textContent = ` · updated ${age(snapshot.generated_at)} ago`;
+  statusView.match.textContent = searchQuery
+    ? ` · ${snapshot.nodes.filter(node => nodeMatches(node, searchQuery)).length} match` : '';
 }
 function paintNode(node, view) {
   view.group.style.opacity = nodeDimmed(node) ? .25 : 1;

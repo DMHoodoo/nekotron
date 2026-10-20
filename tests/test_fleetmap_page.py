@@ -1176,6 +1176,18 @@ console.log(JSON.stringify({opacities: opacities(), status: statusText(),
         self.assertTrue(output['status'].endswith('· 1 match'), output['status'])
         self.assertEqual(output['fields'], [['n2'], ['n3']])
 
+    def test_status_buttons_survive_polls_and_search(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+const buttons = () => descendants($('status')).filter(el => el.tagName === 'button');
+const first = buttons();
+snapshot.generated_at += 3; renderStatus();
+type('6897');
+const same = buttons().every((button, i) => button === first[i]) && first.length === 3;
+console.log(JSON.stringify({same, status: statusText()}));
+""")
+        self.assertTrue(output['same'])
+        self.assertIn('· 1 match', output['status'])
+
     def test_search_matches_the_repository_name_as_well_as_the_worktree_name(self):
         output = run_page_js(self.SEARCH_FIXTURE + """
 const node = {title: 'T', repository: 'glow-core', repo: 'lookdown', branch: 'main'};
