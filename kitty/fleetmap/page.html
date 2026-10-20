@@ -342,11 +342,15 @@ function panelContentHeight(panel, width) {
   }
   return total ? total + 32 : 0;
 }
+function lastTouched(node) {
+  const stamps = [node.you_at, node.it_at].filter(stamp => stamp != null);
+  return stamps.length ? Math.max(...stamps) : null;
+}
 function foldable(node, now = Date.now() / 1000) {
   if (node.state !== 'idle' && node.state !== 'done') return false;
   if (node.never_prompted === true) return true;
-  const stamps = [node.you_at, node.it_at].filter(stamp => stamp != null);
-  return stamps.length > 0 && now - Math.max(...stamps) > 24 * 3600;
+  const touched = lastTouched(node);
+  return touched !== null && now - touched > 24 * 3600;
 }
 function nodeMatches(node, query) {
   const needle = String(query || '').trim().toLowerCase();
@@ -650,7 +654,8 @@ function stateLine(node, now = Date.now() / 1000) {
   if (node.state === 'attention') return 'needs you';
   const since = node.it_at == null ? '' : ` ${age(node.it_at, now)}`;
   if (node.state === 'working') return `working${node.it_at == null ? '' : ` · pulsing${since}`}`;
-  return `${node.state === 'done' ? 'done' : 'idle'}${since}`;
+  const touched = lastTouched(node);
+  return `${node.state === 'done' ? 'done' : 'idle'}${touched === null ? '' : ` ${age(touched, now)}`}`;
 }
 function setSearchQuery(value) {
   searchQuery = String(value || '').trim();

@@ -399,7 +399,7 @@ console.log(JSON.stringify({children: heading.children.map(text),
 
     def run_selection_js(self, source):
         return self.run_cluster_js(page_functions(
-            'selectCluster', 'renderRail', 'stateLine', 'renderContext', 'openBroadcast',
+            'selectCluster', 'renderRail', 'lastTouched', 'stateLine', 'renderContext', 'openBroadcast',
             'openOverlay', 'updateBroadcastCount', 'broadcastTargets',
             'selectNode', 'showContext', 'setText', 'age', 'secondsSince',
             'paintFocus', 'drawEdges') + """
@@ -1297,14 +1297,19 @@ const reasonOf = async (node, behavior) => {
         output = run_page_js(self.RAIL_FIXTURE + """
 const lines = {};
 for (const [name, patch] of Object.entries({working: {}, stalled: {stalled: true}, attention: {state: 'attention'},
-  idle: {state: 'idle', it_at: now - 3 * 86400}, done: {state: 'done', it_at: now - 7200}, quiet: {state: 'idle', it_at: null}}))
+  idle: {state: 'idle', you_at: now - 5 * 86400, it_at: now - 3 * 86400},
+  youNewer: {state: 'idle', you_at: now - 120, it_at: now - 3 * 86400},
+  done: {state: 'done', you_at: now - 3 * 86400, it_at: now - 7200},
+  doneYouNewer: {state: 'done', you_at: now - 600, it_at: now - 7200},
+  quiet: {state: 'idle', you_at: null, it_at: null}}))
   lines[name] = stateLine(Object.assign({}, worker, patch), now);
 selectNode('w');
 console.log(JSON.stringify({lines, rendered: text($('state-line')), doing: $('doing').textContent, said: $('said').textContent}));
 """)
         self.assertEqual(output['lines'], {
             'working': 'working · pulsing 5m', 'stalled': 'stalled', 'attention': 'needs you',
-            'idle': 'idle 3d', 'done': 'done 2h', 'quiet': 'idle'})
+            'idle': 'idle 3d', 'youNewer': 'idle 2m', 'done': 'done 2h', 'doneYouNewer': 'done 10m',
+            'quiet': 'idle'})
         self.assertEqual(output['rendered'], 'working · pulsing 5m')
         self.assertEqual((output['doing'], output['said']), ('Fixing', 'Hi'))
 
