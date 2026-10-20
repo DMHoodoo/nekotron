@@ -91,9 +91,9 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: calc(12px * var(--u)
 #decisions .decision-title { font-weight: 600; }
 #decisions .decision-meta { color: #a0a8be; }
 .decision-card { border: 1px solid #303548; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
-.cluster-content { font-size: calc(12px * var(--u)); padding: 10px; overflow: auto; overflow-wrap: anywhere; height: 100%; box-sizing: border-box; }
-.cluster-content p { margin: 6px 0; }
-.cluster-heading { display: flex; align-items: flex-start; gap: 10px; }
+.cluster-content { font-size: calc(12px * var(--u)); padding: calc(10px * var(--u)); overflow: auto; overflow-wrap: anywhere; height: 100%; box-sizing: border-box; }
+.cluster-content p { margin: calc(6px * var(--u)) 0; }
+.cluster-heading { display: flex; align-items: flex-start; gap: calc(10px * var(--u)); }
 .cluster-heading button { font-size: calc(12px * var(--u)); padding: 3px 6px; }
 .cluster-heading .cluster-toggle, .cluster-heading .cluster-name { font-weight: 650; font-size: calc(14px * var(--u)); }
 .cluster-heading .cluster-toggle { flex: none; }
@@ -106,8 +106,8 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: calc(12px * var(--u)
 .stepper i { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; border: 1px solid #77839e; }
 .stepper i.reached { background: #4f8ef7; }
 .stepper i.current { outline: 2px solid #d2e1ff; outline-offset: 2px; }
-.cluster-summary { margin: 6px 0; color: #bfc6d9; }
-.slice-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; margin-top: 6px; }
+.cluster-summary { margin: calc(6px * var(--u)) 0; color: #bfc6d9; }
+.slice-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; margin-top: calc(6px * var(--u)); }
 .slice-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slice-row .segments { grid-column: 1 / -1; }
 table { border-collapse: collapse; font-size: calc(11px * var(--u)); margin-top: 12px; width: 100%; }
@@ -123,7 +123,7 @@ th { color: #bfc9e0; }
 .revise, .stale { color: #ffba71; }
 .pending { color: #a0a8be; }
 .stale { display: block; margin-top: 4px; }
-.segments { display: flex; gap: 2px; height: 26px; margin: 5px 0; }
+.segments { display: flex; gap: 2px; height: calc(26px * var(--u)); margin: calc(5px * var(--u)) 0; }
 .segments button { min-width: 0; border: 0; white-space: nowrap; padding: 0; border-radius: 2px; font-size: calc(9px * var(--u)); color: #fff; overflow: hidden; }
 .live-node { display: inline-flex; flex-direction: column; align-items: center; width: 66px; vertical-align: top; }
 .live-node span { font-size: calc(10px * var(--u)); text-align: center; overflow-wrap: anywhere; }
@@ -367,22 +367,23 @@ function nodeText(node) {
 }
 // Estimated from the rendered lines so layout needs no browser measurement and stays deterministic.
 function panelContentHeight(panel, width) {
-  const columns = Math.max(8, Math.floor((width - 20) / 6.6));
+  const u = uiScale(), pad = 10 * u, margin = 6 * u, line = 18 * u;
+  const columns = Math.max(8, Math.floor((width - 2 * pad) / (6.6 * u)));
   let total = 0;
   for (const child of panel.children || []) {
     const className = String(child.className || '');
     if (className.includes('cluster-heading')) {
       // The 14px bold name wraps beside the 26px toggle, never beneath it.
-      const name = nodeText((child.children || [])[1] || ''), available = width - 20 - 26 - 10;
-      total += Math.max(32, Math.ceil(name.length * 8.5 / available) * 21 + 12);
+      const name = nodeText((child.children || [])[1] || ''), available = width - 2 * pad - 26 * u - 10 * u;
+      total += Math.max(32 * u, Math.ceil(name.length * 8.5 * u / available) * 21 * u + 12 * u);
       continue;
     }
     // A slice row is one ellipsized line, a 6px margin and the 26px segment bar with 5px margins.
-    if (className.includes('slice-row')) { total += 18 + 6 + 36; continue; }
-    total += Math.max(1, Math.ceil(nodeText(child).length / columns)) * 18 + 6;
+    if (className.includes('slice-row')) { total += line + margin + 36 * u; continue; }
+    total += Math.max(1, Math.ceil(nodeText(child).length / columns)) * line + margin;
   }
   // Adjacent margins collapse to 6 px; the panel's own 10 px padding top and bottom is counted once.
-  return total ? total + 20 : 0;
+  return total ? total + 2 * pad : 0;
 }
 function lastTouched(node) {
   const stamps = [node.you_at, node.it_at].filter(stamp => stamp != null);
@@ -559,8 +560,8 @@ function layoutFleet(hosts) {
         }
       }
       const bodyHeight = open ? (run ? 75 + run.rows.reduce((sum, row) => sum + Math.max(150, Math.ceil(row.live.length / 2) * 76 + 20), 0) : 85 + items.length * 78)
-        : sorted.length ? Math.max(...sorted.map(node => positions.get(node.id).y + 42)) : 0;
-      const clusterHeight = headerHeight + bodyHeight + (bodyHeight ? 20 : 0);
+        : sorted.length ? Math.max(...sorted.map(node => positions.get(node.id).y + 42 * scale)) : 0;
+      const clusterHeight = headerHeight + bodyHeight + (bodyHeight ? 20 * scale : 0);
       cluster.geometry = {left: x, top: y, baseTop: y, width: clusterWidth, baseWidth,
         headerHeight, height: clusterHeight};
       Object.assign(cluster, {x: regionX + 28 + x, headerHeight});

@@ -1774,6 +1774,22 @@ console.log(JSON.stringify({pairs, dotOuter: outer('dot'), fullOuter: outer('p0'
         for a, b, gap in output['pairs']:
             self.assertGreaterEqual(gap, 4 - 1e-6, (a, b))
 
+    def test_box_height_scales_with_ui_scale(self):
+        def probe(width):
+            return run_page_js(f"""
+var window = {{innerWidth: {width}}};
+const panel = new Element('div');
+for (const [name, cls] of [['Heading', 'cluster-heading'], ['Now: short line', 'cluster-now'], ['Another', 'cluster-summary'], ['slice', 'slice-row']]) {{
+  const child = new Element('div'); child.className = cls; child.textContent = name;
+  if (cls === 'cluster-heading') child.children = [new Element('span'), (() => {{ const n = new Element('span'); n.textContent = 'Name'; return n; }})()];
+  panel.append(child);
+}}
+console.log(JSON.stringify(panelContentHeight(panel, 600)));
+""")
+        normal, big = probe(1512), probe(2560)
+        self.assertGreater(normal, 0)
+        self.assertAlmostEqual(big, normal * 14 / 12, delta=1)
+
     def test_subagent_dot_never_covers_a_label(self):
         output = run_page_js(self.BOX_FIXTURE + """
 const parents = makeNodes('Live', 4, 'p');
