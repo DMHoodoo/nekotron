@@ -317,7 +317,7 @@ function clusterRetired(cluster) {
   return (clusterInfo(cluster).retired_workers || []).filter(worker => worker.host === cluster.host);
 }
 function retiredPseudo(worker) {
-  return {id: 'retired:' + worker.dispatchId, title: worker.title, state: 'retired', doing: '', last_said: '', purpose: '', repo: '', branch: ''};
+  return {id: 'retired:' + worker.dispatchId, title: worker.title, state: 'idle', doing: '', last_said: '', purpose: '', repo: '', branch: ''};
 }
 function clusterItems(cluster) { return snapshot.nodes.filter(node => clusterKey(node) === cluster.id); }
 function nodeText(node) {
@@ -624,7 +624,7 @@ function paintRetiredChips() {
       retiredChips.set(cluster.id, chip);
     }
     chip.children[1].textContent = `${list.length} retired worker${list.length === 1 ? '' : 's'}`;
-    chip.setAttribute('aria-label', `${list.length} retired workers; list them`);
+    chip.setAttribute('aria-label', `${list.length} retired worker${list.length === 1 ? '' : 's'}; list them`);
     chip.setAttribute('transform', `translate(${position.x} ${position.y})`);
     if (chip.parentNode !== cluster.grid) cluster.grid.append(chip);
     chip.style.display = '';
@@ -686,7 +686,9 @@ function setStateFilter(state) {
 }
 function dimClusters() {
   for (const cluster of clusters.values()) {
-    const dim = filtering() && !clusterItems(cluster).some(node => !nodeDimmed(node));
+    const lit = clusterItems(cluster).some(node => !nodeDimmed(node)) ||
+      clusterRetired(cluster).some(worker => !nodeDimmed(retiredPseudo(worker)));
+    const dim = filtering() && !lit;
     const opacity = dim ? .25 : 1;
     cluster.background.style.opacity = opacity;
     cluster.content.style.opacity = opacity;

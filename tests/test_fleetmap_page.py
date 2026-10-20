@@ -1001,11 +1001,15 @@ const overlap = [...positions].filter(([id, p]) => id !== 'retired:' + cluster()
 shownRetired()[0].click();
 const rail = text($('context-details'));
 const railHidden = $('context-rail').hidden;
-stateFilter = 'idle'; render();
-const dimmed = shownRetired()[0].style.opacity;
-stateFilter = null;
+const labels = [];
+labels.push(shownRetired()[0].attributes['aria-label']);
+const dimmed = {};
+for (const filter of ['working', 'attention', 'idle']) { stateFilter = filter; render(); dimmed[filter] = shownRetired()[0].style.opacity; }
+stateFilter = null; render();
+snapshot.clusters.Box.retired_workers = retired.slice(0, 1); render();
+labels.push(shownRetired()[0].attributes['aria-label'], text(shownRetired()[0]).trim());
 snapshot.clusters.Box.retired_workers = []; render();
-console.log(JSON.stringify({shown, overlap, rail, railHidden, dimmed, gone: shownRetired().length,
+console.log(JSON.stringify({shown, overlap, rail, railHidden, dimmed, labels, gone: shownRetired().length,
   nodes: drawnNodes().length}));
 """)
         self.assertEqual([c.strip() for c in output['shown']], ['2 retired workers'])
@@ -1013,8 +1017,26 @@ console.log(JSON.stringify({shown, overlap, rail, railHidden, dimmed, gone: show
         self.assertFalse(output['railHidden'])
         for expected in ('Worker one', 'released', '2h', 'Worker two', 'abandoned', '1m'):
             self.assertIn(expected, output['rail'])
-        self.assertEqual(output['dimmed'], .25)
+        self.assertEqual(output['dimmed'], {'working': .25, 'attention': .25, 'idle': 1})
+        self.assertEqual(output['labels'], ['2 retired workers; list them', '1 retired worker; list them',
+                                            '1 retired worker'])
         self.assertEqual((output['gone'], output['nodes']), (0, 1))
+
+    def test_retired_only_box_stays_lit_while_a_retired_title_matches(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+const retired = [{title: 'Worker one', dispatchId: 'd1', state: 'released', retainedFor: 60, host: 'local'}];
+snapshot = {generated_at: Date.now() / 1000, hosts: [{name: 'local'}],
+  clusters: {Past: {name: 'Past', full_name: 'Past', short_name: 'Past', retired_workers: retired}},
+  runs: {}, nodes: [], edges: []};
+render(); renderStatus();
+const box = () => cluster().content.style.opacity;
+const chip = () => unique(byClass(cluster().grid, 'retired-chip'))[0].style.opacity;
+searchQuery = 'one'; dimClusters(); paintRetiredChips();
+const hit = [box(), chip()];
+searchQuery = 'zzz'; dimClusters(); paintRetiredChips();
+console.log(JSON.stringify({hit, miss: [box(), chip()]}));
+""")
+        self.assertEqual(output, {'hit': [1, 1], 'miss': [.25, .25]})
 
     def test_clicking_chip_unfolds_cluster(self):
         output = run_page_js(self.FOLD_FIXTURE + """
