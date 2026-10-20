@@ -16,6 +16,8 @@ class FleetMapPage(unittest.TestCase):
                       "#f0803c", "#6b7394", "Legend", "subagents_shown", "layoutFleet"]:
             self.assertIn(value, html)
         self.assertNotIn("<script src=", html)
+        self.assertIn("regionOrder.map(name => hostMap.get(name))", html)
+        self.assertNotIn("a.name.localeCompare(b.name)", html)
 
 
 if __name__ == "__main__":

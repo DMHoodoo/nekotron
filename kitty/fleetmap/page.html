@@ -129,6 +129,7 @@ const clusters = new Map();
 const nodeViews = new Map();
 const MIN_REGION = 320, CELL = 70, GAP = 16;
 let layoutSignature = '';
+let regionOrder = [];
 let snapshot = {hosts: [], nodes: [], edges: []};
 let nodes = new Map(), selectedId = null, dialogNodeId = null;
 let timer = null, pollSeconds = 3, loading = false, actionBusy = false;
@@ -374,7 +375,10 @@ function render() {
   for (const region of regions.values()) region.group.style.display = 'none';
   const hostMap = new Map(snapshot.hosts.map(host => [host.name, host]));
   for (const node of snapshot.nodes) if (!hostMap.has(node.host)) hostMap.set(node.host, {name: node.host});
-  const hosts = [...hostMap.values()].sort((a, b) => a.name.localeCompare(b.name));
+  // Establish snapshot order once; order-only polls must not move regions.
+  regionOrder = regionOrder.filter(name => hostMap.has(name));
+  for (const name of hostMap.keys()) if (!regionOrder.includes(name)) regionOrder.push(name);
+  const hosts = regionOrder.map(name => hostMap.get(name));
   layoutFleet(hosts);
   for (const host of hosts) {
     const region = ensureRegion(host);
