@@ -47,16 +47,19 @@ class Ladder:
                                worktree)
         except subprocess.CalledProcessError:
             # Older clones may lack the remote HEAD symbolic reference.
+            candidates = []
             for name in ('master', 'main'):
                 try:
                     self._run(self.git, ['rev-parse', '--verify',
                                          'refs/remotes/origin/' + name], worktree)
                 except subprocess.CalledProcessError:
                     continue
-                default = 'origin/' + name
-                break
-            else:
-                raise ValueError('No remote default branch')
+                candidates.append('origin/' + name)
+            if len(candidates) != 1:
+                raise ValueError('Unknown remote default branch')
+            # Only the ladder's TTL cache may retain a guessed baseline, so
+            # the next refresh can discover a repaired origin/HEAD.
+            return candidates[0]
         else:
             if not target.startswith('refs/remotes/origin/'):
                 raise ValueError('Invalid remote HEAD')

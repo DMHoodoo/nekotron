@@ -215,19 +215,62 @@ class OneOffLadder(unittest.TestCase):
         calls = [call for call in self.calls() if call[2][0] == 'symbolic-ref']
         self.assertEqual(len(calls), 1)
 
-    def test_missing_origin_head_falls_back_to_master_then_main(self):
+    def test_missing_origin_head_uses_only_unambiguous_fallback(self):
         self.responses['symbolic-ref']['code'] = 1
         for default in ('master', 'main'):
             with self.subTest(default=default):
                 self.ladder = Ladder(git=self.git, gh=self.gh)
-                self.responses['rev-parse --verify refs/remotes/origin/master'] = {
-                    'code': 0 if default == 'master' else 1, 'stdout': 'abc123'}
+                for name in ('master', 'main'):
+                    self.responses['rev-parse --verify refs/remotes/origin/' + name] = {
+                        'code': 0 if default == name else 1, 'stdout': 'abc123'}
                 self.responses['rev-list']['stdout'] = '2'
                 self.save()
                 self.assertEqual(self.rung()['rung'], 'working')
                 self.assertIn(['git', str(self.worktree),
                                ['rev-list', '--count', 'origin/' + default + '..HEAD']],
                               self.calls())
+
+    def test_ambiguous_fallback_without_previous_value_is_asked(self):
+        self.responses['symbolic-ref']['code'] = 1
+        self.responses['rev-list']['stdout'] = '9'
+        self.save()
+        self.assertEqual(self.rung(), {'rung': 'asked', 'ahead': 0, 'pr': None})
+
+    def test_ambiguous_fallback_retains_previous_value_and_recovers(self):
+        self.responses['symbolic-ref']['code'] = 1
+        self.responses['rev-parse --verify refs/remotes/origin/main'] = {'code': 1}
+        self.responses['rev-list']['stdout'] = '2'
+        self.save()
+        previous = self.rung()
+        self.assertEqual(previous, {'rung': 'working', 'ahead': 2, 'pr': None})
+
+        self.responses['rev-parse --verify refs/remotes/origin/main']['code'] = 0
+        self.responses['rev-list']['stdout'] = '9'
+        self.save()
+        self.assertEqual(self.rung(), previous)
+
+        self.responses['symbolic-ref'] = {'stdout': 'refs/remotes/origin/develop\n'}
+        self.responses['rev-list --count origin/HEAD..HEAD'] = {'stdout': '0'}
+        self.save()
+        self.assertEqual(self.rung(), {'rung': 'asked', 'ahead': 0, 'pr': None})
+
+    def test_fallback_is_replaced_by_repaired_origin_head_after_ttl(self):
+        self.ladder = Ladder(git=self.git, gh=self.gh)
+        self.responses['symbolic-ref']['code'] = 1
+        self.responses['rev-parse --verify refs/remotes/origin/main'] = {'code': 1}
+        self.responses['rev-list']['stdout'] = '2'
+        self.save()
+        with patch('fleetmap.ladder.time.monotonic', return_value=100):
+            previous = self.rung()
+        self.assertEqual(previous, {'rung': 'working', 'ahead': 2, 'pr': None})
+
+        self.responses['symbolic-ref'] = {'stdout': 'refs/remotes/origin/develop\n'}
+        self.responses['rev-list --count origin/HEAD..HEAD'] = {'stdout': '0'}
+        self.save()
+        with patch('fleetmap.ladder.time.monotonic', return_value=159):
+            self.assertEqual(self.rung(), previous)
+        with patch('fleetmap.ladder.time.monotonic', return_value=160):
+            self.assertEqual(self.rung(), {'rung': 'asked', 'ahead': 0, 'pr': None})
 
     def test_no_default_branch_is_asked(self):
         self.responses['symbolic-ref']['code'] = 1
