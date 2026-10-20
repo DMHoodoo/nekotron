@@ -12,6 +12,9 @@ Built 2026-07-09/10. Everything is event-driven — no daemons, no timers.
   transcript activity feeds, notes, cost, context gradient bars; fleet
   timeline; ring gauges (memory / 5h / weekly usage); vitals incl. kitty
   socket health; animated cat (ASCII or pixel sprite, toggle `s`, pet `c`).
+- **Fleet map** (`⌘⇧W`) — sessions grouped by initiative and machine in
+  your browser, with agent traffic between them. Opens on demand, reuses
+  the running map, and shuts down after 30 minutes without page requests.
 - **Meow on attention** — any session flipping to NEEDS YOU plays
   `sounds/meow.wav` (synthesized from raw sine math, symlinked to
   `~/.claude/sounds/`), board open or not. Delete the symlink to silence.
@@ -35,6 +38,7 @@ Built 2026-07-09/10. Everything is event-driven — no daemons, no timers.
 app: `ᓚᘏᗢ ●N` (orange = sessions needing you, blue = working, green ✓ =
 quiet). Click for the session list — each row jumps straight to that
 kitty tab — plus Open Fleet Board / New Claude Tab actions.
+Open Fleet Map brings up the same map as `⌘⇧W`.
 Setup: `brew install swiftbar`, then point SwiftBar's plugin folder at
 `~/.config/nekotron/swiftbar` (symlinked by install.sh).
 

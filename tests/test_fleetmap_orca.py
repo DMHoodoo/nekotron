@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'kitty'))
@@ -13,6 +14,11 @@ from fleetmap.orca import OrcaClient, OrcaError
 
 
 class OrcaCLI(unittest.TestCase):
+    def test_default_binary_falls_back_to_app_when_orca_is_not_on_path(self):
+        with patch('fleetmap.orca.shutil.which', return_value=None):
+            self.assertEqual(OrcaClient().binary,
+                             '/Applications/Orca.app/Contents/Resources/bin/orca')
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory(prefix='fleetmap-orca-')
         self.addCleanup(tmp.cleanup)

@@ -6,7 +6,8 @@ mkdir -p ~/.config/kitty ~/bin ~/.claude/hooks
 for f in "$R"/kitty/*; do
     b=$(basename "$f")
     [ "$b" = "nekotron.conf" ] && continue
-    ln -sf "$f" ~/.config/kitty/"$b"
+    # Do not follow existing directory symlinks (including the fleetmap package).
+    ln -sfn "$f" ~/.config/kitty/"$b"
 done
 for f in "$R"/bin/*;   do ln -sf "$f" ~/bin/"$(basename "$f")"; done
 for f in "$R"/hooks/*; do

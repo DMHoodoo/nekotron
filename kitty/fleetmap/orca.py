@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """The fleet map's subprocess boundary for local and remote Orca runtimes."""
 import json
+import shutil
 import subprocess
 
 
@@ -10,8 +11,9 @@ class OrcaError(RuntimeError):
 
 
 class OrcaClient:
-    def __init__(self, binary: str = 'orca', timeout: float = 5.0):
-        self.binary = binary
+    def __init__(self, binary: str | None = None, timeout: float = 5.0):
+        self.binary = (binary if binary is not None else
+                       shutil.which('orca') or '/Applications/Orca.app/Contents/Resources/bin/orca')
         self.timeout = timeout
 
     def _run(self, args: list[str]) -> str:
