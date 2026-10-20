@@ -16,7 +16,6 @@ h1 { font-size: 18px; margin: 0; font-weight: 650; }
 #status { color: #a0a8be; font-size: 12px; }
 #status button { background: none; border: 0; padding: 0 2px; color: inherit; font: inherit; cursor: pointer; text-decoration: underline dotted; }
 #status button[aria-pressed=true] { color: #fff; text-decoration: underline; }
-#legend-toggle { margin-left: auto; }
 main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; min-height: 0; }
 #map-scroll { overflow: auto; position: relative; }
 #map { display: block; min-width: 100%; min-height: 100%; }
@@ -120,15 +119,28 @@ input[type=checkbox] { width: auto; }
       <div id="decision-slot"></div>
       <div id="action-error" class="error" role="alert" hidden></div>
       <p id="action-status" class="muted" role="status"></p>
-    <section id="context-rail" hidden><h2 id="context-title"></h2><div id="context-details"></div></section>
     <div id="empty"><h2>Your fleet, at a glance</h2><p class="muted">Select a session to see its purpose, recent work, and terminal actions.</p></div>
     <section id="details" hidden>
-      <h2 id="node-title"></h2><p id="node-kind"></p>
+      <h2 id="node-title"></h2><p id="state-line"></p>
       <dl>
-        <dt>Purpose</dt><dd id="purpose"></dd>
-        <dt>Doing now</dt><dd id="doing"></dd>
+        <dt>Doing</dt><dd id="doing"></dd>
+        <dt>Said</dt><dd id="said"></dd>
         <dt>You · last addressed</dt><dd id="you-age"></dd>
         <dt>It · last activity</dt><dd id="it-age"></dd>
+      </dl>
+      <div id="actions" hidden>
+        <button type="button" data-action="peek">Peek</button><button type="button" data-action="jump">Jump</button><button type="button" data-action="send">Send</button><button type="button" data-action="close" class="danger">Close</button>
+      </div>
+      <div id="parent-row" hidden><button id="parent-link" class="link" type="button">Open parent session</button></div>
+    </section>
+    <section id="context-rail" hidden><h2 id="context-title"></h2><div id="context-details"></div></section>
+    <section id="node-rest" hidden>
+      <details id="first-prompt">
+        <summary>First prompt</summary>
+        <p id="purpose"></p>
+      </details>
+      <p id="node-kind"></p>
+      <dl>
         <dt>Repo</dt><dd id="repo"></dd>
         <dt>Worktree</dt><dd id="worktree"></dd>
         <dt>Branch</dt><dd id="branch"></dd>
@@ -139,22 +151,18 @@ input[type=checkbox] { width: auto; }
         <dt>Partners</dt><dd><ul id="partners"></ul></dd>
         <dt>Last five moves</dt><dd><ol id="moves"></ol></dd>
       </dl>
-      <div id="parent-row" hidden><button id="parent-link" class="link" type="button">Open parent session</button></div>
-      <div id="actions" hidden>
-        <button type="button" data-action="peek">Peek</button><button type="button" data-action="jump">Jump</button><button type="button" data-action="send">Send</button><button type="button" data-action="close" class="danger">Close</button>
-      </div>
       <p id="pin-note" class="muted"></p>
       <form id="promote-form">
         <h2 id="promotion-title">Make a slice</h2>
         <div id="slice-identity"><label for="project-name">Project</label><input id="project-name" required maxlength="200">
         <label for="slice-name">Slice</label><input id="slice-name" required maxlength="200"></div>
         <label for="slice-stage">Stage</label><select id="slice-stage"><option value="goal">Goal</option><option value="design">Design</option><option value="plan">Plan (readiness)</option><option value="implementing">Implementing</option><option value="review">Review</option><option value="delivery">Delivery</option><option value="accepted">Accepted</option></select>
-        <button type="submit">Save slice / stage</button>
+        <button type="submit">Add to a project</button>
       </form>
       <form id="assign-form">
         <label for="cluster-choice">Move to…</label><select id="cluster-choice"></select>
         <div id="new-cluster-row" hidden><label for="new-cluster">New cluster name</label><input id="new-cluster" maxlength="200" autocomplete="off"></div>
-        <button type="submit">Move session</button>
+        <button type="submit">Move to another box</button>
       </form>
     </section>
   </aside>
@@ -591,6 +599,13 @@ function hoverText(node, now = Date.now() / 1000) {
   if (place) lines.push(place);
   return lines.join('\n');
 }
+function stateLine(node, now = Date.now() / 1000) {
+  if (node.stalled) return 'stalled';
+  if (node.state === 'attention') return 'needs you';
+  const since = node.it_at == null ? '' : ` ${age(node.it_at, now)}`;
+  if (node.state === 'working') return node.it_at == null ? 'working' : `working · pulsing ${age(node.it_at, now)}`;
+  return `${node.state === 'done' ? 'done' : 'idle'}${since}`;
+}
 function setSearchQuery(value) {
   searchQuery = String(value || '').trim();
   render();
@@ -650,7 +665,7 @@ function paintNode(node, view) {
     (edge.src === node.id || edge.dst === node.id)).length;
   view.badge.textContent = edgeCount > 9 ? '9+' : String(edgeCount);
   view.badge.style.display = !edgeCount || selectedId === node.id || hoveredId === node.id ? 'none' : '';
-  const title = node.title || node.purpose || node.id;
+  const title = node.title || node.id;
   view.group.setAttribute('aria-label', `${node.title || node.id}, ${node.state}, ${node.kind}`);
   view.title.textContent = hoverText(node);
   let split = title.lastIndexOf(' ', 11);
@@ -809,11 +824,13 @@ function renderRail() {
   const node = nodes.get(selectedId);
   $('empty').hidden = Boolean(node) || Boolean(selectedContext);
   $('details').hidden = !node;
+  $('node-rest').hidden = !node;
   if (!node) {
     $('empty').lastElementChild.textContent = selectedId ? 'This session is no longer in the current snapshot. Select another session.' : 'Select a session to see its purpose, recent work, and terminal actions.';
     return;
   }
   setText('node-title', node.title || node.id);
+  $('state-line').textContent = stateLine(node);
   $('pin-note').textContent = node.pin_overridden ? `Pin overridden: ${node.pin_overridden}. The run projection controls this session's cluster and stage.` : node.stage ? `Stage: ${node.stage}${node.run ? ' · run projection' : ' · hand-set'}` : '';
   $('promote-form').hidden = Boolean(snapshot.runs?.[node.run]);
   const editingStage = Boolean(node.stage);
@@ -831,6 +848,7 @@ function renderRail() {
   }
   setText('node-kind', `${node.kind === 'terminal' ? 'Terminal only' : node.kind === 'subagent' ? 'Subagent' : 'Claude session'} · ${node.state === 'attention' ? 'Needs you' : node.state} · ${node.cluster || 'Unsorted'}${node.subagents_total > 0 ? ` · ${node.subagents_total} subagents, ${node.subagents_shown} shown` : ''}`);
   for (const field of ['purpose', 'doing', 'repo', 'worktree', 'branch', 'model']) setText(field, node[field]);
+  setText('said', node.last_said);
   setText('you-age', node.never_addressed ? 'Never addressed' : node.you_at == null ? 'Unknown' : `${age(node.you_at)} ago`);
   setText('it-age', node.it_at == null ? 'Unknown' : `${age(node.it_at)} ago`);
   const hosting = node.hosting === 'orca' ? 'Orca' : node.hosting;
@@ -856,9 +874,8 @@ function renderRail() {
     const item = document.createElement('li'); item.textContent = `${age(at)} ago · ${description}`; $('moves').append(item);
   }
   if (!node.moves?.length) $('moves').textContent = 'No recorded moves';
-  $('parent-row').hidden = node.kind !== 'subagent';
-  $('parent-link').textContent = `Open parent: ${nodes.get(node.parent)?.title || node.parent || 'unavailable'}`;
-  $('parent-link').disabled = !nodes.has(node.parent);
+  $('parent-row').hidden = node.kind !== 'subagent' || !nodes.has(node.parent);
+  $('parent-link').textContent = `Open parent: ${nodes.get(node.parent)?.title || node.parent}`;
   const hasTarget = [node.terminal, node.tmux, node.kitty_window].some(value => value !== null && value !== undefined && value !== '');
   $('actions').hidden = node.kind === 'subagent' || !hasTarget;
   const names = [...new Set(snapshot.nodes.map(item => item.cluster || 'Unsorted'))].sort();
@@ -916,13 +933,25 @@ $('actions').addEventListener('click', event => {
       $('overlay-text').textContent = result.text;
       $('confirm-close').hidden = false;
       $('cancel-overlay').focus();
+    } else if (action === 'peek') {
+      const node = nodes.get(id);
+      let reason = null, output = '', failure = null;
+      if (![node.terminal, node.tmux, node.kitty_window].some(value => value !== null && value !== undefined && value !== '')) {
+        reason = 'No terminal is bound to this session';
+      } else {
+        try { output = (await request('/api/action', {node: id, action})).output; }
+        catch (error) { failure = error; reason = `${node.host} is unreachable`; }
+        if (!reason && !output) reason = 'The terminal returned nothing';
+      }
+      openOverlay(`Peek · ${node.title || 'session'}`, id);
+      if (reason) {
+        $('overlay-text').textContent = reason;
+        if (failure) { $('overlay-error').textContent = failure.message || String(failure); $('overlay-error').hidden = false; }
+      } else { $('screen').textContent = output; $('screen').hidden = false; }
+      $('cancel-overlay').textContent = 'Done'; if (!reason) $('screen').focus();
     } else {
-      const result = await request('/api/action', {node: id, action});
-      if (action === 'peek') {
-        openOverlay(`Peek · ${nodes.get(id)?.title || 'session'}`, id);
-        $('screen').textContent = result.output || '(Screen is empty)'; $('screen').hidden = false;
-        $('cancel-overlay').textContent = 'Done'; $('screen').focus();
-      } else $('action-status').textContent = 'Jump requested.';
+      await request('/api/action', {node: id, action});
+      $('action-status').textContent = 'Jump requested.';
     }
   });
 });

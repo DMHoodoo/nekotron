@@ -399,7 +399,7 @@ console.log(JSON.stringify({children: heading.children.map(text),
 
     def run_selection_js(self, source):
         return self.run_cluster_js(page_functions(
-            'selectCluster', 'renderRail', 'renderContext', 'openBroadcast',
+            'selectCluster', 'renderRail', 'stateLine', 'renderContext', 'openBroadcast',
             'openOverlay', 'updateBroadcastCount', 'broadcastTargets',
             'selectNode', 'showContext', 'setText', 'age', 'secondsSince',
             'paintFocus', 'drawEdges') + """
@@ -1169,6 +1169,146 @@ console.log(JSON.stringify({title: view.title.textContent, expected: hoverText(n
         self.assertEqual(output['aria'], 'untitled-1, idle, claude')
         for text in (output['title'], output['aria']):
             self.assertNotIn('SECRET', text)
+
+    def test_rendered_node_hover_shows_full_card(self):
+        output = run_page_js("""
+const now = Date.now() / 1000;
+const node = {id: 'full', title: 'Full card', purpose: 'SECRET prompt', doing: 'Fixing the test',
+  last_said: 'Tests pass', you_at: now - 7300, it_at: now - 310, repository: 'glow-core',
+  branch: 'fix/it', state: 'idle', kind: 'claude'};
+snapshot = {hosts: [], clusters: {}, runs: {}, nodes: [node], edges: []};
+const view = makeNode(node);
+paintNode(node, view);
+console.log(JSON.stringify({lines: view.title.textContent.split('\\n')}));
+""")
+        self.assertEqual(output['lines'], ['Full card', 'Doing: Fixing the test', 'Said: Tests pass',
+                                           'You: 2h · It: 5m', 'glow-core · fix/it'])
+
+    def test_on_map_label_never_falls_back_to_the_purpose(self):
+        output = run_page_js("""
+const node = {id: 'untitled-1', title: '', purpose: 'Write the quarterly report', state: 'idle', kind: 'claude'};
+snapshot = {hosts: [], clusters: {}, runs: {}, nodes: [node], edges: []};
+const view = makeNode(node);
+paintNode(node, view);
+console.log(JSON.stringify({label: text(view.label)}));
+""")
+        self.assertNotIn('Write', output['label'])
+        self.assertIn('untitled-1', output['label'])
+
+    def test_search_box_sits_next_to_the_help_button(self):
+        html = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        self.assertIn('header input#search { margin-left: auto', html)
+        self.assertNotIn('#legend-toggle { margin-left', html)
+
+    RAIL_FIXTURE = """
+const now = Date.now() / 1000;
+const worker = {id: 'w', title: 'Worker', state: 'working', kind: 'claude', host: 'local', cluster: 'Box',
+  doing: 'Fixing', last_said: 'Hi', you_at: now - 60, it_at: now - 300, purpose: 'First words',
+  tmux: 'sess', hosting: 'tmux'};
+snapshot = {generated_at: now, hosts: [{name: 'local'}], clusters: {}, runs: {}, nodes: [worker], edges: []};
+$('map-scroll').clientWidth = 1200;
+render();
+document.querySelectorAll = () => [];
+$('overlay').showModal = () => {}; $('screen').focus = () => {};
+const reasonOf = async (node, behavior) => {
+  nodes.set(node.id, node); selectedId = node.id;
+  request = behavior;
+  await $('actions').listeners.click({target: {dataset: {action: 'peek'}}});
+  await new Promise(resolve => setTimeout(resolve, 5));
+  return {text: $('overlay-text').textContent, screenHidden: $('screen').hidden};
+};
+"""
+
+    def test_rail_leads_with_state_doing_said_ages(self):
+        html = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        rail = html[html.index('<aside id="rail"'):html.index('</aside>')]
+        order = re.findall(r'<(?:section|h2|p|dd|div|details|form)[^>]* id="([^"]+)"', rail)
+        wanted = ['node-title', 'state-line', 'doing', 'said', 'you-age', 'it-age', 'actions',
+                  'context-rail', 'first-prompt']
+        positions = [order.index(name) for name in wanted]
+        self.assertEqual(positions, sorted(positions), order)
+        self.assertRegex(rail, r'<details id="first-prompt">\s*<summary>First prompt</summary>')
+        output = run_page_js(self.RAIL_FIXTURE + """
+const lines = {};
+for (const [name, patch] of Object.entries({working: {}, stalled: {stalled: true}, attention: {state: 'attention'},
+  idle: {state: 'idle', it_at: now - 3 * 86400}, done: {state: 'done', it_at: now - 7200}, quiet: {state: 'idle', it_at: null}}))
+  lines[name] = stateLine(Object.assign({}, worker, patch), now);
+selectNode('w');
+console.log(JSON.stringify({lines, rendered: text($('state-line')), doing: $('doing').textContent, said: $('said').textContent}));
+""")
+        self.assertEqual(output['lines'], {
+            'working': 'working · pulsing 5m', 'stalled': 'stalled', 'attention': 'needs you',
+            'idle': 'idle 3d', 'done': 'done 2h', 'quiet': 'idle'})
+        self.assertEqual(output['rendered'], 'working · pulsing 5m')
+        self.assertEqual((output['doing'], output['said']), ('Fixing', 'Hi'))
+
+    def test_rail_omits_unavailable_actions_and_parent(self):
+        output = run_page_js(self.RAIL_FIXTURE + """
+const sub = {id: 's', title: 'Sub', state: 'idle', kind: 'subagent', host: 'local', cluster: 'Box', parent: 'gone'};
+const bare = {id: 'b', title: 'Bare', state: 'idle', kind: 'claude', host: 'local', cluster: 'Box'};
+const kid = {id: 'k', title: 'Kid', state: 'idle', kind: 'subagent', host: 'local', cluster: 'Box', parent: 'w'};
+snapshot.nodes.push(sub, bare, kid);
+for (const node of snapshot.nodes) nodes.set(node.id, node);
+const seen = {};
+for (const id of ['w', 's', 'b', 'k']) {
+  selectNode(id);
+  seen[id] = {actionsHidden: $('actions').hidden, parentHidden: $('parent-row').hidden,
+    parent: text($('parent-link')), railText: text($('details'))};
+}
+console.log(JSON.stringify(seen));
+""")
+        self.assertFalse(output['w']['actionsHidden'])
+        self.assertTrue(output['b']['actionsHidden'])
+        self.assertTrue(output['s']['parentHidden'])
+        self.assertFalse(output['k']['parentHidden'])
+        self.assertEqual(output['k']['parent'], 'Open parent: Worker')
+        for view in output.values():
+            self.assertNotIn('unavailable', view['railText'] + view['parent'])
+        html = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        self.assertNotIn("|| 'unavailable'", html)
+
+    def test_rail_button_labels(self):
+        html = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        rail = html[html.index('<aside id="rail"'):html.index('</aside>')]
+        labels = re.findall(r'<button[^>]*>([^<]+)</button>', rail)
+        for label in ('Peek', 'Jump', 'Send', 'Close', 'Add to a project', 'Move to another box'):
+            self.assertIn(label, labels)
+        for old in ('Save slice / stage', 'Move session'):
+            self.assertNotIn(old, labels)
+
+    def test_first_prompt_is_collapsed(self):
+        html = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        tag = re.search(r'<details id="first-prompt"([^>]*)>(.*?)</details>', html, re.DOTALL)
+        self.assertNotIn('open', tag.group(1))
+        self.assertIn('id="purpose"', tag.group(2))
+        output = run_page_js(self.RAIL_FIXTURE + """
+selectNode('w');
+console.log(JSON.stringify({purpose: $('purpose').textContent}));
+""")
+        self.assertEqual(output['purpose'], 'First words')
+
+    def test_peek_empty_screen_states_reason(self):
+        output = run_page_js(self.RAIL_FIXTURE + """
+(async () => {
+  const away = {id: 'a', title: 'Away', state: 'idle', kind: 'claude', host: 'laptop2', cluster: 'Box', terminal: 't1', hosting: 'orca'};
+  const unbound = {id: 'u', title: 'Unbound', state: 'idle', kind: 'claude', host: 'local', cluster: 'Box'};
+  const result = {
+    none: await reasonOf(unbound, async () => { throw new Error('should not be called'); }),
+    down: await reasonOf(away, async () => { throw new Error('ssh: connect timed out'); }),
+    empty: await reasonOf(away, async () => ({ok: true, output: ''})),
+    shown: await reasonOf(away, async () => ({ok: true, output: 'hello screen'}))};
+  result.screen = $('screen').textContent;
+  console.log(JSON.stringify(result));
+})();
+""")
+        self.assertEqual(output['none']['text'], 'No terminal is bound to this session')
+        self.assertEqual(output['down']['text'], 'laptop2 is unreachable')
+        self.assertEqual(output['empty']['text'], 'The terminal returned nothing')
+        for name in ('none', 'down', 'empty'):
+            self.assertTrue(output[name]['screenHidden'], name)
+        self.assertEqual(output['shown']['text'], '')
+        self.assertFalse(output['shown']['screenHidden'])
+        self.assertEqual(output['screen'], 'hello screen')
 
     def test_escape_in_dialog_leaves_search_alone(self):
         output = run_page_js(self.SEARCH_FIXTURE + """
