@@ -253,10 +253,12 @@ class Collector:
         with self._slow_lock:
             slow = self._slow
 
-        def cluster_record(name):
-            return clusters.setdefault(name, dict(name=name,
+        def cluster_record(name, full_name=None):
+            # Keep the legacy grouping key separate from the untruncated display source.
+            full_name = name if full_name is None else full_name
+            return clusters.setdefault(name, dict(name=name, full_name=full_name,
                                                   short_name=(name if name in initiative_names
-                                                              else short_name(name)),
+                                                              else short_name(full_name)),
                                                   run=None, matrix_host=None,
                                                   waiting=0, stalled=0, notes=[], fallbacks=[]))
 
@@ -299,7 +301,7 @@ class Collector:
                 name = cluster_for('', run_objective=run['objective'], title='', purpose=None,
                                    worktree='', branch='', config=config)
                 reason = rejected.get(run_id + '.json', 'projection v1, Chief must re-render')
-                record = cluster_record(name)
+                record = cluster_record(name, full_name=run['objective'])
                 record['notes'].append(reason)
                 record['fallbacks'].append(dict(run=run_id, now=run['objective'], note=reason))
                 if record['run'] not in matrices:

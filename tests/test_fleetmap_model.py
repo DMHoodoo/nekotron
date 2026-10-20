@@ -128,10 +128,34 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertGreaterEqual(len(snapshot['clusters']), 3)
         for record in snapshot['clusters'].values():
             self.assertIsInstance(record['short_name'], str)
+            self.assertEqual(record['full_name'], record['name'])
         self.assertEqual(snapshot['clusters'][title]['short_name'], title)
         self.assertEqual(snapshot['clusters'][objective]['short_name'],
                          'Review PR 6869 under Engineering…')
         self.assertEqual(snapshot['clusters'][objective]['name'], objective)
+
+    def test_legacy_cluster_keeps_full_objective_and_identity(self):
+        cases = [
+            ('Review: finish the pending delivery with all evidence',
+             'Review', 'Review: finish the pending delivery…'),
+            ('Review; finish the pending delivery with all evidence',
+             'Review', 'Review; finish the pending delivery…'),
+            ('<pasted_content id="4e35">\n'
+             'Continue a review of c5a5627d657b67bb95d28fdf6d794f7d4dff9131 now',
+             '<pasted_content id="4e35">\nContinue a review of c5a5627d657b',
+             'Continue a review of now'),
+        ]
+        for objective, identity, summary in cases:
+            with self.subTest(objective=objective):
+                self.orca.put('orchestration run-list', 'runs', [{
+                    'id': 'legacy', 'objective': objective,
+                    'coordinator_handle': 'term_a'}])
+                snapshot = self.collector().snapshot()
+                self.assertEqual(self.node(snapshot)['cluster'], identity)
+                record = snapshot['clusters'][identity]
+                self.assertEqual(record['name'], identity)
+                self.assertEqual(record['full_name'], objective)
+                self.assertEqual(record['short_name'], summary)
 
     def test_local_worktree_run_status_reaches_run_and_cluster_and_refreshes(self):
         root = self.base / 'checkout'

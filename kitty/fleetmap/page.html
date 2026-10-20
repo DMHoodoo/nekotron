@@ -771,7 +771,7 @@ function renderCluster(cluster) {
     selectedContext = {cluster: cluster.name, run: run?.run}; selectedId = null;
     render();
   }, 'cluster-toggle');
-  toggle.setAttribute('title', info.name || cluster.name);
+  toggle.setAttribute('title', info.full_name || info.name || cluster.name);
   toggle.setAttribute('aria-expanded', String(open));
   heading.append(toggle, button('Send to all', () => openBroadcast(cluster.name)));
   if (run) heading.append(button('Open run plan', () => runAction(async () => {

@@ -83,6 +83,7 @@ class FleetMapPage(unittest.TestCase):
     def test_cluster_heading_uses_short_name_with_full_title(self):
         output = self.run_cluster_js("""
 info.name = cluster.name;
+info.full_name = 'Review run: finish the pending delivery with all evidence';
 info.short_name = 'Short review';
 renderCluster(cluster);
 let toggle = byClass(cluster.panel, 'cluster-toggle')[0];
@@ -92,8 +93,10 @@ toggle = byClass(cluster.panel, 'cluster-toggle')[0];
 console.log(JSON.stringify([collapsed, {text: text(toggle), title: toggle.attributes.title}]));
 """)
         self.assertEqual(output, [
-            {'text': '▸ Short review', 'title': 'Review run'},
-            {'text': '▾ Short review', 'title': 'Review run'}])
+            {'text': '▸ Short review',
+             'title': 'Review run: finish the pending delivery with all evidence'},
+            {'text': '▾ Short review',
+             'title': 'Review run: finish the pending delivery with all evidence'}])
 
     def test_node_label_wraps_to_two_lines_at_a_space(self):
         output = run_js(DOM + page_functions('paintNode') + """
