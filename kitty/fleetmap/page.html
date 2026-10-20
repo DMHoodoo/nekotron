@@ -295,10 +295,19 @@ function panelContentHeight(panel, width) {
   const columns = Math.max(8, Math.floor((width - 20) / 6.6));
   let total = 0;
   for (const child of panel.children || []) {
-    if (String(child.className || '').includes('cluster-heading')) { total += 32; continue; }
+    const className = String(child.className || '');
+    if (className.includes('cluster-heading')) {
+      // The 14px bold name wraps onto its own lines when it cannot sit beside the 26px toggle.
+      const name = nodeText((child.children || [])[1] || ''), available = width - 20;
+      const nameWidth = name.length * 8.5;
+      total += nameWidth + 10 + 26 <= available ? 32 : 32 + Math.ceil(nameWidth / available) * 20;
+      continue;
+    }
+    // A slice row is one ellipsized line, a 6px margin and the 26px segment bar with 5px margins.
+    if (className.includes('slice-row')) { total += 18 + 6 + 36; continue; }
     total += Math.max(1, Math.ceil(nodeText(child).length / columns)) * 18 + 12;
   }
-  return total ? total + 20 : 0;
+  return total ? total + 32 : 0;
 }
 function layoutFleet(hosts) {
   const ordered = [...snapshot.nodes].sort((a, b) => a.id.localeCompare(b.id));
@@ -310,7 +319,7 @@ function layoutFleet(hosts) {
   const signature = JSON.stringify([width, hosts.map(host => host.name), [...expanded],
     ordered.map(node => [node.id, clusterKey(node), node.kind, node.parent]),
     Object.values(snapshot.runs || {}).map(run => [run.run, run.rows.map(row => [row.id, row.live])]),
-    Object.values(snapshot.clusters || {}).map(info => [info.name, info.run, info.matrix_host, info.fallbacks, info.waiting, info.stalled]),
+    Object.values(snapshot.clusters || {}).map(info => [info.name, info.run, info.matrix_host, info.fallbacks, info.waiting, info.stalled, info.short_name]),
     Object.values(snapshot.runs || {}).map(run => run.now)]);
   if (signature === layoutSignature && !repack) return;
   layoutSignature = signature;
@@ -355,10 +364,12 @@ function layoutFleet(hosts) {
       const saved = cluster.geometry;
       const baseWidth = saved?.baseWidth ?? Math.min(available, Math.max(340, Math.ceil(Math.sqrt(items.length)) * CELL + 20));
       const clusterWidth = saved?.width ?? (open ? available : baseWidth);
-      if (items.length || run) renderCluster(cluster);
+      const info = clusterInfo(cluster);
+      if (items.length || (info.run && info.matrix_host === host.name)) renderCluster(cluster);
       const contentHeight = open ? 0 : panelContentHeight(cluster.panel, clusterWidth);
-      const headerHeight = Math.max(saved?.headerHeight ?? (125 + (run?.rows.length || 0) * 60), contentHeight);
-      if (saved) { x = saved.left; y = saved.top; }
+      const baseHeader = saved?.baseHeader ?? (125 + (run?.rows.length || 0) * 60);
+      const headerHeight = Math.max(baseHeader, contentHeight);
+      if (saved) { x = saved.left; y = saved.baseTop; }
       else if (!repack) {
         x = 0;
         y = Math.max(82, ...[...clusters.values()].filter(c => c.host === host.name && c.geometry)
@@ -412,10 +423,11 @@ function layoutFleet(hosts) {
       }
       const bodyHeight = open ? (run ? 75 + run.rows.reduce((sum, row) => sum + Math.max(150, Math.ceil(row.live.length / 2) * 76 + 20), 0) : 85 + items.length * 78)
         : Math.max(50, ...items.map(node => positions.get(node.id).y + 42));
-      const clusterHeight = Math.max(saved?.height || 0, headerHeight + bodyHeight + 20);
-      cluster.geometry = {left: x, top: y, width: clusterWidth, baseWidth, headerHeight, height: clusterHeight};
-      Object.assign(cluster, {x: regionX + 28 + x, y: y + headerHeight, headerHeight});
-      cluster.group.setAttribute('transform', `translate(${regionX + 18 + x} ${y})`);
+      const floorHeight = Math.max(saved?.floorHeight || 0, baseHeader + bodyHeight + 20);
+      const clusterHeight = Math.max(floorHeight, headerHeight + bodyHeight + 20);
+      cluster.geometry = {left: x, top: y, baseTop: y, width: clusterWidth, baseWidth, baseHeader,
+        headerHeight, floorHeight, height: clusterHeight};
+      Object.assign(cluster, {x: regionX + 28 + x, headerHeight});
       cluster.background.setAttribute('width', clusterWidth);
       cluster.background.setAttribute('height', clusterHeight);
       cluster.content.setAttribute('width', clusterWidth);
@@ -423,6 +435,21 @@ function layoutFleet(hosts) {
       cluster.grid.setAttribute('transform', `translate(10 ${headerHeight})`);
       cluster.grid.style.display = open ? 'none' : '';
       x += clusterWidth + GAP; rowHeight = Math.max(rowHeight, clusterHeight);
+    }
+    // A cluster whose content grew pushes the clusters below it down; shrinking restores them.
+    const placed = [];
+    const stacked = groups.map(([id]) => clusters.get(id))
+      .sort((a, b) => a.geometry.baseTop - b.geometry.baseTop || a.geometry.left - b.geometry.left);
+    for (const cluster of stacked) {
+      const box = cluster.geometry;
+      let top = box.baseTop;
+      for (const above of placed)
+        if (above.baseTop < box.baseTop && box.left < above.left + above.width && above.left < box.left + box.width)
+          top = Math.max(top, above.top + above.height + GAP);
+      box.top = top;
+      cluster.y = top + box.headerHeight;
+      cluster.group.setAttribute('transform', `translate(${regionX + 18 + box.left} ${top})`);
+      placed.push(box);
     }
     const bottom = Math.max(82, ...[...clusters.values()].filter(c => c.host === host.name && c.geometry)
       .map(c => c.geometry.top + c.geometry.height));

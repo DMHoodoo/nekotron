@@ -130,16 +130,27 @@ class FleetMapPage(unittest.TestCase):
 fallback.now = 'x'.repeat(200);
 render();
 const panel = cluster().panel;
-console.log(JSON.stringify({text: text(panel), contentHeight: Number(cluster().content.attributes.height),
-  headerHeight: cluster().headerHeight, gridTop: gridTop()}));
+const now = descendants(panel).find(el => text(el).startsWith('Now:') && el.tagName === 'p');
+const chain = [];
+// Every element between the panel and the Now line must allow wrapping.
+const walk = (el, trail) => el === now ? chain.push(trail) :
+  (el.children || []).forEach(child => walk(child, [...trail, el]));
+walk(panel, []);
+console.log(JSON.stringify({text: text(panel), found: Boolean(now), chains: chain.length,
+  noWrap: chain.flat().concat([now]).some(el => /nowrap|pre$/.test(el.style.whiteSpace || '')),
+  contentHeight: Number(cluster().content.attributes.height),
+  workerY: endpoint('worker').y, top: cluster().y - cluster().headerHeight}));
 """)
         self.assertIn('x' * 200, output['text'])
+        self.assertTrue(output['found'])
+        self.assertEqual(output['chains'], 1)
+        self.assertFalse(output['noWrap'])
         rule = re.search(r'\.cluster-content\s*\{[^}]*\}',
                          (ROOT / 'kitty/fleetmap/page.html').read_text()).group()
         self.assertRegex(rule, r'overflow-wrap:\s*anywhere')
-        # 200 unbroken characters at the 340px cluster width take five lines.
-        self.assertGreaterEqual(output['contentHeight'], 32 + 30 + 5 * 18 + 30 + 20)
-        self.assertGreater(output['gridTop'], output['contentHeight'] - 28)
+        # Heading 32 + run 30 + five-line Now 102 + projection 30 + 20 padding.
+        self.assertGreaterEqual(output['contentHeight'], 214)
+        self.assertGreater(output['workerY'], output['top'] + 214)
 
     def test_node_grid_starts_below_cluster_content(self):
         output = run_page_js(FALLBACK_FIXTURE + """
@@ -168,6 +179,100 @@ console.log(JSON.stringify({empty, three, again, longer, stable}));
         self.assertGreater(output['longer']['y'], output['three']['y'])
         self.assertGreaterEqual(output['longer']['height'], output['longer']['header'])
 
+    def test_run_backed_grid_starts_below_slice_bars_under_long_now(self):
+        output = run_page_js("""
+const row = id => ({id, name: 'Slice ' + id, stage: 'implementing',
+  stepper: [1, 1, 1, 1, 0, 0, 0], live: [], cells: {
+    goal: {verdict: 'pass'}, design: {verdict: 'pass'}, plan: {verdict: 'pass'},
+    implementing: {verified_units: 2, total_units: 6, segments: [
+      {id: id + '-S', size: 1, state: 'planned', node: null},
+      {id: id + '-L', size: 3, state: 'running', node: null}]},
+    review: {chips: []}, delivery: {verdict: 'pending'}, accepted: {state: 'pending'}}});
+snapshot = {hosts: [{name: 'local'}], edges: [], runs: {run_test: {run: 'run_test',
+  title: 'Review run', now: 'n'.repeat(290), rows: [row('1'), row('2'), row('3')],
+  proofs: [], chief_node: null}},
+  clusters: {'Review run': {name: 'Review run', run: 'run_test', matrix_host: 'local',
+    waiting: 0, stalled: 0}},
+  nodes: [{id: 'worker', title: 'Worker', state: 'idle', kind: 'claude',
+    host: 'local', cluster: 'Review run'}]};
+$('map-scroll').clientWidth = 1200;
+render();
+const cluster = [...clusters.values()][0];
+console.log(JSON.stringify({y: endpoint('worker').y, top: cluster.y - cluster.headerHeight,
+  slices: byClass(cluster.panel, 'slice-row').length}));
+""")
+        self.assertEqual(output['slices'], 3)
+        # Heading 32 + six-line Now 120 + three slice rows 180 + 20 padding.
+        self.assertGreater(output['y'], output['top'] + 352)
+
+    def test_growing_cluster_pushes_lower_cluster_and_shrinks_back(self):
+        output = run_page_js("""
+const make = (id, cluster, now) => ({node: {id, title: id, state: 'idle', kind: 'claude',
+  host: 'local', cluster}, info: {name: cluster, run: 'run_' + id, matrix_host: 'local',
+  fallbacks: [{run: 'run_' + id, now, note: ''}]}});
+const state = {Upper: make('up', 'Upper', 'short'), Lower: make('low', 'Lower', 'short'),
+  Other: make('oth', 'Other', 'short')};
+const publish = names => {
+  snapshot = {hosts: [{name: 'local'}, {name: 'remote'}], runs: {}, edges: [],
+    clusters: Object.fromEntries(names.map(n => [n, state[n].info])),
+    nodes: names.map(n => state[n].node)};
+  state.Other.node.host = 'remote'; state.Other.info.matrix_host = 'remote';
+  render();
+};
+$('map-scroll').clientWidth = 1200;
+const box = name => { const c = [...clusters.values()].find(c => c.name === name);
+  return {top: c.geometry.top, bottom: c.geometry.top + c.geometry.height, y: c.y}; };
+publish(['Upper', 'Other']);
+publish(['Upper', 'Other', 'Lower']);
+const first = {upper: box('Upper'), lower: box('Lower'), other: box('Other')};
+state.Upper.info.fallbacks[0].now = 'word '.repeat(60);
+publish(['Upper', 'Other', 'Lower']);
+const grown = {upper: box('Upper'), lower: box('Lower'), other: box('Other')};
+state.Upper.info.fallbacks[0].now = 'short';
+publish(['Upper', 'Other', 'Lower']);
+console.log(JSON.stringify({first, grown, shrunk: {upper: box('Upper'), lower: box('Lower'),
+  other: box('Other')}}));
+""")
+        self.assertGreater(output['grown']['upper']['bottom'], output['first']['upper']['bottom'])
+        self.assertGreaterEqual(output['grown']['lower']['top'], output['grown']['upper']['bottom'])
+        self.assertGreater(output['first']['lower']['top'], output['first']['upper']['top'])
+        self.assertEqual(output['shrunk'], output['first'])
+        self.assertEqual(output['grown']['other'], output['first']['other'])
+
+    def test_empty_fallback_cluster_panel_is_not_clipped(self):
+        output = run_page_js(FALLBACK_FIXTURE + """
+snapshot.nodes = [];
+// Two wrapped lines at the 340px default width.
+fallback.now = 'Audit the integration layer. '.repeat(3);
+render();
+const first = {height: Number(cluster().content.attributes.height)};
+fallback.now += 'And then the delivery pipeline. '.repeat(2);
+render();
+console.log(JSON.stringify({first, height: Number(cluster().content.attributes.height),
+  header: cluster().headerHeight, grid: cluster().grid.attributes.transform,
+  now: text(cluster().panel).length}));
+""")
+        # Heading 32 + run 30 + Now (two lines at 48 columns) 48 + projection 30 + margin.
+        self.assertGreaterEqual(output['first']['height'], 32 + 30 + 2 * 18 + 12 + 30)
+        self.assertGreater(output['height'], output['first']['height'])
+        self.assertEqual(output['height'], output['header'])
+
+    def test_wrapping_cluster_name_adds_heading_lines(self):
+        output = run_page_js(FALLBACK_FIXTURE + """
+snapshot.clusters.Fallback.fallbacks = [];
+render();
+const plain = Number(cluster().content.attributes.height);
+snapshot.clusters.Fallback.short_name = 'Glow commissions integrity audit 2026-10-08 backlog';
+snapshot.clusters.Fallback.fallbacks = [{run: 'r', now: 'n', note: ''}];
+render();
+const long = Number(cluster().content.attributes.height);
+snapshot.clusters.Fallback.short_name = 'Audit';
+render();
+console.log(JSON.stringify({plain, long, short: Number(cluster().content.attributes.height)}));
+""")
+        # The name (51 characters, 433px) takes two lines of the 320px content width.
+        self.assertGreaterEqual(output['long'] - output['short'], 2 * 20)
+
     def test_removed_hovered_node_clears_hovered_id(self):
         output = run_page_js(EDGE_FIXTURE + """
 nodeViews.get('b').group.listeners.mouseenter();
@@ -187,6 +292,7 @@ selectNode('a');
 console.log(JSON.stringify({selectedId, edges: drawn()}));
 """)
         self.assertEqual(output, {'selectedId': 'a', 'edges': []})
+
     def test_legend_closed_by_default_and_toggle_persists(self):
         page = (ROOT / 'kitty/fleetmap/page.html').read_text()
         self.assertRegex(page, r'<footer\b[^>]*\bhidden\b')
