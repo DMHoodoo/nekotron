@@ -247,6 +247,15 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertEqual((first['repository'], other['repository']), ('glow-core', 'glow-core'))
         self.assertEqual((first['branch'], other['branch']), ('main', 'feature'))
 
+    def test_local_folder_outside_any_repository_is_unsorted_but_unprimed_uses_path(self):
+        with patch('fleetmap.model._git_metadata', return_value=('', '')):
+            node = self.node(self.collector().snapshot())
+        self.assertEqual(node['cluster'], 'Unsorted')
+        self.assertEqual(node['repository'], '')
+        fresh = Collector(self.orca, config_path=self.config, sessions=lambda: self.local,
+                          tmux_sessions=lambda: {}, providers=[DirectoryProvider(self.base / 'progress')])
+        self.assertEqual(self.node(fresh.snapshot())['repository'], 'project')
+
     def test_repository_lookup_runs_in_slow_thread_and_is_cached(self):
         collector = Collector(self.orca, config_path=self.config, sessions=lambda: [],
                               tmux_sessions=lambda: {}, providers=[DirectoryProvider(self.base / 'progress')])
@@ -663,7 +672,7 @@ class SnapshotAssembler(unittest.TestCase):
         node = self.node(collector.snapshot())
         self.assertEqual(node['you_at'], NOW)
         self.assertFalse(node['never_addressed'])
-        self.assertEqual(node['cluster'], 'project')
+        self.assertEqual(node['cluster'], 'Unsorted')
 
     def test_dispatched_worker_run_objective_applies_before_human_follow_up(self):
         self.orca.put('orchestration worker-list', 'workers',
@@ -953,7 +962,7 @@ class SnapshotAssembler(unittest.TestCase):
 
     def test_config_is_reloaded_and_new_transcript_path_resets_facts(self):
         collector = self.collector()
-        self.assertEqual(self.node(collector.snapshot())['cluster'], 'project')
+        self.assertEqual(self.node(collector.snapshot())['cluster'], 'Unsorted')
         self.config.write_text(json.dumps({'assign': {'s1': 'Pinned'}}))
         self.assertEqual(self.node(collector.snapshot())['cluster'], 'Pinned')
         replacement = self.base / 'replacement.jsonl'

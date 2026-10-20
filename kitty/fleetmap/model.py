@@ -207,9 +207,15 @@ class Collector:
 
     @staticmethod
     def _repository(slow, host, worktree):
-        """Cached git answer for a local checkout; the path decides when git cannot."""
-        cached = slow['repository'].get(worktree, (0, None))[1] if host == 'local' else None
-        return cached or repository_from_path(worktree)
+        """Cached git answer for a local checkout; the path decides only when git could not run."""
+        if host == 'local':
+            cached = slow['repository'].get(worktree, (0, None))[1]
+            if cached:
+                return cached
+            answer = slow['git'].get(worktree)
+            if answer is not None and not answer[1][0]:
+                return None
+        return repository_from_path(worktree)
 
     def refresh_sources(self):
         """Refresh host and checkout caches on the slow thread."""
