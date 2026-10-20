@@ -1,12 +1,7 @@
 from __future__ import annotations
 
-"""Read the Chief's schema v2 run projections without inferring plan progress."""
+"""Consume Engineering OS schema v2 records without inferring plan progress."""
 from dataclasses import dataclass, field
-import json
-import os
-from pathlib import Path
-
-PROGRESS_DIR = Path.home() / '.glow' / 'orca-progress'
 REQUIRED_FIELDS = (
     'schemaVersion', 'run', 'title', 'updatedAt', 'runPlan', 'pr', 'acceptance',
     'chiefTerminal', 'now', 'statusCard', 'decisions', 'gates', 'mergeGate',
@@ -46,11 +41,11 @@ class Projection:
 
 
 def validate(data: dict) -> list[str]:
-    """Return every Reference H violation; safe for malformed JSON value shapes.
+    """Return every run-status schema violation; safe for malformed JSON value shapes.
 
-    Keep this function self-contained: the lab renderer copies its source and
-    checks it byte for byte. Schema vocabulary is repeated here intentionally so
-    that the copied validator needs no module globals or companion helpers.
+    Keep this function self-contained: a consumer may vendor its source byte for
+    byte. Schema vocabulary is repeated here intentionally so that a vendored
+    validator needs no module globals or companion helpers.
     """
     from datetime import datetime
     from posixpath import isabs
@@ -188,38 +183,14 @@ def validate(data: dict) -> list[str]:
     return errors
 
 
-def load_projections(directory=PROGRESS_DIR) -> tuple[list[Projection], dict[str, str]]:
-    """Read each JSON independently, returning valid runs and file diagnostics.
-
-    Files predating schemaVersion are v1. A missing or inaccessible projection
-    directory is empty; per-file read failures never hide other valid runs.
-    """
-    good = []
-    bad = {}
-    try:
-        paths = sorted(Path(directory).glob('*.json'))
-    except OSError:
-        return good, bad
-    for path in paths:
-        try:
-            with path.open(encoding='utf-8') as source:
-                data = json.load(source)
-                # Use the same open file for content and metadata if a Chief
-                # atomically replaces the path during this read.
-                mtime = os.fstat(source.fileno()).st_mtime
-        except (OSError, ValueError, RecursionError):
-            bad[path.name] = 'unreadable'
-            continue
-        if isinstance(data, dict):
-            version = data.get('schemaVersion', 1)
-            if type(version) is not int or version != 2:
-                bad[path.name] = f'schemaVersion {version}, Chief must re-render'
-                continue
-        violations = validate(data)
-        if violations:
-            bad[path.name] = violations[0]
-            continue
-        fields = {name: data[name] for name in REQUIRED_FIELDS}
-        good.append(Projection(**fields, caps=data.get('caps', {}),
-                               path=str(path), mtime=mtime))
-    return good, bad
+def parse_projection(data, mtime) -> Projection:
+    """Validate a provider's decoded record; source paths are assigned by providers."""
+    if isinstance(data, dict):
+        version = data.get('schemaVersion', 1)
+        if type(version) is not int or version != 2:
+            raise ValueError(f'schemaVersion {version}, Chief must re-render')
+    violations = validate(data)
+    if violations:
+        raise ValueError(violations[0])
+    fields = {name: data[name] for name in REQUIRED_FIELDS}
+    return Projection(**fields, caps=data.get('caps', {}), path='', mtime=mtime)
