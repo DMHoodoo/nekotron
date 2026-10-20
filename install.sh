@@ -14,6 +14,10 @@ for f in "$R"/hooks/*; do
     [ "$(basename "$f")" = codex-notify.sh ] && continue
     ln -sf "$f" ~/.claude/hooks/"$(basename "$f")"
 done
+mkdir -p ~/.claude/skills
+for f in "$R"/claude/skills/*; do
+    ln -sfn "$f" ~/.claude/skills/"$(basename "$f")"
+done
 mkdir -p ~/.codex/hooks
 # Share Hassan's Markdown skills with Codex without replacing user instructions.
 if [ ! -e ~/.codex/AGENTS.md ] && [ ! -L ~/.codex/AGENTS.md ]; then
