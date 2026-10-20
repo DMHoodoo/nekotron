@@ -1639,7 +1639,7 @@ console.log(JSON.stringify({narrow, closed, wide: rail()}));
     def test_rail_open_gives_map_a_narrower_column_by_css(self):
         page = (ROOT / 'kitty/fleetmap/page.html').read_text()
         self.assertRegex(page, r'main \{[^}]*grid-template-columns: minmax\(0, 1fr\);')
-        self.assertRegex(page, r'main\.rail-open \{[^}]*grid-template-columns: minmax\(0, 1fr\) 320px;')
+        self.assertRegex(page, r'main\.rail-open \{[^}]*grid-template-columns: minmax\(0, 1fr\) calc\(320px \* var\(--u\)\);')
         self.assertRegex(page, r'main\.rail-open\.rail-overlay \{[^}]*grid-template-columns: minmax\(0, 1fr\);')
 
     def test_selected_node_stays_in_view_after_rail_toggle(self):
@@ -1812,6 +1812,26 @@ console.log(JSON.stringify(panelContentHeight(panel, 600)));
         normal, big = probe(1512), probe(2560)
         self.assertGreater(normal, 0)
         self.assertAlmostEqual(big, normal * 14 / 12, delta=1)
+
+    def test_inline_svg_text_and_rail_scale_at_large_screens(self):
+        page = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        self.assertIn('calc(320px * var(--u))', re.search(r'main\.rail-open \{([^}]*)\}', page).group(1))
+        self.assertIn('var(--u)', re.search(r'\.region-metrics \{([^}]*)\}', page).group(1))
+        def probe(width):
+            return run_page_js(f"""
+var window = {{innerWidth: {width}}};
+""" + self.BOX_FIXTURE + """
+snapshot = {hosts: [{name: 'local', reachable: false}], clusters: {}, runs: {}, edges: [], nodes: makeNodes('A', 1)};
+render();
+const region = [...regions.values()][0];
+console.log(JSON.stringify({badge: region.badge.attributes.transform, metrics: region.metrics.attributes.class,
+  fontAttr: region.metrics.attributes['font-size'] ?? null}));
+""")
+        big, normal = probe(2560), probe(1512)
+        self.assertIn('scale(1)', normal['badge'])
+        self.assertIn('scale(1.1666', big['badge'])
+        self.assertEqual(big['metrics'], 'region-metrics')
+        self.assertIsNone(big['fontAttr'])
 
     def test_subagent_dot_never_covers_a_label(self):
         output = run_page_js(self.BOX_FIXTURE + """

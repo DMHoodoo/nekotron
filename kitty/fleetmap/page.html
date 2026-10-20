@@ -17,7 +17,7 @@ h1 { font-size: calc(18px * var(--u)); margin: 0; font-weight: 650; }
 #status button { background: none; border: 0; padding: 0 2px; color: inherit; font: inherit; cursor: pointer; text-decoration: underline dotted; }
 #status button[aria-pressed=true] { color: #fff; text-decoration: underline; }
 main { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; position: relative; }
-main.rail-open { grid-template-columns: minmax(0, 1fr) 320px; }
+main.rail-open { grid-template-columns: minmax(0, 1fr) calc(320px * var(--u)); }
 main.rail-open.rail-overlay { grid-template-columns: minmax(0, 1fr); }
 #rail-backdrop { position: fixed; inset: 0; background: #05070b99; z-index: 9; }
 #rail-close { position: sticky; top: 8px; float: right; margin: -26px -10px 0 0; z-index: 1; padding: 2px 9px; line-height: 1.2; }
@@ -76,6 +76,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: calc(12px * var(--u)
 .fold-chip { cursor: pointer; }
 .fold-chip rect { fill: #232838; stroke: #4a5272; }
 .fold-chip text { fill: #bfc6d9; font-size: calc(11px * var(--u)); }
+.region-metrics { font-size: calc(12px * var(--u)); }
 .retired-chip { cursor: pointer; }
 .retired-chip rect { fill: #232838; stroke: #4a5272; stroke-dasharray: 3 2; }
 .retired-chip text { fill: #bfc6d9; font-size: calc(11px * var(--u)); }
@@ -339,7 +340,7 @@ function ensureRegion(host) {
   const group = svg('g');
   const background = svg('rect', {y: 10, rx: 12, fill: '#141824'});
   const label = svg('text', {y: 38, class: 'region-label'});
-  const metrics = svg('text', {y: 62, fill: '#a0a8be', 'font-size': 12});
+  const metrics = svg('text', {y: 62, fill: '#a0a8be', class: 'region-metrics'});
   const badge = svg('g');
   badge.append(svg('rect', {y: 22, width: 99, height: 22, rx: 5, fill: '#702e38'}), svg('text', {x: 10, y: 37, fill: '#ffd2d7', 'font-size': 11}, 'unreachable'));
   group.append(background, label, metrics, badge);
@@ -470,7 +471,7 @@ function layoutFleet(hosts) {
     region.background.setAttribute('width', regionWidth - 16);
     region.label.setAttribute('x', regionX + 24);
     region.metrics.setAttribute('x', regionX + 24);
-    region.badge.setAttribute('transform', `translate(${regionX + regionWidth - 124} 0)`);
+    region.badge.setAttribute('transform', `translate(${regionX + regionWidth - 124 * scale} 0) scale(${scale})`);
     const groups = [...members.entries()].filter(([id]) => JSON.parse(id)[0] === host.name)
       .sort(([a], [b]) => a.localeCompare(b));
     let x = 0, y = 82;
