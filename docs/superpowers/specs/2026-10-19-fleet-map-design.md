@@ -145,7 +145,7 @@ PR with "6962 ready, green". Five sessions you never prompted sit at Asked with 
     - **Decided by:** Claude, 2026-10-19, from `engineering-os-lab/process.md` and `roles/chief.md`; shown to Hassan on the "run-card" screen.
 
 13. **The run plan stays the single record; the map reads a projection of it.**
-    - **Decision:** the run plan carries the progress data itself, as exactly one fenced `json progress` block anywhere in the file; the Status card section is the recommended place, and a plan with zero or two such blocks fails the render. The lab tool `render-progress.py` (Decision 21) extracts that block, validates it against Reference H, stamps the plan's commit, and writes `~/.glow/orca-progress/<run>.json` atomically. The map reads only `schemaVersion: 2` files; a file with any other version, or no file, shows the run's Orca objective and a rail note "projection v1, Chief must re-render". The map never translates older shapes and never parses run plans. Reference H is normative field for field.
+    - **Decision:** the run plan carries the progress data itself, as exactly one fenced `json run-status` block anywhere in the file; the Status card section is the recommended place, and a plan with zero or two such blocks fails the export. The lab tool `run-status.py` (Decision 21) extracts that block, validates the Engineering OS-owned schema summarized in Reference H, stamps the plan commit and worktree, and writes `run-status.json` beside the plan atomically. The map reads only integer `schemaVersion: 2` records through configured progress providers; an absent or rejected record leaves the Orca objective and a diagnostic. The map never translates older shapes and never parses run plans. The lab validator is normative field for field.
     - **Why:** the process forbids a status document beside the run plan, so the block lives inside it. Translating the existing v1 file would mean inventing a mapping for its fractional statuses, which Decision 12 rejects.
     - **Decided by:** Claude, 2026-10-19, after the builder check; the Handoff Project Chief session is sent Reference H once Hassan approves this addition.
 
@@ -180,10 +180,10 @@ PR with "6962 ready, green". Five sessions you never prompted sit at Asked with 
     - **Decision:** a cluster with a projection has an "Open run plan" control that opens `runPlan.worktree/runPlan.path` and opens it with nekotron's `bin/md-preview` in a kitty overlay, scrolled to "Resume here".
     - **Decided by:** Hassan, 2026-10-19 13:29 PDT.
 
-21. **The lab renders the projection.**
-    - **Decision:** `engineering-os-lab/tools/render-progress.py --run-plan <path> --out <file>` extracts the fenced `json progress` block, validates it against Reference H, fills `runPlan.commit` from `git log -1 --format=%h -- <path>`, and writes the file atomically; it exits 1 and names the field on any violation. `tools/README.md` documents it and `selftest.sh` covers it. `roles/chief.md` gains one sentence after "Keep live status in the run plan and the status card": "After every run plan update, run `render-progress.py` so the fleet map reflects the plan." Runs pinned before that commit keep their pin; the three live runs are asked once by Hassan to re-render.
-    - **Why:** every future Chief then participates without being asked, and the single record stays the run plan.
-    - **Decided by:** Claude, 2026-10-19, in reply to Hassan's question about integration across sessions; changes his process repo, so he can still veto it.
+21. **Engineering OS owns the run-status record; nekotron plugs into it.**
+    - **Decision:** `engineering-os-lab/tools/run-status.py --run-plan <path> [--out <file>]` extracts the fenced `json run-status` block, validates the Engineering OS-owned schema version 2, stamps `runPlan.commit` from the plan's last Git commit and `runPlan.worktree` from the checkout root, and atomically writes `run-status.json` beside the run plan by default. It exits 1 and names the field on a violation. The lab's validator is the schema authority; nekotron vendors it in `projection.py` and consumes records through its Engineering OS progress provider. The Engineering OS workflow names no consumer and requires no nekotron output path. The Chief refreshes the record after each run-plan update; older pinned runs must adopt the new exporter and fence.
+    - **Why:** the run plan stays the single record, Engineering OS owns its export, and each consumer chooses how to discover it.
+    - **Decided by:** Task 23 dependency inversion, 2026-10-20, superseding the original consumer-specific renderer integration.
 
 22. **A `fleet-map` skill for sessions.**
     - **Decision:** `nekotron/claude/skills/fleet-map/SKILL.md`, installed like the other nekotron Claude assets, tells a session how to read the map: find `~/.config/nekotron/fleet-map.server.json`, call `GET /api/state` with the key, and interpret nodes, edges, clusters and decisions. Read-only; actions stay with the human in the page.
@@ -212,7 +212,7 @@ mechanism named above.
 - E: `kitty/fleetmap/edges.py`.
 - F: `kitty/fleetmap/actions.py`.
 - G: `kitty/fleetmap/server.py` and `bin/fleet-map`.
-- H: `kitty/fleetmap/projection.py` and `tools/render-progress.py` in the `engineering-os-lab` repository, branch `fleet-map-progress`, commit `221b5c8` (Decision 21).
+- H: `kitty/fleetmap/providers/engineering_os.py` consumes the schema owned by `tools/run-status.py` in the `engineering-os-lab` repository, branch `fleet-map-progress`, commit `f752803`; `kitty/fleetmap/projection.py` vendors its validator (Decision 21).
 - I: `kitty/fleetmap/ladder.py`.
 - J: `kitty/fleetmap/clusters.py`.
 - Decision 7: `hooks/kitty-tab-status.sh`.
@@ -317,7 +317,22 @@ The close confirm names the host, the terminal handle or window, and that the tr
 
 ### H. Run projection
 
-The run plan holds one fenced block, opened with ```` ```json progress ````, in its Status card section. `render-progress.py` (Decision 21) writes it to `~/.glow/orca-progress/<runId>.json`, adding `runPlan.commit`. The file is written atomically (temp file, then rename). The map reads every `*.json` in that directory on each refresh, keeps only `schemaVersion: 2`, and matches `run` to Orca's run list. Every field below is required unless marked optional; lists may be empty.
+The run plan holds one fenced block, opened with ```` ```json run-status ````, in its Status card section. Engineering OS owns this schema and its authoritative `validate()` in `tools/run-status.py`. That exporter (Decision 21) writes `run-status.json` beside the plan by default, stamping `runPlan.commit` and `runPlan.worktree`; `--out <file>` optionally selects another output. Writes are atomic (temp file, then rename). Nekotron vendors the validator and reads this record through progress providers; it does not define the Engineering OS workflow or export destination. Every field below is required unless marked optional; lists may be empty.
+
+With no `providers` key in `~/.config/nekotron/fleet-map.json`, the map enables exactly the Engineering OS provider with no extra roots. On each snapshot refresh it searches the deduplicated local nodes' worktree roots plus configured extra roots, using only `run-status.json`, `*/run-status.json`, and `engineering-os/*/run-status.json`. It never traverses a symlink outside its root, searches deeper, or reads a remote host's worktree. Each file is read independently, with content and modification time from the same open file. Only integer `schemaVersion: 2` records passing the lab validator are accepted; rejections are keyed by file path in `rejected_projections`.
+
+Each configured provider key enables that provider. `~` expands in paths; an unknown provider produces a config note and leaves known providers enabled. An explicit empty object disables all providers. The optional directory provider supports existing `--out` users by reading every top-level `*.json` in its directory, retaining filename-based rejection labels:
+
+```json
+{
+  "providers": {
+    "engineering_os": {"roots": ["~/orca/workspaces/glow-core/lookdown"]},
+    "directory": {"path": "~/.glow/orca-progress"}
+  }
+}
+```
+
+The provider results and rejection diagnostics are merged. For duplicate `run` IDs, the newer `updatedAt` wins; the discarded source is marked `superseded` under `<provider-name>:<file-path>`. ISO timestamps are compared as instants; an unparseable timestamp ranks oldest, and ties retain the first source. The map matches selected records to Orca's existing run list. Provider construction uses the launch configuration; restart the map after changing provider settings. Local discovery roots and record contents refresh on every snapshot without new Orca or network calls on the fast thread.
 
 ```json
 {
