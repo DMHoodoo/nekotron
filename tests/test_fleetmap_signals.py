@@ -138,7 +138,7 @@ class FleetSignals(unittest.TestCase):
     def test_not_stale_when_head_unchanged(self):
         self.responses['gh']['stdout'] = json.dumps({'headRefOid': self.old})
         self.save()
-        self.assertEqual(self.checker.check(self.p, self.row), {'moved': False, 'commits': []})
+        self.assertEqual(self.checker.check(self.p, row=self.row), {'moved': False, 'commits': []})
         self.assertEqual(len(self.calls()), 1)
 
     def test_not_stale_without_head_sha(self):
@@ -179,34 +179,48 @@ class FleetSignals(unittest.TestCase):
         with patch('fleetmap.signals.time.monotonic', return_value=160):
             self.assertFalse(checker.check(self.p, self.row)['moved'])
 
-    def test_stalled_after_window_with_no_movement(self):
-        node = {'kind': 'claude', 'state': 'working', 'it_at': 100, 'last_output_at': 120, 'offset': 10}
-        previous = dict(node)
-        self.assertFalse(is_stalled(node, previous, 719))
-        self.assertTrue(is_stalled(node, previous, 720))
-        for key, value in (('it_at', 101), ('last_output_at', 121), ('offset', 11)):
-            self.assertFalse(is_stalled(dict(node, **{key: value}), previous, 1000))
-        self.assertEqual(previous, node)
+    def test_stall_when_activity_stamp_is_old_enough(self):
+        node = {'state': 'working', 'activity_changed_at': 100}
+        self.assertTrue(is_stalled(node, None, 700))
+        self.assertFalse(is_stalled(node, None, 700, window=601))
 
-    def test_stall_requires_working_supported_kind_and_previous_evidence(self):
-        node = {'kind': 'terminal', 'state': 'working', 'it_at': 100}
-        self.assertTrue(is_stalled(node, dict(node), 700))
-        self.assertFalse(is_stalled(node, None, 700))
-        self.assertFalse(is_stalled(dict(node, state='idle'), node, 700))
-        self.assertFalse(is_stalled(dict(node, kind='subagent'), node, 700))
-        self.assertFalse(is_stalled(dict(node, it_at=None), dict(node, it_at=None), 700))
-        self.assertFalse(is_stalled(node, dict(node), 700, window=601))
+    def test_no_stall_when_activity_stamp_is_recent(self):
+        # The collector advances the stamp when an offset advances, even when
+        # the assistant timestamp stays old and the next poll is unchanged.
+        node = {'kind': 'claude', 'state': 'working', 'it_at': 100, 'offset': 20,
+                'activity_changed_at': 650}
+        self.assertFalse(is_stalled(node, dict(node), 700))
+
+    def test_no_stall_without_activity_stamp(self):
+        node = {'kind': 'claude', 'state': 'working', 'it_at': 100}
+        self.assertFalse(is_stalled(node, dict(node), 700))
+        node['activity_changed_at'] = None
+        self.assertFalse(is_stalled(node, dict(node), 700))
+
+    def test_no_stall_unless_working(self):
+        for state in ('idle', 'attention', 'done'):
+            with self.subTest(state=state):
+                node = {'state': state, 'activity_changed_at': 100}
+                self.assertFalse(is_stalled(node, None, 700))
 
     def test_memory_probe_parses_vm_stat_and_swapusage(self):
-        self.assertEqual(self.probe.probe('local', None), {'free_pct': 25.0, 'swap_gb': 1.5})
+        self.assertEqual(self.probe.probe('local', None), {'free_pct': 43.75, 'swap_gb': 1.5})
         self.assertEqual([call[2] for call in self.calls()], [[], ['hw.memsize'], ['vm.swapusage']])
+
+    def test_memory_counts_inactive_and_speculative_pages_when_free_is_zero(self):
+        self.responses['vm_stat']['stdout'] = (
+            'Mach Virtual Memory Statistics: (page size of 16384 bytes)\n'
+            'Pages free: 0.\nPages inactive: 262144.\nPages speculative: 262144.\n')
+        self.save()
+        self.assertEqual(self.probe.probe('local', None),
+                         {'free_pct': 50.0, 'swap_gb': 1.5})
 
     def test_memory_supports_intel_pages_and_swap_units(self):
         self.responses['vm_stat']['stdout'] = self.vm_stat.replace('16384', '4096')
         for unit, value in (('G', '1.5'), ('M', '1536'), ('K', '1572864'), ('B', '1610612736')):
             self.responses['sysctl vm.swapusage']['stdout'] = 'used = ' + value + unit
             self.save()
-            self.assertEqual(self.probe.probe('local', None), {'free_pct': 6.25, 'swap_gb': 1.5})
+            self.assertEqual(self.probe.probe('local', None), {'free_pct': 10.9375, 'swap_gb': 1.5})
 
     def test_remote_probe_failure_returns_blanks(self):
         self.assertEqual(self.probe.probe('laptop2', 'worker@host'), {'free_pct': None, 'swap_gb': None})
@@ -216,7 +230,7 @@ class FleetSignals(unittest.TestCase):
     def test_remote_probe_uses_one_ssh_with_three_output_lines(self):
         self.responses['ssh'] = {'stdout': self.vm_stat.replace('\n', ' ') + '\n17179869184\nused = 1536.00M\n'}
         self.save()
-        self.assertEqual(self.probe.probe('laptop2', 'worker@host'), {'free_pct': 25.0, 'swap_gb': 1.5})
+        self.assertEqual(self.probe.probe('laptop2', 'worker@host'), {'free_pct': 43.75, 'swap_gb': 1.5})
         self.assertEqual(len(self.calls()), 1)
         command = self.calls()[0][2][-1]
         for part in ('vm_stat', 'sysctl hw.memsize', 'sysctl vm.swapusage'):
@@ -226,7 +240,7 @@ class FleetSignals(unittest.TestCase):
         self.responses['ssh'] = {'execute': True}
         self.save()
         self.assertEqual(self.probe.probe('laptop2', 'worker@host'),
-                         {'free_pct': 25.0, 'swap_gb': 1.5})
+                         {'free_pct': 43.75, 'swap_gb': 1.5})
         self.assertEqual([call[0] for call in self.calls()],
                          ['ssh', 'vm_stat', 'sysctl', 'sysctl'])
 
@@ -252,11 +266,11 @@ class FleetSignals(unittest.TestCase):
     def test_memory_cache_expires_and_does_not_cross_hosts_or_targets(self):
         probe = MemoryProbe(ssh=self.ssh)
         with patch('fleetmap.signals.time.monotonic', return_value=100):
-            self.assertEqual(probe.probe('local', None)['free_pct'], 25)
+            self.assertEqual(probe.probe('local', None)['free_pct'], 43.75)
         self.responses['vm_stat']['code'] = 1
         self.save()
         with patch('fleetmap.signals.time.monotonic', return_value=114):
-            self.assertEqual(probe.probe('local', None)['free_pct'], 25)
+            self.assertEqual(probe.probe('local', None)['free_pct'], 43.75)
             self.assertEqual(len(self.calls()), 3)
             self.assertIsNone(probe.probe('laptop2', 'host')['free_pct'])
             self.assertIsNone(probe.probe('laptop2', 'new-host')['free_pct'])

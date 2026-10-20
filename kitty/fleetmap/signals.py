@@ -2,12 +2,13 @@ from __future__ import annotations
 
 """Read-only overlays for the fleet collector.
 
-StaleChecker.check(p, gate, branch=None) accepts a projection gate (verdict,
+StaleChecker.check(p, row, branch=None) accepts a gate-shaped row (verdict,
 headSha); a branch selects the slice head, otherwise the run's PR is checked.
-is_stalled compares it_at, optional last_output_at (epoch seconds), and optional
-offset with the previous node. Both activity timestamps must be unchanged and
-the latest known timestamp at least window seconds old; missing evidence cannot
-establish a stall. Neither helper changes the projection or snapshot records.
+is_stalled uses the collector's activity_changed_at epoch-seconds stamp, updated
+whenever it_at, transcript offset, or last_output_at changes. A working node is
+stalled only when that stamp is present and at least window seconds old; the
+prev_node argument is retained for compatibility and ignored. Neither helper
+changes the projection or snapshot records.
 """
 from datetime import datetime, timezone
 import json
@@ -55,16 +56,16 @@ class StaleChecker:
         self.ttl = ttl
         self._cache: dict[tuple, tuple[float, dict | None]] = {}
 
-    def check(self, p: Projection, gate: dict, branch: str | None = None) -> dict | None:
+    def check(self, p: Projection, row: dict, branch: str | None = None) -> dict | None:
         """Compare passed evidence with a remote head, without fetching objects.
 
         Missing worktrees, missing targets, and failed head probes mean no check.
         A moved head remains reportable when its commit range is unavailable.
         """
-        old = gate.get('headSha')
+        old = row.get('headSha')
         worktree = p.runPlan.get('worktree')
         number, repo = p.pr.get('number'), p.pr.get('repo')
-        if (gate.get('verdict') != 'pass' or not _sha(old) or not worktree
+        if (row.get('verdict') != 'pass' or not _sha(old) or not worktree
                 or not Path(worktree).is_dir() or not (branch or (number and repo))):
             return None
         key = (p.run, worktree, branch, number, repo, old)
@@ -101,30 +102,30 @@ class StaleChecker:
 
 
 def is_stalled(node: dict, prev_node: dict | None, now: float, window: float = 600) -> bool:
-    """Require unchanged activity and enough elapsed time for a working node."""
-    if (not prev_node or node.get('state') != 'working'
-            or node.get('kind') not in ('claude', 'terminal')):
-        return False
-    if any(node.get(key) != prev_node.get(key) for key in ('it_at', 'last_output_at', 'offset')):
-        return False
-    timestamps = [node[key] for key in ('it_at', 'last_output_at')
-                  if isinstance(node.get(key), (int, float))]
-    return bool(timestamps) and now - max(timestamps) >= window
+    """Require a working node and an activity_changed_at stamp aged by window.
+
+    The collector updates the epoch-seconds stamp whenever it_at, transcript
+    offset, or last_output_at changes. No stamp means no stall evidence;
+    prev_node is ignored and retained only for signature compatibility.
+    """
+    stamp = node.get('activity_changed_at')
+    return node.get('state') == 'working' and stamp is not None and now - stamp >= window
 
 
 def _memory(vm_stat: str, memsize: str, swapusage: str) -> dict:
     page_size = re.search(r'page size of\s+(\d+)\s+bytes', vm_stat)
-    free_pages = re.search(r'Pages free:\s+(\d+)\.', vm_stat)
+    available_pages = [re.search(r'Pages ' + kind + r':\s+(\d+)\.', vm_stat)
+                       for kind in ('free', 'inactive', 'speculative')]
     total = re.fullmatch(r'(?:hw\.memsize:\s*)?(\d+)', memsize.strip())
     swap = re.search(r'\bused\s*=\s*(\d+(?:\.\d+)?)\s*([BKMGTP])\b', swapusage)
-    if not all((page_size, free_pages, total, swap)):
+    if not all((page_size, total, swap, *available_pages)):
         raise ValueError('Incomplete memory probe')
     total_bytes = int(total[1])
     page_bytes = int(page_size[1])
-    free_bytes = int(free_pages[1]) * page_bytes
+    free_bytes = sum(int(pages[1]) for pages in available_pages) * page_bytes
     if total_bytes <= 0 or page_bytes <= 0 or free_bytes > total_bytes:
         raise ValueError('Invalid memory probe')
-    # Report literal free pages; inactive and speculative pages remain separate.
+    # macOS can reclaim inactive and speculative pages for new work.
     return {'free_pct': free_bytes * 100.0 / total_bytes,
             'swap_gb': float(swap[1]) * 1024 ** ('BKMGTP'.index(swap[2]) - 3)}
 
@@ -136,8 +137,9 @@ class MemoryProbe:
         self._cache: dict[tuple, tuple[float, dict]] = {}
 
     def probe(self, host: str, ssh_target: str | None) -> dict:
-        """Read free page percentage and swap GiB, or None for both on failure.
+        """Read free + inactive + speculative page percentage and swap GiB.
 
+        Failures return None for both measurements.
         Local vm_stat and sysctl executables are injectable through PATH. Remote
         output is three lines: flattened vm_stat, hw.memsize, and vm.swapusage.
         """
