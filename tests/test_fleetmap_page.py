@@ -1140,6 +1140,13 @@ console.log(JSON.stringify({opacities: opacities(), status: statusText(),
         self.assertTrue(output['status'].endswith('· 1 match'), output['status'])
         self.assertEqual(output['fields'], [['n2'], ['n3']])
 
+    def test_search_matches_the_repository_name_as_well_as_the_worktree_name(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+const node = {title: 'T', repository: 'glow-core', repo: 'lookdown', branch: 'main'};
+console.log(JSON.stringify(['glow-core', 'GLOW', 'lookdown', 'nekotron'].map(q => nodeMatches(node, q))));
+""")
+        self.assertEqual(output, [True, True, True, False])
+
     def test_search_unfolds_matching_folded_node(self):
         output = run_page_js(self.FOLD_FIXTURE + """
 load([mk('a', 'idle', 30, {title: 'Fix PR 6897'}), mk('b', 'idle', 30), mk('c', 'idle', 30)]);
