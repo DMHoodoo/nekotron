@@ -61,7 +61,8 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospac
 .attention { filter: drop-shadow(0 0 6px #f0803c); }
 #decisions { padding: 8px 22px; display: flex; gap: 8px; overflow: auto; max-height: 130px; border-bottom: 1px solid #303548; }
 #decisions button { min-width: 260px; text-align: left; font-size: 12px; }
-.cluster-content { font-size: 12px; padding: 10px; overflow: auto; height: 100%; }
+.cluster-content { font-size: 12px; padding: 10px; overflow: auto; overflow-wrap: anywhere; height: 100%; box-sizing: border-box; }
+.cluster-content p { margin: 6px 0; }
 .cluster-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .cluster-heading button { font-size: 12px; padding: 3px 6px; }
 .cluster-heading .cluster-toggle, .cluster-name { font-weight: 650; font-size: 14px; }
@@ -286,6 +287,19 @@ function ensureCluster(node) {
 function clusterInfo(cluster) { return snapshot.clusters?.[cluster.name] || {}; }
 function clusterRun(cluster) { return snapshot.runs?.[clusterInfo(cluster).run]; }
 function clusterItems(cluster) { return snapshot.nodes.filter(node => clusterKey(node) === cluster.id); }
+function nodeText(node) {
+  return typeof node === 'string' ? node : node.textContent || (node.children || []).map(nodeText).join('');
+}
+// Estimated from the rendered lines so layout needs no browser measurement and stays deterministic.
+function panelContentHeight(panel, width) {
+  const columns = Math.max(8, Math.floor((width - 20) / 6.6));
+  let total = 0;
+  for (const child of panel.children || []) {
+    if (String(child.className || '').includes('cluster-heading')) { total += 32; continue; }
+    total += Math.max(1, Math.ceil(nodeText(child).length / columns)) * 18 + 12;
+  }
+  return total ? total + 20 : 0;
+}
 function layoutFleet(hosts) {
   const ordered = [...snapshot.nodes].sort((a, b) => a.id.localeCompare(b.id));
   const viewport = $('map-scroll').clientWidth;
@@ -296,7 +310,8 @@ function layoutFleet(hosts) {
   const signature = JSON.stringify([width, hosts.map(host => host.name), [...expanded],
     ordered.map(node => [node.id, clusterKey(node), node.kind, node.parent]),
     Object.values(snapshot.runs || {}).map(run => [run.run, run.rows.map(row => [row.id, row.live])]),
-    Object.values(snapshot.clusters || {}).map(info => [info.name, info.run, info.matrix_host])]);
+    Object.values(snapshot.clusters || {}).map(info => [info.name, info.run, info.matrix_host, info.fallbacks, info.waiting, info.stalled]),
+    Object.values(snapshot.runs || {}).map(run => run.now)]);
   if (signature === layoutSignature && !repack) return;
   layoutSignature = signature;
   const members = new Map();
@@ -338,9 +353,11 @@ function layoutFleet(hosts) {
       const cluster = ensureCluster({host: host.name, cluster: JSON.parse(id)[1]});
       const run = clusterRun(cluster), open = expanded.has(id);
       const saved = cluster.geometry;
-      const headerHeight = saved?.headerHeight ?? (125 + (run?.rows.length || 0) * 60);
       const baseWidth = saved?.baseWidth ?? Math.min(available, Math.max(340, Math.ceil(Math.sqrt(items.length)) * CELL + 20));
       const clusterWidth = saved?.width ?? (open ? available : baseWidth);
+      if (items.length || run) renderCluster(cluster);
+      const contentHeight = open ? 0 : panelContentHeight(cluster.panel, clusterWidth);
+      const headerHeight = Math.max(saved?.headerHeight ?? (125 + (run?.rows.length || 0) * 60), contentHeight);
       if (saved) { x = saved.left; y = saved.top; }
       else if (!repack) {
         x = 0;

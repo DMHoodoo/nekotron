@@ -111,7 +111,82 @@ function showContext(context, node) { selections.push({context, node}); }
 """
 
 
+FALLBACK_FIXTURE = """
+snapshot = {hosts: [{name: 'local'}], runs: {}, edges: [], clusters: {
+  Fallback: {name: 'Fallback', run: 'run_missing', matrix_host: 'local',
+    fallbacks: [{run: 'run_missing', now: '', note: 'projection v1, Chief must re-render'}]}},
+  nodes: [{id: 'worker', title: 'Worker', state: 'idle', kind: 'claude',
+    host: 'local', cluster: 'Fallback'}]};
+$('map-scroll').clientWidth = 1200;
+const fallback = snapshot.clusters.Fallback.fallbacks[0];
+const cluster = () => [...clusters.values()][0];
+const gridTop = () => cluster().y + 28;
+"""
+
+
 class FleetMapPage(unittest.TestCase):
+    def test_fallback_now_line_wraps_inside_panel(self):
+        output = run_page_js(FALLBACK_FIXTURE + """
+fallback.now = 'x'.repeat(200);
+render();
+const panel = cluster().panel;
+console.log(JSON.stringify({text: text(panel), contentHeight: Number(cluster().content.attributes.height),
+  headerHeight: cluster().headerHeight, gridTop: gridTop()}));
+""")
+        self.assertIn('x' * 200, output['text'])
+        rule = re.search(r'\.cluster-content\s*\{[^}]*\}',
+                         (ROOT / 'kitty/fleetmap/page.html').read_text()).group()
+        self.assertRegex(rule, r'overflow-wrap:\s*anywhere')
+        # 200 unbroken characters at the 340px cluster width take five lines.
+        self.assertGreaterEqual(output['contentHeight'], 32 + 30 + 5 * 18 + 30 + 20)
+        self.assertGreater(output['gridTop'], output['contentHeight'] - 28)
+
+    def test_node_grid_starts_below_cluster_content(self):
+        output = run_page_js(FALLBACK_FIXTURE + """
+snapshot.clusters.Fallback.fallbacks = [];
+render();
+const empty = {header: cluster().headerHeight, top: gridTop(), y: endpoint('worker').y};
+snapshot.clusters.Fallback.fallbacks = [{run: 'run_missing',
+  now: 'Working on the next delivery '.repeat(4), note: 'projection v1, Chief must re-render'}];
+render();
+const three = {header: cluster().headerHeight, top: gridTop(), y: endpoint('worker').y};
+const stable = {x: endpoint('worker').x};
+render();
+const again = {y: endpoint('worker').y};
+snapshot.clusters.Fallback.fallbacks[0].now += ' more details'.repeat(35);
+render();
+const longer = {header: cluster().headerHeight, y: endpoint('worker').y,
+  height: Number(cluster().content.attributes.height)};
+console.log(JSON.stringify({empty, three, again, longer, stable}));
+""")
+        self.assertEqual(output['empty']['header'], 125)
+        # Heading 32 + run 30 + three-line Now 66 + projection 30 + 20 padding.
+        self.assertGreaterEqual(output['three']['header'], 178)
+        self.assertGreater(output['three']['y'], output['empty']['y'])
+        self.assertEqual(output['three']['y'], output['again']['y'])
+        self.assertGreater(output['longer']['header'], output['three']['header'])
+        self.assertGreater(output['longer']['y'], output['three']['y'])
+        self.assertGreaterEqual(output['longer']['height'], output['longer']['header'])
+
+    def test_removed_hovered_node_clears_hovered_id(self):
+        output = run_page_js(EDGE_FIXTURE + """
+nodeViews.get('b').group.listeners.mouseenter();
+const before = hoveredId;
+snapshot.nodes = snapshot.nodes.filter(node => node.id !== 'b');
+snapshot.edges = [];
+render();
+console.log(JSON.stringify({before, hoveredId, edges: drawn()}));
+""")
+        self.assertEqual(output, {'before': 'b', 'hoveredId': None, 'edges': []})
+
+    def test_selecting_isolated_node_draws_no_edge(self):
+        output = run_page_js(EDGE_FIXTURE + """
+snapshot.edges = [snapshot.edges[1]];
+render();
+selectNode('a');
+console.log(JSON.stringify({selectedId, edges: drawn()}));
+""")
+        self.assertEqual(output, {'selectedId': 'a', 'edges': []})
     def test_legend_closed_by_default_and_toggle_persists(self):
         page = (ROOT / 'kitty/fleetmap/page.html').read_text()
         self.assertRegex(page, r'<footer\b[^>]*\bhidden\b')
@@ -511,12 +586,13 @@ console.log(JSON.stringify({collapsed, expanded: text(cluster.panel),
 
     def test_layout_preserves_positions_across_membership_thresholds_and_hosts(self):
         source = DOM + page_functions('ensureRegion', 'ensureCluster', 'clusterInfo',
-                                     'clusterRun', 'layoutFleet', 'endpoint')
+                                     'clusterRun', 'nodeText', 'panelContentHeight', 'layoutFleet', 'endpoint')
         output = run_js(source + """
 const svg = () => new Element();
 const positions = new Map(), regions = new Map(), clusters = new Map(), expanded = new Set();
 const MIN_REGION = 420, CELL = 70, GAP = 16;
 let layoutSignature = '', layoutModeSignature = '';
+function renderCluster() {}
 const clusterKey = node => JSON.stringify([node.host, node.cluster]);
 const member = (id, host = 'local', cluster = 'A') => ({id, host, cluster, kind: 'claude'});
 let snapshot = {nodes: Array.from({length: 16}, (_, i) => member('s' + String(i).padStart(2, '0')))
