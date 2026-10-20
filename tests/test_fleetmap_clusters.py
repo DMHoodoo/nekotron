@@ -6,10 +6,12 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'kitty'))
 from fleetmap.clusters import ClusterConfig, cluster_for, load, save_assign
+from fleetmap import clusters
 
 
 class InitiativeClusters(unittest.TestCase):
@@ -116,6 +118,160 @@ class InitiativeClusters(unittest.TestCase):
         for branch in ('refs/heads/hok/topic', 'hok/topic', 'refs/heads/topic', 'topic'):
             with self.subTest(branch=branch):
                 self.assertEqual(self.cluster(worktree='/w', branch=branch), 'topic')
+
+    def write_config(self, data):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(data), encoding='utf-8')
+
+    def test_projection_cluster_beats_assign(self):
+        cfg = ClusterConfig([('Matched', ['needle'])], {'local:sid:s1': 'Pinned'})
+        self.assertEqual(self.cluster(cfg, node_id='s1', projection_cluster='Run projection',
+                                      run_objective='Old run', title='needle',
+                                      worktree='/w', branch='topic'), 'Run projection')
+
+    def test_bare_session_id_in_assign_is_accepted(self):
+        self.write_config({'assign': {'s1': 'Pinned'}})
+        cfg = load(self.path)
+        self.assertEqual(cfg.assign, {'local:sid:s1': 'Pinned'})
+        self.assertEqual(self.cluster(cfg, node_id='local:sid:s1'), 'Pinned')
+
+    def test_promote_writes_assign_and_project_together(self):
+        clusters.promote('s1', 'Core lint speed', 'root cause 6962', 'review', path=self.path)
+        cfg = load(self.path)
+        self.assertEqual(cfg.assign, {'local:sid:s1': 'Core lint speed'})
+        self.assertEqual(cfg.projects, [{'name': 'Core lint speed', 'slices': [
+            {'name': 'root cause 6962', 'stage': 'review', 'sessions': ['local:sid:s1']}]}])
+        self.assertEqual(clusters.stage_for('s1', cfg), 'review')
+
+    def test_move_to_non_project_drops_project_entry(self):
+        clusters.promote('s1', 'Core lint speed', 'root cause 6962', 'review', path=self.path)
+        clusters.move('local:sid:s1', 'Commissions', self.path)
+        cfg = load(self.path)
+        self.assertEqual(self.cluster(cfg, node_id='s1'), 'Commissions')
+        self.assertIsNone(clusters.stage_for('s1', cfg))
+        self.assertFalse(any('local:sid:s1' in item['sessions']
+                             for project in cfg.projects for item in project['slices']))
+
+    def test_never_prompted_session_is_unsorted_not_branch(self):
+        self.assertEqual(self.cluster(purpose=None, worktree='/w', branch='topic'), 'Unsorted')
+
+    def test_never_prompted_session_can_still_be_explicitly_clustered_or_matched(self):
+        cfg = ClusterConfig([('Matched', ['needle'])], {'local:sid:s1': 'Pinned'})
+        self.assertEqual(self.cluster(cfg, node_id='s1', purpose=None), 'Pinned')
+        self.assertEqual(self.cluster(cfg, purpose=None, title='needle'), 'Matched')
+        self.assertEqual(self.cluster(purpose=None, projection_cluster='Projected'), 'Projected')
+
+    def test_reference_j_config_and_bare_project_sessions_load(self):
+        self.write_config({
+            'projects': [{'name': 'Core lint speed', 'slices': [
+                {'name': 'root cause 6962', 'stage': 'review',
+                 'sessions': ['s1', 'env:laptop2:term:t1']}]}],
+            'hosts': {'laptop2': {'ssh': 'hok@Hassans-MacBook-Pro.local'}},
+            'caps': {'laptop2': 7, 'local': 3}})
+        cfg = load(self.path)
+        self.assertEqual(cfg.hosts, {'laptop2': {'ssh': 'hok@Hassans-MacBook-Pro.local'}})
+        self.assertEqual(cfg.caps, {'laptop2': 7, 'local': 3})
+        self.assertEqual(cfg.projects[0]['slices'][0]['sessions'],
+                         ['local:sid:s1', 'env:laptop2:term:t1'])
+        for node_id in ('s1', 'local:sid:s1', 'env:laptop2:term:t1'):
+            with self.subTest(node_id=node_id):
+                self.assertEqual(self.cluster(cfg, node_id=node_id, run_objective='Old run'),
+                                 'Core lint speed')
+                self.assertEqual(clusters.stage_for(node_id, cfg), 'review')
+        self.assertIsNone(clusters.stage_for('missing', cfg))
+
+    def test_v2_defaults_are_empty_and_independent(self):
+        first, second = ClusterConfig([], {}), ClusterConfig([], {})
+        self.assertEqual((first.projects, first.hosts, first.caps), ([], {}, {}))
+        first.projects.append({'name': 'Project'})
+        first.hosts['local'] = {}
+        first.caps['local'] = 3
+        self.assertEqual((second.projects, second.hosts, second.caps), ([], {}, {}))
+
+    def test_assign_beats_project_and_projection_beats_both(self):
+        clusters.promote('s1', 'Core lint speed', 'root cause 6962', 'review', self.path)
+        save_assign('s1', 'Pinned', self.path)
+        cfg = load(self.path)
+        self.assertEqual(self.cluster(cfg, node_id='s1'), 'Pinned')
+        self.assertEqual(self.cluster(cfg, node_id='s1', projection_cluster='Run'), 'Run')
+
+    def test_promote_updates_existing_slice_without_duplicates_or_losing_peers(self):
+        clusters.promote('s1', 'Core lint speed', 'root cause 6962', 'plan', self.path)
+        clusters.promote('env:laptop2:term:t1', 'Core lint speed', 'root cause 6962',
+                         'review', self.path)
+        clusters.promote('s1', 'Core lint speed', 'root cause 6962', 'delivery', self.path)
+        cfg = load(self.path)
+        self.assertEqual(cfg.projects, [{'name': 'Core lint speed', 'slices': [
+            {'name': 'root cause 6962', 'stage': 'delivery',
+             'sessions': ['local:sid:s1', 'env:laptop2:term:t1']}]}])
+        self.assertEqual(clusters.stage_for('env:laptop2:term:t1', cfg), 'delivery')
+
+    def test_repromotion_moves_membership_and_preserves_peer_stage(self):
+        clusters.promote('s1', 'Old', 'Old slice', 'plan', self.path)
+        clusters.promote('s2', 'Old', 'Old slice', 'plan', self.path)
+        clusters.promote('s1', 'New', 'New slice', 'review', self.path)
+        cfg = load(self.path)
+        self.assertEqual(clusters.stage_for('s1', cfg), 'review')
+        self.assertEqual(clusters.stage_for('s2', cfg), 'plan')
+        self.assertEqual(cfg.projects[0]['slices'][0]['sessions'], ['local:sid:s2'])
+
+    def test_move_removes_bare_aliases_from_all_slices_preserving_peers(self):
+        self.write_config({'assign': {'s1': 'Old'}, 'projects': [
+            {'name': 'Old', 'slices': [{'name': 'One', 'stage': 'review',
+                                      'sessions': ['s1', 's2']} ]},
+            {'name': 'Other', 'slices': [{'name': 'Two', 'stage': 'plan',
+                                        'sessions': ['local:sid:s1']}]}]})
+        clusters.move('s1', 'Unsorted', self.path)
+        cfg = load(self.path)
+        self.assertEqual(self.cluster(cfg, node_id='s1'), 'Unsorted')
+        self.assertIsNone(clusters.stage_for('s1', cfg))
+        self.assertEqual(clusters.stage_for('s2', cfg), 'review')
+
+    def test_move_to_project_retains_project_entries(self):
+        clusters.promote('s1', 'Core lint speed', 'root cause 6962', 'review', self.path)
+        before = load(self.path).projects
+        clusters.move('s1', 'Core lint speed', self.path)
+        self.assertEqual(load(self.path).projects, before)
+        self.assertEqual(clusters.stage_for('s1', load(self.path)), 'review')
+
+    def test_config_mutations_preserve_unowned_values(self):
+        untouched = {'hosts': {'laptop2': {'ssh': 'hok@Hassans-MacBook-Pro.local'}},
+                     'caps': {'laptop2': 7, 'local': 3}, 'future': [None, True, 'café'],
+                     'initiatives': [{'name': 'Commissions', 'match': ['commission']} ]}
+        self.write_config(dict(untouched, assign={'env:laptop2:term:t1': 'Remote'}))
+        for mutate in (lambda: clusters.promote('s1', 'Project', 'Slice', 'review', self.path),
+                       lambda: clusters.move('s1', 'Unsorted', self.path),
+                       lambda: save_assign('s1', 'Pinned', self.path)):
+            mutate()
+            saved = json.loads(self.path.read_text())
+            self.assertEqual({key: saved[key] for key in untouched}, untouched)
+            self.assertEqual(saved['assign']['env:laptop2:term:t1'], 'Remote')
+
+    def test_failed_atomic_replace_preserves_original_and_cleans_temp_files(self):
+        for operation in ('promote', 'move', 'save_assign'):
+            with self.subTest(operation=operation):
+                self.write_config({'assign': {'s1': 'Old'}, 'future': True})
+                before = self.path.read_bytes()
+                with patch('os.replace', side_effect=OSError('replace failed')):
+                    with self.assertRaises(OSError):
+                        if operation == 'promote':
+                            clusters.promote('s1', 'Project', 'Slice', 'review', self.path)
+                        elif operation == 'move':
+                            clusters.move('s1', 'New', self.path)
+                        else:
+                            save_assign('s1', 'New', self.path)
+                self.assertEqual(self.path.read_bytes(), before)
+                self.assertEqual(list(self.path.parent.iterdir()), [self.path])
+
+    def test_invalid_json_is_not_overwritten(self):
+        self.path.parent.mkdir()
+        self.path.write_text('{broken', encoding='utf-8')
+        for mutate in (lambda: clusters.promote('s1', 'Project', 'Slice', 'review', self.path),
+                       lambda: clusters.move('s1', 'New', self.path),
+                       lambda: save_assign('s1', 'New', self.path)):
+            with self.assertRaises(json.JSONDecodeError):
+                mutate()
+            self.assertEqual(self.path.read_text(), '{broken')
 
 
 if __name__ == '__main__':
