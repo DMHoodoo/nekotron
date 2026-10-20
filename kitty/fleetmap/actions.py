@@ -151,10 +151,16 @@ class Actions:
         else:
             self._run([self.tmux, 'kill-session', '-t', target])
 
+    @staticmethod
+    def destination(node):
+        route, target = Actions._target(node)
+        return (node['id'], node['host'], route, target,
+                node.get('kitty_pid') if route == 'kitty' else None)
+
     def describe_close(self, node) -> str:
         route, target = self._target(node)
-        if route == 'orca':
-            target = target[:9] + '…' if len(target) > 9 else target
+        if route == 'kitty':
+            target += f' (kitty PID {node.get("kitty_pid")})'
         label = {'orca': 'Orca terminal', 'kitty': 'kitty window', 'tmux': 'tmux session'}[route]
         return (f'Close {label} {target} on {node["host"]}. '
                 'The Claude process ends; the transcript stays resumable.')

@@ -170,11 +170,12 @@ class FleetMapHTTP(unittest.TestCase):
                 self.assertEqual(self.json_request('/api/action', body={
                     'node': NODE['id'], 'action': action, 'text': 'hello café'}),
                     {'ok': True, 'output': output})
+        token = self.json_request('/api/confirm?node=' + NODE['id'])['token']
         self.assertEqual(self.json_request('/api/action', body={
-            'node': NODE['id'], 'action': 'close'}),
+            'node': NODE['id'], 'action': 'close', 'token': token}),
             {'ok': False, 'error': 'terminal_not_found'})
         self.assertEqual(self.actions.calls, [
-            ('peek', NODE), ('jump', NODE), ('send', NODE, 'hello café'), ('close', NODE)])
+            ('peek', NODE), ('jump', NODE), ('send', NODE, 'hello café'), ('describe_close', NODE), ('close', NODE)])
 
     def test_invalid_actions_and_nodes_do_not_call_actions(self):
         self.wait_for_snapshot()
@@ -196,9 +197,56 @@ class FleetMapHTTP(unittest.TestCase):
 
     def test_confirm_uses_latest_node(self):
         self.wait_for_snapshot()
-        self.assertEqual(self.json_request('/api/confirm?' + urlencode({'node': NODE['id']})),
-                         {'text': 'Close Orca terminal term_one on local.'})
+        confirmation = self.json_request('/api/confirm?' + urlencode({'node': NODE['id']}))
+        self.assertEqual(confirmation['text'], 'Close Orca terminal term_one on local.')
+        self.assertTrue(confirmation['token'])
         self.assertEqual(self.actions.calls, [('describe_close', NODE)])
+
+    def test_close_rejects_changed_unknown_expired_and_cross_node_tokens(self):
+        self.wait_for_snapshot()
+        for change in ({'terminal': 'term_different'}, {'host': 'laptop2'}, {'hosting': 'unknown'},
+                       {'hosting': 'tmux', 'tmux': 'neko-other'}):
+            token = self.json_request('/api/confirm?node=' + NODE['id'])['token']
+            with self.instance._lock:
+                self.instance._snapshot = dict(self.instance._snapshot, nodes=[dict(NODE, **change)])
+            result = self.json_request('/api/action', body={
+                'node': NODE['id'], 'action': 'close', 'token': token})
+            self.assertEqual(result, {'ok': False, 'error': 'destination changed, confirm again'})
+            with self.instance._lock:
+                self.instance._snapshot = dict(self.instance._snapshot, nodes=[NODE])
+        for token in (None, 'unknown', []):
+            self.assertFalse(self.json_request('/api/action', body={
+                'node': NODE['id'], 'action': 'close', 'token': token})['ok'])
+        token = self.json_request('/api/confirm?node=' + NODE['id'])['token']
+        stamp, destination = self.instance._confirmations[token]
+        self.instance._confirmations[token] = (stamp - 301, destination)
+        self.assertFalse(self.json_request('/api/action', body={
+            'node': NODE['id'], 'action': 'close', 'token': token})['ok'])
+        other = dict(NODE, id='local:sid:other')
+        token = self.json_request('/api/confirm?node=' + NODE['id'])['token']
+        with self.instance._lock:
+            self.instance._snapshot = dict(self.instance._snapshot, nodes=[NODE, other])
+        self.assertFalse(self.json_request('/api/action', body={
+            'node': other['id'], 'action': 'close', 'token': token})['ok'])
+        self.assertFalse([call for call in self.actions.calls if call[0] == 'close'])
+
+    def test_each_batch_target_requires_its_own_unchanged_confirmation(self):
+        self.wait_for_snapshot()
+        other = dict(NODE, id='local:sid:other', terminal='term_two')
+        with self.instance._lock:
+            self.instance._snapshot = dict(self.instance._snapshot, nodes=[NODE, other])
+        tokens = [self.json_request('/api/confirm?node=' + n['id'])['token'] for n in (NODE, other)]
+        with self.instance._lock:
+            self.instance._snapshot = dict(self.instance._snapshot,
+                                           nodes=[NODE, dict(other, terminal='term_changed')])
+        with patch.object(self.actions, 'close', return_value=None) as close:
+            results = [self.json_request('/api/action', body={
+                'node': n['id'], 'action': 'close', 'token': token})
+                for n, token in zip((NODE, other), tokens)]
+        self.assertEqual([result['ok'] for result in results], [True, False])
+        close.assert_called_once_with(NODE)
+        self.assertFalse(self.json_request('/api/action', body={
+            'node': NODE['id'], 'action': 'close', 'token': tokens[0]})['ok'])
 
     def test_promote_and_move_update_pin_and_stage(self):
         self.wait_for_snapshot()

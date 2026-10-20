@@ -208,9 +208,9 @@ class ActionRouting(unittest.TestCase):
                          'The Claude process ends; the transcript stays resumable.')
         self.assertEqual(self.actions.describe_close(node(
             host='laptop2', terminal='term_c7bf123456789')),
-            'Close Orca terminal term_c7bf… on laptop2. '
+            'Close Orca terminal term_c7bf123456789 on laptop2. '
             'The Claude process ends; the transcript stays resumable.')
-        for fields, label in [(dict(hosting='kitty', kitty_window=42), 'kitty window 42'),
+        for fields, label in [(dict(hosting='kitty', kitty_window=42), f'kitty window 42 (kitty PID {os.getpid()})'),
                               (dict(hosting='tmux', tmux='neko-abc'), 'tmux session neko-abc')]:
             with self.subTest(fields=fields):
                 description = self.actions.describe_close(node(**fields))

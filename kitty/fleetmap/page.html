@@ -184,7 +184,7 @@ const MIN_REGION = 420, CELL = 70, GAP = 16;
 let layoutSignature = '';
 let regionOrder = [];
 let snapshot = {hosts: [], nodes: [], edges: []};
-let nodes = new Map(), selectedId = null, dialogNodeId = null;
+let nodes = new Map(), selectedId = null, dialogNodeId = null, closeToken = null;
 let timer = null, pollSeconds = 3, loading = false, actionBusy = false;
 let gradientId = 0, assignmentChoices = '';
 const stages = ['goal', 'design', 'plan', 'implementing', 'review', 'delivery', 'accepted'];
@@ -581,6 +581,7 @@ function renderRail() {
 function openOverlay(title, nodeId) {
   overlayVersion++;
   dialogNodeId = nodeId;
+  closeToken = null;
   $('overlay-title').textContent = title;
   $('overlay-text').textContent = '';
   $('screen').hidden = true;
@@ -614,6 +615,7 @@ $('actions').addEventListener('click', event => {
     } else if (action === 'close') {
       const result = await request(`/api/confirm?node=${encodeURIComponent(id)}`);
       openOverlay('Close this session?', id);
+      closeToken = result.token;
       $('overlay-text').textContent = result.text;
       $('confirm-close').hidden = false;
       $('cancel-overlay').focus();
@@ -628,9 +630,9 @@ $('actions').addEventListener('click', event => {
   });
 });
 $('confirm-close').addEventListener('click', () => {
-  const id = dialogNodeId;
+  const id = dialogNodeId, token = closeToken;
   runAction(async () => {
-    await request('/api/action', {node: id, action: 'close'});
+    await request('/api/action', {node: id, action: 'close', token});
     $('overlay').close(); $('action-status').textContent = 'Close requested.';
     await refresh();
   });
@@ -903,14 +905,14 @@ async function prepareBatchClose(targets) {
   const version = overlayVersion;
   $('overlay-text').textContent = 'Loading every close destination…';
   const descriptions = await Promise.all(targets.map(async node => {
-    // Keep full handles: the router's prose may abbreviate an Orca handle.
+    // Each destination gets its own server-bound confirmation.
     const destinations = [['terminal', node.terminal], ['tmux session', node.tmux], ['kitty window', node.kitty_window]]
       .filter(([, target]) => target != null && target !== '').map(([kind, target]) => `${kind}: ${target}`).join(' · ');
     const target = {id: node.id, label: `${node.title || node.id} · ${node.host} · ${destinations || 'destination unknown'}`};
     try {
       const result = await request(`/api/confirm?node=${encodeURIComponent(node.id)}`);
-      if (typeof result.text !== 'string' || !result.text.trim() || !destinations) throw new Error('Missing destination description');
-      return {...target, description: result.text};
+      if (typeof result.text !== 'string' || !result.text.trim() || !result.token || !destinations) throw new Error('Missing destination description');
+      return {...target, description: result.text, token: result.token};
     } catch (error) { return {...target, error: `Confirmation unavailable: ${error.message}`}; }
   }));
   if (!$('overlay').open || overlayVersion !== version) return;
@@ -926,7 +928,7 @@ $('confirm-batch').addEventListener('click', () => {
   runAction(async () => {
     $('confirm-batch').hidden = true; $('screen').hidden = false; $('screen').textContent = '';
     for (const node of batch) {
-      try { await request('/api/action', {node: node.id, action: 'close'}); $('screen').textContent += `${node.label}: closed\n`; }
+      try { await request('/api/action', {node: node.id, action: 'close', token: node.token}); $('screen').textContent += `${node.label}: closed\n`; }
       catch (error) { $('screen').textContent += `${node.label}: ${error.message}\n`; }
     }
     $('cancel-overlay').textContent = 'Done'; await refresh();

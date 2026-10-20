@@ -11,7 +11,7 @@ import threading
 import time
 from urllib.parse import parse_qs, urlsplit
 
-from .actions import Actions
+from .actions import ActionError, Actions
 from .clusters import CONFIG_PATH, move, promote, save_assign, update_stage
 from .model import Collector
 from .orca import OrcaClient
@@ -77,7 +77,8 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.route.path == '/api/confirm':
             try:
                 node = self._node(self.query.get('node', [''])[0])
-                result = {'text': fleet.actions.describe_close(node)}
+                result = {'text': fleet.actions.describe_close(node),
+                          'token': fleet.confirm(node)}
             except Exception as error:
                 result = {'ok': False, 'error': str(error)}
             self._json(result)
@@ -107,6 +108,8 @@ class _Handler(BaseHTTPRequestHandler):
                 if action not in ('peek', 'jump', 'send', 'close'):
                     raise ValueError('Unknown action')
                 node = self._node(body.get('node'))
+                if action == 'close':
+                    fleet.validate_confirmation(body.get('token'), node)
                 args = [node]
                 if action == 'send':
                     text = body.get('text', '')
@@ -183,6 +186,8 @@ class FleetMapServer:
         self._idle_seconds = idle_minutes * 60
         self._lock = threading.Lock()
         self._assign_lock = threading.Lock()
+        self._confirm_lock = threading.Lock()
+        self._confirmations = {}
         self._lifecycle_lock = threading.Lock()
         self._stop_lock = threading.Lock()
         self._stopped = threading.Event()
@@ -191,6 +196,27 @@ class FleetMapServer:
         self._snapshot = {'generated_at': None, 'hosts': [], 'nodes': [], 'edges': [],
                           'runs': {}, 'clusters': {}, 'decisions': [], 'rejected_projections': {}}
         self._snapshot_ready = threading.Event()
+
+    def confirm(self, node):
+        now = time.monotonic()
+        destination = Actions.destination(node)
+        token = secrets.token_urlsafe(32)
+        with self._confirm_lock:
+            self._confirmations = {key: value for key, value in self._confirmations.items()
+                                   if now - value[0] <= 300}
+            self._confirmations[token] = (now, destination)
+        return token
+
+    def validate_confirmation(self, token, node):
+        with self._confirm_lock:
+            stored = self._confirmations.pop(token, None) if isinstance(token, str) else None
+        try:
+            destination = Actions.destination(node)
+        except ActionError:
+            destination = None
+        if (stored is None or time.monotonic() - stored[0] > 300
+                or stored[1] != destination):
+            raise ValueError('destination changed, confirm again')
 
     def _snapshot_copy(self):
         with self._lock:
