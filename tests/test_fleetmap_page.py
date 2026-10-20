@@ -111,7 +111,8 @@ const info = {run: 'run_test', matrix_host: 'local', waiting: 0, stalled: 0};
 const snapshot = {clusters: {'Review run': info}, runs: {run_test: run}, nodes: [], edges: []};
 const cluster = {id: 'cluster', name: 'Review run', host: 'local', panel: new Element()};
 const expanded = new Set(), nodes = new Map();
-let selectedId = null, selectedContext = null, miniViews = [];
+let selectedId = null, selectedContext = null, miniViews = [], railOpen = false;
+function noteRailToggle() {}
 const selections = [];
 function showContext(context, node) { selections.push({context, node}); }
 """
@@ -697,7 +698,7 @@ console.log(JSON.stringify({collapsed, expanded: text(cluster.panel),
             self.assertIn('projection v1, Chief must re-render', rendered)
 
     def test_layout_preserves_positions_across_membership_thresholds_and_hosts(self):
-        source = DOM + page_functions('ensureRegion', 'ensureCluster', 'clusterInfo',
+        source = DOM + 'function viewportWidth() { return 1600; }\n' + page_functions('ensureRegion', 'ensureCluster', 'clusterInfo',
                                      'clusterRun', 'nodeText', 'panelContentHeight', 'layoutFleet', 'endpoint',
                                      'lastTouched', 'foldable', 'isFolded', 'clusterRetired')
         output = run_js(source + """
@@ -1567,14 +1568,86 @@ var window = {innerWidth: 768};
 selectNode('a'); const narrow = rail();
 $('rail-backdrop').click(); const closed = rail();
 window.innerWidth = 1200; selectNode('a');
-console.log(JSON.stringify({narrow, closed, wide: rail(), width: $('map-scroll').clientWidth}));
+console.log(JSON.stringify({narrow, closed, wide: rail()}));
 """)
         self.assertIn('rail-overlay', output['narrow']['main'])
         self.assertFalse(output['narrow']['backdrop'])
-        self.assertEqual(output['width'], 1200)
         self.assertTrue(output['closed']['hidden'])
         self.assertNotIn('rail-overlay', output['wide']['main'])
         self.assertTrue(output['wide']['backdrop'])
+
+    def test_rail_open_gives_map_a_narrower_column_by_css(self):
+        page = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        self.assertRegex(page, r'main \{[^}]*grid-template-columns: minmax\(0, 1fr\);')
+        self.assertRegex(page, r'main\.rail-open \{[^}]*grid-template-columns: minmax\(0, 1fr\) 320px;')
+        self.assertRegex(page, r'main\.rail-open\.rail-overlay \{[^}]*grid-template-columns: minmax\(0, 1fr\);')
+
+    def test_selected_node_stays_in_view_after_rail_toggle(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + """
+const calls = [];
+render();
+nodeViews.get('a').group.scrollIntoView = options => calls.push(['a', options.block]);
+selectNode('a'); const beforeResize = calls.length;
+$('map-scroll').clientWidth = 880; onMapResize(); const opened = calls.slice();
+$('rail-close').click();
+$('map-scroll').clientWidth = 1200; onMapResize();
+onMapResize();
+console.log(JSON.stringify({beforeResize, opened, calls}));
+""")
+        self.assertEqual(output['beforeResize'], 0)
+        self.assertEqual(output['opened'], [['a', 'nearest']])
+        self.assertEqual(output['calls'], [['a', 'nearest'], ['a', 'nearest']])
+
+    def test_regions_stack_below_700px(self):
+        output = run_page_js(EDGE_FIXTURE.replace("hosts: [{name: 'local'}]", "hosts: [{name: 'local'}, {name: 'laptop2'}]")
+            .replace("host: 'local', cluster: 'Traffic'}))", "host: id === 'c' ? 'laptop2' : 'local', cluster: 'Traffic'}))")
+            .replace("clientWidth = 1200", "clientWidth = 390") + """
+var window = {innerWidth: 390};
+render();
+const [first, second] = [...regions.values()];
+console.log(JSON.stringify({first: first.geometry, second: second.geometry,
+  firstBounds: first.bounds, secondBounds: second.bounds, mapWidth: $('map').attributes.width}));
+""")
+        self.assertGreaterEqual(output['secondBounds']['y'], output['firstBounds']['y'] + output['firstBounds']['height'])
+        self.assertLessEqual(output['first']['width'], 390)
+        self.assertLessEqual(output['second']['width'], 390)
+        self.assertEqual(output['second']['x'], 0)
+        self.assertLessEqual(output['mapWidth'], 390)
+
+    def test_narrow_css_wraps_panel_text(self):
+        page = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        media = re.search(r'@media \(max-width: 699px\) \{(.*?)\n\}', page, re.DOTALL).group(1)
+        self.assertRegex(media, r'\.cluster-content[^{]*\{[^}]*overflow-wrap: anywhere')
+
+    def test_rail_close_button_stays_visible_while_rail_scrolls(self):
+        page = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        self.assertRegex(page, r'#rail-close \{[^}]*position: sticky')
+
+    def test_escape_in_rail_field_leaves_input_alone(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + """
+selectNode('a');
+document.activeElement = {tagName: 'INPUT'};
+document.dispatch('keydown', {key: 'Escape'}); const inField = rail();
+document.activeElement = {tagName: 'TEXTAREA'};
+document.dispatch('keydown', {key: 'Escape'}); const inArea = rail();
+document.activeElement = null;
+document.dispatch('keydown', {key: 'Escape'});
+console.log(JSON.stringify({inField, inArea, after: rail()}));
+""")
+        self.assertFalse(output['inField']['hidden'])
+        self.assertFalse(output['inArea']['hidden'])
+        self.assertTrue(output['after']['hidden'])
+
+    def test_overlay_rail_moves_focus_in_and_restores_it(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + """
+var window = {innerWidth: 768};
+const opener = new Element('g'); opener.focus();
+selectNode('a'); const inside = document.activeElement === $('rail-close');
+$('rail-close').click(); const restored = document.activeElement === opener;
+console.log(JSON.stringify({inside, restored}));
+""")
+        self.assertTrue(output['inside'])
+        self.assertTrue(output['restored'])
 
     def test_narrow_header_wraps_search_onto_second_line(self):
         page = (ROOT / 'kitty/fleetmap/page.html').read_text()
@@ -1587,6 +1660,9 @@ console.log(JSON.stringify({narrow, closed, wide: rail(), width: $('map-scroll')
         media = re.search(r'@media \(max-width: 699px\) \{(.*?)\n\}', page, re.DOTALL).group(1)
         self.assertRegex(media, r'\.header-main \{[^}]*flex: 1 1 100%')
         self.assertRegex(media, r'header \{[^}]*flex-wrap: wrap')
+        self.assertRegex(page, r'body \{[^}]*grid-template-columns: minmax\(0, 1fr\)')
+        self.assertRegex(media, r'\.header-main > \*[^{]*\{[^}]*min-width: 0')
+        self.assertRegex(media, r'#status \{[^}]*flex: 1 1 100%')
 
 
 if __name__ == "__main__":

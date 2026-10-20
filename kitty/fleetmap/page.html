@@ -9,7 +9,7 @@
 <style>
 :root { color-scheme: dark; font: 14px/1.5 system-ui, sans-serif; background: #10121a; color: #e4e7f0; }
 * { box-sizing: border-box; }
-body { margin: 0; height: 100vh; display: grid; grid-template-rows: 58px auto minmax(0, 1fr) auto; }
+body { margin: 0; height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 58px auto minmax(0, 1fr) auto; }
 header input#search { margin-left: auto; background: #1b1f2c; border: 1px solid #303548; border-radius: 6px; color: inherit; font: inherit; font-size: 12px; padding: 4px 8px; width: 180px; }
 header { display: flex; align-items: center; gap: 20px; padding: 0 22px; border-bottom: 1px solid #303548; }
 h1 { font-size: 18px; margin: 0; font-weight: 650; }
@@ -20,7 +20,7 @@ main { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; posi
 main.rail-open { grid-template-columns: minmax(0, 1fr) 320px; }
 main.rail-open.rail-overlay { grid-template-columns: minmax(0, 1fr); }
 #rail-backdrop { position: fixed; inset: 0; background: #05070b99; z-index: 9; }
-#rail-close { position: absolute; top: 8px; right: 10px; padding: 2px 9px; line-height: 1.2; }
+#rail-close { position: sticky; top: 8px; float: right; margin: -26px -10px 0 0; z-index: 1; padding: 2px 9px; line-height: 1.2; }
 main.rail-overlay #rail { position: fixed; top: 0; right: 0; bottom: 0; width: 90%; z-index: 10; box-shadow: -8px 0 24px #000a; }
 .header-main, .header-tools { display: flex; align-items: center; gap: 20px; min-width: 0; }
 .header-tools { margin-left: auto; }
@@ -28,8 +28,12 @@ main.rail-overlay #rail { position: fixed; top: 0; right: 0; bottom: 0; width: 9
   body { grid-template-rows: auto auto minmax(0, 1fr) auto; }
   header { flex-wrap: wrap; gap: 6px 20px; padding: 8px 14px; }
   .header-main { flex: 1 1 100%; flex-wrap: wrap; }
+  .header-main > *, .header-tools > * { min-width: 0; }
+  #status { flex: 1 1 100%; overflow-wrap: anywhere; }
   .header-tools { flex: 1 1 100%; margin-left: 0; }
   header input#search { margin-left: 0; flex: 1 1 auto; width: auto; min-width: 0; }
+  #map-scroll, #rail { overflow-x: hidden; }
+  .cluster-content, #rail { overflow-wrap: anywhere; word-break: break-word; }
 }
 #map-scroll { overflow: auto; position: relative; }
 #map { display: block; min-width: 100%; min-height: 100%; }
@@ -381,10 +385,11 @@ function isFolded(node) {
 function layoutFleet(hosts) {
   const ordered = [...snapshot.nodes].sort((a, b) => a.id.localeCompare(b.id));
   const viewport = $('map-scroll').clientWidth;
-  const mode = JSON.stringify([viewport, [...expanded].sort()]);
+  const phone = viewportWidth() < 700;
+  const mode = JSON.stringify([viewport, phone, [...expanded].sort()]);
   const repack = mode !== layoutModeSignature;
   layoutModeSignature = mode;
-  let width = Math.max(viewport, hosts.length * MIN_REGION);
+  let width = Math.max(viewport, phone ? 0 : hosts.length * MIN_REGION);
   const signature = JSON.stringify([width, hosts.map(host => host.name), [...expanded], [...unfolded],
     ordered.filter(isFolded).map(node => node.id),
     ordered.map(node => [node.id, clusterKey(node), node.kind, node.parent]),
@@ -415,15 +420,17 @@ function layoutFleet(hosts) {
     for (const region of regions.values()) delete region.geometry;
   }
   const retiredKeys = new Set();
-  const initialRegionWidth = width / Math.max(1, hosts.length);
-  let regionX = 0, height = 100;
+  const initialRegionWidth = phone ? viewport : width / Math.max(1, hosts.length);
+  let regionX = 0, regionY = 0, height = 100;
   for (const host of hosts) {
     const region = ensureRegion(host);
-    if (!region.geometry) {
+    if (phone) region.geometry = {x: 0, width: viewport};
+    else if (!region.geometry) {
       regionX = Math.max(regionX, ...[...regions.values()].map(r => r.geometry ? r.geometry.x + r.geometry.width : 0));
       region.geometry = {x: regionX, width: repack ? initialRegionWidth : MIN_REGION};
     }
     regionX = region.geometry.x;
+    region.group.setAttribute('transform', `translate(0 ${regionY})`);
     const regionWidth = region.geometry.width, available = regionWidth - 36;
     region.background.setAttribute('x', regionX + 8);
     region.background.setAttribute('width', regionWidth - 16);
@@ -537,14 +544,16 @@ function layoutFleet(hosts) {
         if (above.baseTop < box.baseTop && box.left < above.left + above.width && above.left < box.left + box.width)
           top = Math.max(top, above.top + above.height + GAP);
       box.top = top;
-      cluster.y = top + box.headerHeight;
-      cluster.group.setAttribute('transform', `translate(${regionX + 18 + box.left} ${top})`);
+      cluster.y = regionY + top + box.headerHeight;
+      cluster.group.setAttribute('transform', `translate(${regionX + 18 + box.left} ${regionY + top})`);
       placed.push(box);
     }
     const bottom = Math.max(82, ...[...clusters.values()].filter(c => c.host === host.name && c.geometry)
       .map(c => c.geometry.top + c.geometry.height));
     region.background.setAttribute('height', bottom + 16);
-    height = Math.max(height, bottom + 26);
+    height = Math.max(height, regionY + bottom + 26);
+    region.bounds = {y: regionY, height: bottom + 26};
+    if (phone) regionY += bottom + 26;
     regionX += regionWidth;
     width = Math.max(width, regionX);
   }
@@ -692,7 +701,8 @@ document.addEventListener('keydown', event => {
     $('search').value = '';
     setSearchQuery('');
     if (active === $('search')) $('search').blur();
-  } else if (event.key === 'Escape' && !$('overlay').open && railOpen) {
+  } else if (event.key === 'Escape' && !$('overlay').open && railOpen &&
+      !['input', 'textarea', 'select'].includes(tag) && !active?.isContentEditable) {
     closeRail();
   }
 });
@@ -825,9 +835,27 @@ function applyRail() {
   $('rail').hidden = !railOpen;
   $('rail-backdrop').hidden = !(railOpen && overlay);
   $('main').className = (railOpen ? 'rail-open' : '') + (overlay ? ' rail-overlay' : '');
+  if (railOpen === railWasOpen) return;
+  railWasOpen = railOpen;
+  if (railOpen && overlay) {
+    railReturnFocus = document.activeElement || null;
+    $('rail-close').focus();
+  } else if (!railOpen && railReturnFocus) {
+    const target = railReturnFocus; railReturnFocus = null;
+    if (target.focus) target.focus();
+  }
 }
+let revealTarget = null, railWasOpen = false, railReturnFocus = null;
+function noteRailToggle(target) { if (viewportWidth() >= 1000) revealTarget = target; }
+function revealSelection() {
+  const target = revealTarget; revealTarget = null;
+  const element = target?.node ? nodeViews.get(target.node)?.group : target?.cluster ? clusters.get(target.cluster)?.group : null;
+  if (element?.scrollIntoView) element.scrollIntoView({block: 'nearest', inline: 'nearest'});
+}
+function onMapResize() { render(); revealSelection(); }
 function openRail() { railOpen = true; applyRail(); }
 function closeRail() {
+  if (railOpen) noteRailToggle(selectedId ? {node: selectedId} : selectedCluster ? {cluster: selectedCluster} : null);
   railOpen = false; selectedId = null; selectedCluster = null; selectedContext = null;
   render(); paintFocus(); renderRail();
 }
@@ -888,6 +916,7 @@ function render() {
 }
 function selectNode(id) {
   if (!nodes.has(id)) return;
+  if (!railOpen) noteRailToggle({node: id});
   selectedId = id; railOpen = true;
   selectedCluster = null;
   selectedContext = null;
@@ -900,6 +929,7 @@ function selectNode(id) {
 }
 function selectCluster(id) {
   if (!clusters.has(id)) return;
+  if (!railOpen) noteRailToggle({cluster: id});
   selectedCluster = id; railOpen = true;
   selectedId = null;
   selectedContext = null;
@@ -1128,6 +1158,7 @@ function miniNode(id) {
   miniViews.push([id, view]); return wrapper;
 }
 function showContext(context, nodeId = null) {
+  if (!railOpen && nodeId) noteRailToggle({node: nodeId});
   railOpen = true; selectedCluster = null; selectedContext = context; selectedId = nodeId; assignmentChoices = '';
   $('rail').scrollTop = 0; renderRail();
   paintFocus();
@@ -1469,7 +1500,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') refresh();
   else setStatusMessage('Paused while hidden');
 });
-new ResizeObserver(() => render()).observe($('map-scroll'));
+new ResizeObserver(onMapResize).observe($('map-scroll'));
 startPolling();
 refresh();
 </script>
