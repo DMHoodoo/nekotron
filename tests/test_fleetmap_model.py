@@ -438,7 +438,10 @@ class SnapshotAssembler(unittest.TestCase):
             self.assertTrue(self.collector().snapshot()['hosts'][0]['reachable'])
 
     def test_remote_terminal_nodes_from_environment(self):
-        remote = [terminal('term_r1'), terminal('term_r2')]
+        remote = [terminal('term_r1'), terminal('term_r2'), terminal('term_shell')]
+        remote[2]['agentIdentity'] = None
+        self.orca.put('orchestration worker-list', 'workers',
+                      [{'agentTerminalHandle': 'term_r2', 'dispatchId': 'worker'}])
         remote[1].update(agentIdentity=None, lastOutputAt=NOW - 60)
         self.orca.put('terminal list', 'terminals', remote, 'laptop2')
         snap = self.collector().snapshot()

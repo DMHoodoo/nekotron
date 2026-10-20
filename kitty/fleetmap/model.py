@@ -314,11 +314,24 @@ class Collector:
         matches = _match_terminals(sessions, records['terminals']) if host == 'local' else {}
         used = {terminal['handle'] for terminal in matches.values()}
         records['matches'] = matches
-        records['screens'] = {
-            terminal['handle']: optional('screen', self.orca.screen, '', handle=terminal['handle'])
-            for terminal in records['terminals'] if terminal['handle'] not in used
-            and (host != 'local' or terminal.get('agentIdentity'))}
+        records['screens'] = {}
         return records
+
+    def _poll_screens(self, data):
+        workers = {w.get('agentTerminalHandle') for records in data.values()
+                   for w in records['workers']}
+        for host, records in data.items():
+            used = {t['handle'] for t in records['matches'].values()}
+            for terminal in records['terminals']:
+                handle = terminal['handle']
+                if handle in used or not (terminal.get('agentIdentity') or handle in workers):
+                    continue
+                try:
+                    screen = self.orca.screen(handle, env=None if host == 'local' else host)
+                except OrcaError as error:
+                    records['degraded'].append(f'screen: {error}')
+                    screen = ''
+                records['screens'][handle] = screen
 
     def snapshot(self) -> dict:
         now = time.time()
@@ -351,6 +364,7 @@ class Collector:
                         env=None if name == 'local' else name, run_id=run_id))
                 except OrcaError as error:
                     records['degraded'].append(f'workers: {error}')
+        self._poll_screens(data)
         for host in hosts:
             degraded = data.get(host['name'], {}).get('degraded', [])
             if degraded:
