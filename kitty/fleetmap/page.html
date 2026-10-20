@@ -61,6 +61,10 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospac
 .attention { filter: drop-shadow(0 0 6px #f0803c); }
 #decisions { padding: 8px 22px; display: flex; gap: 8px; overflow: auto; max-height: 130px; border-bottom: 1px solid #303548; }
 #decisions button { min-width: 260px; text-align: left; font-size: 12px; }
+#decisions button span { display: block; }
+#decisions .decision-title { font-weight: 600; }
+#decisions .decision-meta { color: #a0a8be; }
+.decision-card { border: 1px solid #303548; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
 .cluster-content { font-size: 12px; padding: 10px; overflow: auto; overflow-wrap: anywhere; height: 100%; box-sizing: border-box; }
 .cluster-content p { margin: 6px 0; }
 .cluster-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -107,6 +111,7 @@ input[type=checkbox] { width: auto; }
 <main>
   <div id="map-scroll"><svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="Agent sessions grouped by host and cluster"><defs><pattern id="stalled-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#f3d18a" stroke-width="2"/></pattern></defs><g id="regions"></g><g id="edges" pointer-events="none"></g><g id="clusters"></g></svg></div>
   <aside id="rail" aria-label="Session details">
+      <div id="decision-slot"></div>
       <div id="action-error" class="error" role="alert" hidden></div>
       <p id="action-status" class="muted" role="status"></p>
     <section id="context-rail" hidden><h2 id="context-title"></h2><div id="context-details"></div></section>
@@ -642,7 +647,11 @@ function selectCluster(id) {
   paintFocus();
   renderRail();
 }
+function openRunPlan(runId) {
+  return runAction(async () => { await request('/api/open-plan', {run: runId}); });
+}
 function renderRail() {
+  $('decision-slot').replaceChildren();
   const cluster = clusters.get(selectedCluster);
   if (cluster) {
     const info = clusterInfo(cluster), run = clusterRun(cluster);
@@ -652,9 +661,7 @@ function renderRail() {
     $('context-title').textContent = info.full_name || info.name || cluster.name;
     const details = $('context-details'); details.replaceChildren();
     detailLine(details, 'Host', cluster.host);
-    if (run) details.append(button('Open run plan', () => runAction(async () => {
-      await request('/api/open-plan', {run: run.run});
-    })));
+    if (run) details.append(button('Open run plan', () => openRunPlan(run.run)));
     if (info.waiting || info.stalled)
       details.append(html('p', `waiting on you: ${info.waiting || 0} · ${info.stalled || 0} stalled`, 'cluster-summary'));
     renderFallback(details, info);
@@ -727,7 +734,7 @@ function renderRail() {
     assignmentChoices = signature;
   }
 }
-function openOverlay(title, nodeId) {
+function openOverlay(title, nodeId, prefill) {
   overlayVersion++;
   dialogNodeId = nodeId;
   closeToken = null;
@@ -740,7 +747,12 @@ function openOverlay(title, nodeId) {
   $('confirm-batch').hidden = true;
   $('overlay-error').hidden = true;
   $('cancel-overlay').textContent = 'Cancel';
+  if (prefill !== undefined) $('send-text').value = prefill;
   $('overlay').showModal();
+}
+function openSend(id, prefill = '') {
+  openOverlay(`Send to ${nodes.get(id)?.title || 'session'}`, id, prefill);
+  $('send-form').hidden = false; $('send-text').focus();
 }
 async function runAction(work) {
   if (actionBusy) return;
@@ -759,8 +771,7 @@ $('actions').addEventListener('click', event => {
   if (!action || !nodes.has(id)) return;
   runAction(async () => {
     if (action === 'send') {
-      openOverlay(`Send to ${nodes.get(id).title || 'session'}`, id);
-      $('send-form').hidden = false; $('send-text').value = ''; $('send-text').focus();
+      openSend(id);
     } else if (action === 'close') {
       const result = await request(`/api/confirm?node=${encodeURIComponent(id)}`);
       openOverlay('Close this session?', id);
@@ -834,12 +845,12 @@ function showContext(context, nodeId = null) {
   $('rail').scrollTop = 0; renderRail();
   paintFocus();
 }
-function openRun(runId) {
+function openRun(runId, context = {run: runId}) {
   const run = snapshot.runs?.[runId]; if (!run) return;
   const info = snapshot.clusters?.[run.title]; if (!info) return;
   const id = JSON.stringify([info.matrix_host, run.title]);
   selectedCluster = null;
-  expanded.add(id); selectedContext = {run: runId}; selectedId = run.chief_node;
+  expanded.add(id); selectedContext = context; selectedId = run.chief_node;
   render(); clusters.get(id)?.group.scrollIntoView({block: 'nearest', inline: 'nearest'});
   $('rail').scrollTop = 0;
 }
@@ -849,9 +860,29 @@ function renderDecisions() {
   decisionSignature = signature;
   const strip = $('decisions'); strip.replaceChildren(html('strong', 'Decisions'));
   for (const item of snapshot.decisions || []) {
-    strip.append(button(`${item.title} · Class ${item.class} · ${item.id}\n${item.text}\nPacket: ${item.packet || '—'} · apply-by: ${item.applyAt || '—'}`, () => openRun(item.run)));
+    const chip = button('', () => showDecision(item), 'decision-chip');
+    chip.append(html('span', item.title, 'decision-title'), html('span', item.text, 'decision-text'),
+      html('span', `Class ${item.class} · ${item.id} · apply-by ${item.applyAt || '—'}`, 'decision-meta'));
+    strip.append(chip);
   }
   if (!snapshot.decisions?.length) strip.append(html('span', 'No open decisions', 'muted'));
+}
+function showDecision(item) {
+  openRun(item.run, {run: item.run, decision: item.id});
+}
+function decisionCard(item, run) {
+  const card = html('div', undefined, 'decision-card');
+  card.append(html('strong', `Decision ${item.id} · Class ${item.class}`), html('p', item.text));
+  detailLine(card, 'Packet', item.packet);
+  detailLine(card, 'Apply-by', item.applyAt);
+  const chief = run.chief_node;
+  if (chief && nodes.has(chief)) {
+    card.append(miniNode(chief));
+    card.append(button('Reply to Chief', () => runAction(async () => openSend(chief, `Decision ${item.id}: `))));
+  }
+  card.append(button('Open run plan', () => openRunPlan(run.run)));
+  card.append(html('p', 'Clears when the Chief records it', 'muted'));
+  return card;
 }
 function stepper(row) {
   const line = html('div', undefined, 'stepper'); line.append(html('span', row.name));
@@ -1040,7 +1071,9 @@ function renderContext() {
   detailLine(details, 'Proofs', run.proofs.map(proof => `${proof.id}: ${proof.status}`).join('\n'));
   detailLine(details, 'Merge gate', `${run.merge_gate.ready ? 'ready' : 'not ready'} · ${run.merge_gate.classDOpen} class D open · ${run.merge_gate.classBUnratified} class B unratified`);
   detailLine(details, 'Run plan', `${run.run_plan.path} @ ${run.run_plan.commit}`);
-  for (const item of (snapshot.decisions || []).filter(item => item.run === run.run))
+  const open = (snapshot.decisions || []).find(item => item.run === run.run && item.id === context.decision);
+  if (open) $('decision-slot').append(decisionCard(open, run));
+  for (const item of (snapshot.decisions || []).filter(item => item.run === run.run && item !== open))
     detailLine(details, `Decision ${item.id} · ${item.class}`, `${item.text}\nPacket: ${item.packet || '—'}\nApply-by: ${item.applyAt || '—'}`);
   for (const note of run.notes || []) detailLine(details, 'Note', note);
 }

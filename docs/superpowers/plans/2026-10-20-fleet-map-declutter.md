@@ -106,3 +106,19 @@
 - [ ] **Step 3: Implement**: measure the panel content height after rendering (or compute it from the rendered line count) and feed it to `layoutFleet` as the cluster's content offset; wrap long lines with `overflow-wrap: anywhere` in the panel.
 - [ ] **Step 4: Run** both complete suites; expect pass, including the position stability tests.
 - [ ] **Step 5: Commit** `feat(declutter): node grid starts below cluster content`.
+
+### Task 29: Decision card
+
+**Files:**
+- Modify: `kitty/fleetmap/page.html` (`renderDecisions`, `renderContext`, the send overlay's prefill)
+- Test: `tests/test_fleetmap_page.py`
+
+**Interfaces:**
+- Consumes: `snapshot.decisions` items `{run, title, id, class, text, packet, applyAt}`; `openRun(runId)`; `openOverlay(title, nodeId)` and the `send` action; the `Open run plan` button in the rail; `run.chief_node`; `miniNode(id)`.
+- Produces: `showDecision(item)` sets `selectedContext = {run, decision: item.id}` after `openRun(item.run)`; `renderContext` renders a `.decision-card` for that context; `openOverlay` accepts an optional third argument `prefill` that sets the send text field's value.
+
+- [ ] **Step 1: Failing page tests**: `test_decision_chip_has_three_lines` (a chip renders three child lines: title, text, `Class C · E3 · apply-by —`), `test_clicking_decision_opens_run_and_card` (after the click, `expanded` holds the run's cluster, `selectedContext.decision === 'E3'`, and the rail holds a `.decision-card` with the full text, the packet, a mini node for the Chief, buttons `Reply to Chief` and `Open run plan`, and the muted line `Clears when the Chief records it`), `test_reply_to_chief_prefills_send_overlay` (clicking `Reply to Chief` opens the overlay for the Chief node with the text field value `Decision E3: `), `test_decision_card_without_chief_node` (a run whose `chief_node` is not in the snapshot renders the card without the mini node and without `Reply to Chief`, and throws nothing).
+- [ ] **Step 2: Run**; expect FAIL.
+- [ ] **Step 3: Implement** per Decision 28.
+- [ ] **Step 4: Run** both complete suites; expect pass.
+- [ ] **Step 5: Commit** `feat(declutter): decision card with reply to Chief`.
