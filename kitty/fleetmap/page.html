@@ -58,6 +58,9 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospac
 .fold-chip { cursor: pointer; }
 .fold-chip rect { fill: #232838; stroke: #4a5272; }
 .fold-chip text { fill: #bfc6d9; font-size: 11px; }
+.retired-chip { cursor: pointer; }
+.retired-chip rect { fill: #232838; stroke: #4a5272; stroke-dasharray: 3 2; }
+.retired-chip text { fill: #bfc6d9; font-size: 11px; }
 .node-label { fill: #bfc6d9; font-size: 10px; pointer-events: none; }
 .edge-badge { fill: #e4e7f0; stroke: #161924; stroke-width: 4px; paint-order: stroke; font-size: 10px; font-weight: 650; pointer-events: none; }
 .node { cursor: pointer; outline: none; }
@@ -219,7 +222,7 @@ let gradientId = 0, assignmentChoices = '';
 const stages = ['goal', 'design', 'plan', 'implementing', 'review', 'delivery', 'accepted'];
 const stageLabels = ['Goal', 'Design', 'Plan (readiness)', 'Implementing', 'Review', 'Delivery', 'Accepted'];
 const packageColors = {planned: '#6b7394', assigned: '#8567b4', running: '#4f8ef7', returned: '#277c8b', verified: '#298456', blocked: '#a95b28'};
-const expanded = new Set(), unfolded = new Set(), foldChips = new Map();
+const expanded = new Set(), unfolded = new Set(), foldChips = new Map(), retiredChips = new Map();
 let selectedContext = null, selectedCluster = null, broadcastCluster = null, closeBatch = [];
 let overlayVersion = 0;
 let miniViews = [];
@@ -310,6 +313,12 @@ function ensureCluster(node) {
 }
 function clusterInfo(cluster) { return snapshot.clusters?.[cluster.name] || {}; }
 function clusterRun(cluster) { return snapshot.runs?.[clusterInfo(cluster).run]; }
+function clusterRetired(cluster) {
+  return (clusterInfo(cluster).retired_workers || []).filter(worker => worker.host === cluster.host);
+}
+function retiredPseudo(worker) {
+  return {id: 'retired:' + worker.dispatchId, title: worker.title, state: 'retired', doing: '', last_said: '', purpose: '', repo: '', branch: ''};
+}
 function clusterItems(cluster) { return snapshot.nodes.filter(node => clusterKey(node) === cluster.id); }
 function nodeText(node) {
   return typeof node === 'string' ? node : node.textContent || (node.children || []).map(nodeText).join('');
@@ -359,7 +368,7 @@ function layoutFleet(hosts) {
     ordered.filter(isFolded).map(node => node.id),
     ordered.map(node => [node.id, clusterKey(node), node.kind, node.parent]),
     Object.values(snapshot.runs || {}).map(run => [run.run, run.rows.map(row => [row.id, row.live])]),
-    Object.values(snapshot.clusters || {}).map(info => [info.name, info.run, info.matrix_host, info.fallbacks, info.waiting, info.stalled, info.short_name]),
+    Object.values(snapshot.clusters || {}).map(info => [info.name, info.run, info.matrix_host, info.fallbacks, info.waiting, info.stalled, info.short_name, (info.retired_workers || []).map(worker => [worker.host, worker.dispatchId])]),
     Object.values(snapshot.runs || {}).map(run => run.now)]);
   if (signature === layoutSignature && !repack) return;
   layoutSignature = signature;
@@ -380,6 +389,7 @@ function layoutFleet(hosts) {
     for (const cluster of clusters.values()) delete cluster.geometry;
     for (const region of regions.values()) delete region.geometry;
   }
+  const retiredKeys = new Set();
   const initialRegionWidth = width / Math.max(1, hosts.length);
   let regionX = 0, height = 100;
   for (const host of hosts) {
@@ -420,6 +430,9 @@ function layoutFleet(hosts) {
       const chipId = 'fold:' + id, foldedNodes = items.filter(isFolded);
       const sorted = items.filter(node => !isFolded(node)).sort((a, b) => (a.kind === 'subagent') - (b.kind === 'subagent'));
       if (foldedNodes.length) sorted.push({id: chipId, kind: 'chip'}); else positions.delete(chipId);
+      const retiredId = 'retired:' + id;
+      if (clusterRetired(cluster).length) { sorted.push({id: retiredId, kind: 'chip'}); retiredKeys.add(retiredId); }
+      else positions.delete(retiredId);
       const slots = new Map(), preserved = new Set();
       // A folded node keeps its slot reserved, so unfolding puts it back where it was.
       const heldSlots = foldedNodes.map(node => [node, positions.get(node.id)])
@@ -513,6 +526,7 @@ function layoutFleet(hosts) {
   const foldedKeys = new Set(ordered.filter(isFolded).map(clusterKey));
   for (const id of positions.keys()) {
     if (id.startsWith('fold:["')) { if (!foldedKeys.has(id.slice(5))) positions.delete(id); }
+    else if (id.startsWith('retired:["')) { if (!retiredKeys.has(id)) positions.delete(id); }
     else if (!nodes.has(id)) positions.delete(id);
   }
   $('map').setAttribute('width', width);
@@ -585,6 +599,30 @@ function paintFoldChips() {
     chip.style.opacity = clusterItems(cluster).filter(isFolded).every(nodeDimmed) ? .25 : 1;
   }
 }
+function paintRetiredChips() {
+  for (const chip of retiredChips.values()) chip.style.display = 'none';
+  for (const cluster of clusters.values()) {
+    const list = clusterRetired(cluster), position = positions.get('retired:' + cluster.id);
+    if (!list.length || !position) continue;
+    let chip = retiredChips.get(cluster.id);
+    if (!chip) {
+      chip = svg('g', {class: 'retired-chip', role: 'button', tabindex: 0});
+      chip.append(svg('rect', {x: -48, y: -11, width: 96, height: 22, rx: 11}), svg('text', {y: 4, 'text-anchor': 'middle'}));
+      const open = () => showContext({retired: cluster.id});
+      chip.addEventListener('click', open);
+      chip.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); }
+      });
+      retiredChips.set(cluster.id, chip);
+    }
+    chip.children[1].textContent = `${list.length} retired worker${list.length === 1 ? '' : 's'}`;
+    chip.setAttribute('aria-label', `${list.length} retired workers; list them`);
+    chip.setAttribute('transform', `translate(${position.x} ${position.y})`);
+    if (chip.parentNode !== cluster.grid) cluster.grid.append(chip);
+    chip.style.display = '';
+    chip.style.opacity = list.map(retiredPseudo).every(nodeDimmed) ? .25 : 1;
+  }
+}
 function nodeState(node) { return node.state === 'done' ? 'idle' : node.state; }
 function filtering() { return stateFilter !== null || searchQuery !== ''; }
 function nodeDimmed(node) {
@@ -635,6 +673,7 @@ function setStateFilter(state) {
   for (const [id, view] of miniViews) if (nodes.has(id)) paintNode(nodes.get(id), view);
   dimClusters();
   paintFoldChips();
+  paintRetiredChips();
 }
 function dimClusters() {
   for (const cluster of clusters.values()) {
@@ -764,6 +803,7 @@ function render() {
     if (!isFolded(node)) updateNode(node);
   }
   paintFoldChips();
+  paintRetiredChips();
   miniViews = [];
   for (const cluster of clusters.values()) {
     const info = clusterInfo(cluster);
@@ -1214,8 +1254,20 @@ function renderFallback(container, info) {
     detailLine(container, 'Projection', fallback.note);
   }
 }
+function renderRetiredList(cluster, details) {
+  const list = cluster ? clusterRetired(cluster) : [];
+  $('context-title').textContent = `${list.length} retired worker${list.length === 1 ? '' : 's'}`;
+  for (const worker of list)
+    detailLine(details, worker.title || worker.dispatchId, `${worker.state} · retained ${age(Date.now() / 1000 - worker.retainedFor)}`);
+}
 function renderContext() {
   const node = nodes.get(selectedId);
+  if (selectedContext?.retired) {
+    $('context-rail').hidden = false;
+    const details = $('context-details'); details.replaceChildren();
+    renderRetiredList(clusters.get(selectedContext.retired), details);
+    return;
+  }
   const context = selectedContext || (node ? {cluster: node.cluster, run: node.run} : null);
   $('context-rail').hidden = !context; if (!context) return;
   const run = snapshot.runs?.[context.run];

@@ -280,6 +280,54 @@ class SnapshotAssembler(unittest.TestCase):
                     self.assertEqual(collector._screens[('laptop2', 'term_bad')],
                                      (1.0, 'Last good screen'))
 
+    def retire(self, *states):
+        handles = ['term_r%d' % i for i in range(len(states))]
+        self.orca.put('terminal list', 'terminals',
+                      [terminal()] + [dict(terminal(h), title='Retired ' + h) for h in handles])
+        self.orca.put('orchestration worker-list', 'workers', [
+            {'dispatchId': 'd_' + h, 'runId': 'run_x', 'agentTerminalHandle': h,
+             'workerState': state, 'terminalState': 'retained'}
+            for h, state in zip(handles, states)])
+        return handles
+
+    def test_retired_worker_terminals_are_not_nodes(self):
+        self.retire('released', 'abandoned')
+        snap = self.collector().snapshot()
+        self.assertEqual([n['id'] for n in snap['nodes'] if n['kind'] == 'terminal'], [])
+        retired = [r for c in snap['clusters'].values() for r in c.get('retired_workers', [])]
+        self.assertEqual(sorted((r['title'], r['dispatchId'], r['state']) for r in retired),
+                         [('Retired term_r0', 'd_term_r0', 'released'),
+                          ('Retired term_r1', 'd_term_r1', 'abandoned')])
+        self.assertTrue(all(isinstance(r['retainedFor'], int) for r in retired))
+        self.assertEqual(len({name for name, c in snap['clusters'].items()
+                              if c.get('retired_workers')}), 1)
+
+    def test_live_agent_terminal_is_never_retired(self):
+        self.orca.put('orchestration worker-list', 'workers', [
+            {'dispatchId': 'd1', 'agentTerminalHandle': 'term_a',
+             'workerState': 'released', 'terminalState': 'retained'}])
+        snap = self.collector().snapshot()
+        self.assertIn('local:sid:s1', [n['id'] for n in snap['nodes']])
+        self.assertEqual([r for c in snap['clusters'].values()
+                          for r in c.get('retired_workers', [])], [])
+
+    def test_unretained_or_running_workers_stay_nodes(self):
+        self.orca.put('terminal list', 'terminals', [dict(terminal('term_w'), title='W')])
+        self.orca.put('orchestration worker-list', 'workers', [
+            {'dispatchId': 'd1', 'agentTerminalHandle': 'term_w', 'workerState': 'succeeded'}])
+        snap = self.collector().snapshot()
+        self.assertIn('local:term:term_w', [n['id'] for n in snap['nodes']])
+
+    def test_host_worker_count_excludes_retired(self):
+        handles = self.retire('released', 'succeeded', 'failed')
+        self.orca.put('terminal list', 'terminals',
+                      [terminal(), dict(terminal('term_live'), title='Live')] +
+                      [dict(terminal(h), title='Retired ' + h) for h in handles])
+        self.orca.responses[None, ('orchestration', 'worker-list')]['workers'].append(
+            {'dispatchId': 'd_live', 'agentTerminalHandle': 'term_live', 'workerState': 'running'})
+        snap = self.collector().snapshot()
+        self.assertEqual(snap['hosts'][0]['workers'], 1)
+
     def test_projection_joins_remote_chief_and_local_worker_over_pin(self):
         self.config.write_text(json.dumps({'assign': {'s1': 'Pinned'}, 'projects': [
             {'name': 'Pinned', 'slices': [{'name': 'Manual', 'stage': 'goal',

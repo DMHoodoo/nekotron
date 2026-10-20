@@ -698,7 +698,7 @@ console.log(JSON.stringify({collapsed, expanded: text(cluster.panel),
     def test_layout_preserves_positions_across_membership_thresholds_and_hosts(self):
         source = DOM + page_functions('ensureRegion', 'ensureCluster', 'clusterInfo',
                                      'clusterRun', 'nodeText', 'panelContentHeight', 'layoutFleet', 'endpoint',
-                                     'foldable', 'isFolded')
+                                     'foldable', 'isFolded', 'clusterRetired')
         output = run_js(source + """
 const svg = () => new Element();
 const positions = new Map(), regions = new Map(), clusters = new Map(), expanded = new Set(), unfolded = new Set();
@@ -984,6 +984,37 @@ load([{id: 'n', title: 'n', state: 'idle', kind: 'claude', host: 'local', cluste
 console.log(JSON.stringify({nodes: drawnNodes().length, chips: chips().length}));
 """)
         self.assertEqual(output, {'nodes': 0, 'chips': 1})
+
+    def test_retired_chip_lists_in_rail(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+const retired = [
+  {title: 'Worker one', dispatchId: 'd1', state: 'released', retainedFor: 7200, host: 'local'},
+  {title: 'Worker two', dispatchId: 'd2', state: 'abandoned', retainedFor: 90, host: 'local'}];
+const shownRetired = () => unique(byClass(cluster().grid, 'retired-chip')).filter(g => g.style.display !== 'none');
+snapshot = {generated_at: Date.now() / 1000, hosts: [{name: 'local'}],
+  clusters: {Box: {name: 'Box', full_name: 'Box', short_name: 'Box', retired_workers: retired}},
+  runs: {}, nodes: [mk('a', 'working', 1)], edges: []};
+render(); renderStatus();
+const shown = shownRetired().map(text);
+const slot = positions.get('retired:' + cluster().id);
+const overlap = [...positions].filter(([id, p]) => id !== 'retired:' + cluster().id && p.cluster === cluster().id && p.x === slot.x && p.y === slot.y).length;
+shownRetired()[0].click();
+const rail = text($('context-details'));
+const railHidden = $('context-rail').hidden;
+stateFilter = 'idle'; render();
+const dimmed = shownRetired()[0].style.opacity;
+stateFilter = null;
+snapshot.clusters.Box.retired_workers = []; render();
+console.log(JSON.stringify({shown, overlap, rail, railHidden, dimmed, gone: shownRetired().length,
+  nodes: drawnNodes().length}));
+""")
+        self.assertEqual([c.strip() for c in output['shown']], ['2 retired workers'])
+        self.assertEqual(output['overlap'], 0)
+        self.assertFalse(output['railHidden'])
+        for expected in ('Worker one', 'released', '2h', 'Worker two', 'abandoned', '1m'):
+            self.assertIn(expected, output['rail'])
+        self.assertEqual(output['dimmed'], .25)
+        self.assertEqual((output['gone'], output['nodes']), (0, 1))
 
     def test_clicking_chip_unfolds_cluster(self):
         output = run_page_js(self.FOLD_FIXTURE + """

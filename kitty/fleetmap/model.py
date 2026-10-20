@@ -37,6 +37,26 @@ def _match_terminals(sessions, terminals):
     return matched
 
 
+RETIRED_STATES = ('released', 'abandoned', 'failed', 'succeeded')
+
+
+def _retired_workers(data, live_handles):
+    """Map (host, terminal handle) to the worker record of each retired worker terminal.
+
+    A worker is retired when its dispatch is over and Orca still retains the terminal.
+    A terminal that hosts a live agent process is never retired."""
+    records = {}
+    for entry in data.values():
+        for worker in entry['workers']:
+            handle = worker.get('agentTerminalHandle')
+            if (handle and worker.get('workerState') in RETIRED_STATES
+                    and worker.get('terminalState') == 'retained'):
+                records[handle] = worker
+    return {(host, terminal['handle']): records[terminal['handle']]
+            for host, entry in data.items() for terminal in entry['terminals']
+            if terminal['handle'] in records and terminal['handle'] not in live_handles}
+
+
 def _git_metadata(cwd):
     """Read local git facts only; remote paths must never be probed locally."""
     if not cwd:
@@ -235,7 +255,7 @@ class Collector:
         self._sources[node_id] = source
         return facts
 
-    def _enrich(self, nodes, hosts, data, resolver, config, now):
+    def _enrich(self, nodes, hosts, data, resolver, config, now, retired=()):
         """Join projections and cheap overlays using the last completed probe pass."""
         roots = sorted({Path(node['worktree']) for node in nodes
                         if node['host'] == 'local' and node['worktree']})
@@ -260,7 +280,8 @@ class Collector:
                                                   short_name=(name if name in initiative_names
                                                               else short_name(full_name)),
                                                   run=None, matrix_host=None,
-                                                  waiting=0, stalled=0, notes=[], fallbacks=[]))
+                                                  waiting=0, stalled=0, notes=[], fallbacks=[],
+                                                  retired_workers=[]))
 
         for p in projections:
             matrix = build_matrix(p, resolver)
@@ -307,6 +328,15 @@ class Collector:
                 if record['run'] not in matrices:
                     record.update(run=run_id, matrix_host=next(
                         (host for host, records in data.items() if run in records['runs']), 'local'))
+        for worker in sorted(retired, key=lambda w: (w['host'], w['title'], w['dispatchId'])):
+            binding = bindings.get(worker['id'])
+            name = cluster_for(
+                worker['id'], run_objective=objectives.get(worker['handle']),
+                projection_cluster=binding[0].title if binding else None,
+                title=worker['title'], purpose='', worktree=worker['worktree'],
+                branch=worker['branch'], config=config)
+            cluster_record(name)['retired_workers'].append(
+                {key: worker[key] for key in ('title', 'dispatchId', 'state', 'retainedFor', 'host')})
         ladders = set()
         by_node = {node['id']: node for node in nodes}
         activity = {}
@@ -363,7 +393,10 @@ class Collector:
         for p in projections:
             matrices[p.run]['stalled'] = clusters[p.title]['stalled']
 
-        counts = running_workers({h: r['workers'] for h, r in data.items()},
+        retired_handles = {w['handle'] for w in retired}
+        counts = running_workers({h: [w for w in r['workers']
+                                      if w.get('agentTerminalHandle') not in retired_handles]
+                                  for h, r in data.items()},
                                  {h: r['terminals'] for h, r in data.items()})
         caps = dict(config.caps)
         # Sorted projection-file order makes overlapping host caps deterministic.
@@ -412,7 +445,9 @@ class Collector:
 
     def _poll_screens(self, host, records, workers):
         used = {t['handle'] for t in records['matches'].values()}
+        retired = _retired_workers({host: records}, used)
         candidates = [t for t in records['terminals'] if t['handle'] not in used
+                      and (host, t['handle']) not in retired
                       and (t.get('agentIdentity') or t['handle'] in workers)]
         candidates.sort(key=lambda t: self._screens.get((host, t['handle']), (0, ''))[0])
         for terminal in candidates:
@@ -471,6 +506,7 @@ class Collector:
         nodes, subagent_edges, facts_by_node = [], [], {}
         local_matches = _match_terminals(sessions, data.get('local', {}).get('terminals', []))
         git_by_path = slow['git']
+        retired = _retired_workers(data, {t['handle'] for t in local_matches.values()})
 
         def local_git(path):
             return git_by_path.get(path, (0, ('', '')))[1]
@@ -517,9 +553,24 @@ class Collector:
                 nodes.append(child)
                 subagent_edges.append(Edge(node_id, child_id, 1, agent.mtime, 'subagent'))
 
+        retired_nodes = []
         for host, records in data.items():
             for terminal in records['terminals']:
                 handle = terminal['handle']
+                worker = retired.get((host, handle))
+                if worker is not None:
+                    prefix = 'local' if host == 'local' else f'env:{host}'
+                    worktree = terminal.get('worktreePath') or ''
+                    root, branch = local_git(worktree) if host == 'local' else ('', '')
+                    stamp = terminal.get('lastOutputAt')
+                    retired_nodes.append(dict(
+                        id=f'{prefix}:term:{handle}', host=host, handle=handle,
+                        title=terminal.get('title') or '', worktree=root or worktree,
+                        branch=terminal.get('branch') or branch,
+                        dispatchId=worker.get('dispatchId') or worker.get('id') or '',
+                        state=worker['workerState'],
+                        retainedFor=max(0, int(now - stamp)) if stamp is not None else 0))
+                    continue
                 if (handle not in records['screens'] or (host == 'local' and
                         any(t['handle'] == handle for t in local_matches.values()))):
                     continue
@@ -558,7 +609,7 @@ class Collector:
                 inbox[host].append(dict(message, id=key))
         edges = build_edges(resolver, facts_by_node, inbox, self.first_seen) + subagent_edges
         visible = {node['id'] for node in nodes}
-        additions = self._enrich(nodes, hosts, data, resolver, config, now)
+        additions = self._enrich(nodes, hosts, data, resolver, config, now, retired_nodes)
         with self._slow_lock:
             self._local_input = (list(sessions),
                                  {n['worktree'] for n in nodes if n['host'] == 'local' and n['worktree']}
