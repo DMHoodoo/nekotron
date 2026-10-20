@@ -403,7 +403,7 @@ console.log(JSON.stringify({children: heading.children.map(text),
         return self.run_cluster_js(page_functions(
             'selectCluster', 'renderRail', 'lastTouched', 'foldable', 'stateLine', 'renderContext', 'openBroadcast',
             'openOverlay', 'updateBroadcastCount', 'broadcastTargets',
-            'selectNode', 'showContext', 'setText', 'age', 'secondsSince',
+            'selectNode', 'showContext', 'shortIds', 'setText', 'age', 'secondsSince',
             'paintFocus', 'drawEdges') + """
 const clusters = new Map([[cluster.id, cluster]]), nodeViews = new Map();
 let selectedCluster = null, assignmentChoices = '', overlayVersion = 0;
@@ -571,8 +571,19 @@ console.log(JSON.stringify(results));
     def run_cluster_js(self, source):
         return run_js(DOM + page_functions(
             'html', 'button', 'clusterInfo', 'clusterRun', 'clusterItems',
-            'renderCluster', 'renderFallback', 'detailLine', 'stepper',
+            'renderCluster', 'renderFallback', 'shortIds', 'detailLine', 'stepper',
             'matrixTable', 'gateContent', 'segmentBar', 'miniNode') + RUN_CLUSTER + source)
+
+    def test_long_hex_ids_are_shortened_in_run_box_now_line(self):
+        output = self.run_cluster_js("""
+const full = 'Reviewing c5a5627d' + 'a'.repeat(56) + ' now';
+run.now = full;
+renderCluster(cluster);
+const now = byClass(cluster.panel, 'cluster-now')[0];
+console.log(JSON.stringify({text: text(now), title: now.attributes.title, full}));
+""")
+        self.assertEqual(output['text'], 'Reviewing c5a5627d… now')
+        self.assertEqual(output['title'], output['full'])
 
     def test_collapsed_run_cluster_renders_now_line_and_slice_bars(self):
         output = self.run_cluster_js("""
@@ -650,7 +661,7 @@ console.log(JSON.stringify({
 
     def test_fallback_objective_and_identity_render_in_header_and_rail(self):
         source = DOM + page_functions('html', 'button', 'clusterInfo', 'clusterRun',
-                                     'clusterItems', 'renderCluster', 'detailLine',
+                                     'clusterItems', 'renderCluster', 'shortIds', 'detailLine',
                                      'renderFallback', 'renderContext')
         output = run_js(source + """
 const objective = 'Handoff scheduling: wave 1 running; waiting for approval | full objective';
@@ -670,7 +681,7 @@ console.log(JSON.stringify([text(cluster.panel), text($('context-details'))]));
 
     def test_fallback_renders_beside_projected_matrix(self):
         source = DOM + page_functions('html', 'button', 'clusterInfo', 'clusterRun',
-                                     'clusterItems', 'renderCluster', 'detailLine',
+                                     'clusterItems', 'renderCluster', 'shortIds', 'detailLine',
                                      'renderFallback', 'matrixTable', 'miniNode')
         output = run_js(source + """
 const objective = 'Review run: legacy work; waiting';
@@ -822,6 +833,18 @@ console.log(JSON.stringify({text: text(line), title: line.attributes.title, full
 """)
         self.assertEqual(output['text'], 'Now:  Reviewing c5a5627d… now')
         self.assertEqual(output['title'], output['full'])
+
+    def test_long_hex_ids_are_shortened_in_rail_fields(self):
+        output = run_page_js("""
+const full = 'Doing c5a5627d' + 'a'.repeat(56) + ' now';
+setText('doing', full); setText('said', 'plain');
+console.log(JSON.stringify({doing: $('doing').textContent, title: $('doing').attributes.title, full,
+  said: $('said').textContent, saidTitle: $('said').attributes.title ?? null}));
+""")
+        self.assertEqual(output['doing'], 'Doing c5a5627d… now')
+        self.assertEqual(output['title'], output['full'])
+        self.assertEqual(output['said'], 'plain')
+        self.assertIsNone(output['saidTitle'])
 
     def test_decision_strip_label_and_attention_style(self):
         output = self.run_decision_js("""

@@ -287,7 +287,17 @@ function svg(tag, attributes = {}, text) {
   if (text !== undefined) element.textContent = text;
   return element;
 }
-function setText(id, value) { $(id).textContent = value === null || value === undefined || value === '' ? 'Unknown' : value; }
+// A hex token of 32 or more characters shows as its first 8 plus an ellipsis; the full text stays in the title.
+function shortIds(value) {
+  const full = String(value);
+  return {full, shown: full.replace(/[0-9a-fA-F]{32,}/g, token => token.slice(0, 8) + '…')};
+}
+function setText(id, value) {
+  const element = $(id), empty = value === null || value === undefined || value === '';
+  const {full, shown} = shortIds(empty ? 'Unknown' : value);
+  element.textContent = shown;
+  if (shown !== full) element.setAttribute('title', full); else element.removeAttribute?.('title');
+}
 function secondsSince(epoch, now = Date.now() / 1000) { return epoch == null ? null : Math.max(0, now - epoch); }
 function age(epoch, now = Date.now() / 1000) {
   const seconds = secondsSince(epoch, now);
@@ -1313,7 +1323,10 @@ function renderCluster(cluster) {
     panel.append(html('p', `waiting on you: ${info.waiting || 0} · ${info.stalled || 0} stalled`, 'cluster-summary'));
   renderFallback(panel, info);
   if (run) {
-    panel.append(html('p', run.now, 'cluster-now'));
+    const now = html('p', undefined, 'cluster-now'), {full, shown} = shortIds(run.now ?? '');
+    now.textContent = shown;
+    if (shown !== full) now.setAttribute('title', full);
+    panel.append(now);
     if (!open || elsewhere) {
       for (const row of run.rows) {
         const line = html('div', undefined, 'slice-row'), cell = row.cells.implementing;
@@ -1414,8 +1427,7 @@ function ladderTable(cluster) {
   table.append(body); return table;
 }
 function detailLine(container, label, value) {
-  const full = value == null || value === '' ? '—' : String(value);
-  const shown = full.replace(/[0-9a-fA-F]{32,}/g, token => token.slice(0, 8) + '…');
+  const {full, shown} = shortIds(value == null || value === '' ? '—' : value);
   const line = html('p'); line.append(html('strong', `${label}: `), document.createTextNode(shown));
   if (shown !== full) line.setAttribute('title', full);
   container.append(line);
