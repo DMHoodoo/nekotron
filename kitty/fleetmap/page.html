@@ -63,12 +63,15 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospac
 .cluster-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .cluster-heading button { font-size: 12px; padding: 3px 6px; }
 .cluster-heading .cluster-toggle { font-weight: 650; font-size: 14px; }
-.stepper { display: flex; align-items: center; gap: 5px; margin-top: 6px; }
-.stepper span:first-child { width: 145px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.stepper i { width: 8px; height: 8px; border-radius: 50%; border: 1px solid #77839e; }
+.stepper { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.stepper span:first-child { flex-basis: 100%; }
+.stepper i { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; border: 1px solid #77839e; }
 .stepper i.reached { background: #4f8ef7; }
 .stepper i.current { outline: 2px solid #d2e1ff; outline-offset: 2px; }
 .cluster-summary { margin: 6px 0; color: #bfc6d9; }
+.slice-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; margin-top: 6px; }
+.slice-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slice-row .segments { grid-column: 1 / -1; }
 table { border-collapse: collapse; font-size: 11px; margin-top: 12px; width: 100%; }
 .matrix { min-width: 1130px; table-layout: fixed; }
 th, td { text-align: left; border: 1px solid #374058; padding: 8px; vertical-align: top; overflow-wrap: anywhere; }
@@ -320,7 +323,7 @@ function layoutFleet(hosts) {
       const cluster = ensureCluster({host: host.name, cluster: JSON.parse(id)[1]});
       const run = clusterRun(cluster), open = expanded.has(id);
       const saved = cluster.geometry;
-      const headerHeight = saved?.headerHeight ?? (125 + (run?.rows.length || 0) * 24);
+      const headerHeight = saved?.headerHeight ?? (125 + (run?.rows.length || 0) * 60);
       const baseWidth = saved?.baseWidth ?? Math.min(available, Math.max(340, Math.ceil(Math.sqrt(items.length)) * CELL + 20));
       const clusterWidth = saved?.width ?? (open ? available : baseWidth);
       if (saved) { x = saved.left; y = saved.top; }
@@ -766,16 +769,24 @@ function renderCluster(cluster) {
     showContext({run: run.run});
   })));
   panel.append(heading);
-  panel.append(html('p', `waiting on you: ${info.waiting || 0} · ${info.stalled || 0} stalled`, 'cluster-summary'));
+  if (info.waiting || info.stalled)
+    panel.append(html('p', `waiting on you: ${info.waiting || 0} · ${info.stalled || 0} stalled`, 'cluster-summary'));
   renderFallback(panel, info);
   if (run) {
-    for (const row of run.rows) panel.append(stepper(row));
-    const proofs = html('div', `Proofs: ${run.proofs.map(proof => `${proof.id} ${proof.status}`).join(' · ') || '—'}`, 'cluster-summary');
-    panel.append(proofs);
+    panel.append(html('p', run.now, 'cluster-now'));
+    if (!open || elsewhere) {
+      for (const row of run.rows) {
+        const line = html('div', undefined, 'slice-row'), cell = row.cells.implementing;
+        const name = html('span', row.name); name.title = row.name;
+        line.append(name, html('span', `verified ${cell.verified_units} of ${cell.total_units} units`), segmentBar(run, row));
+        panel.append(line);
+      }
+    }
     if (elsewhere) panel.append(button(`matrix on ${info.matrix_host}`, () => openRun(run.run), 'link'));
     else if (open) {
       const chief = html('div', 'Chief: '); chief.append(miniNode(run.chief_node)); panel.append(chief);
       panel.append(matrixTable(run));
+      panel.append(html('p', `Proofs: ${run.proofs.map(proof => `${proof.id} ${proof.status}`).join(' · ') || '—'}`, 'matrix-proofs'));
     }
   } else {
     if (open) panel.append(ladderTable(cluster));
@@ -790,6 +801,16 @@ function gateContent(run, row, stage, gate) {
   if (gate.stale?.moved) fragment.append(button('evidence stale', () => showContext({run: run.run, row: row.id, gate: stage}), 'link stale'));
   return fragment;
 }
+function segmentBar(run, row) {
+  const segments = html('div', undefined, 'segments');
+  for (const segment of row.cells.implementing.segments) {
+    const part = button(segment.id, () => showContext({run: run.run, package: segment.id}, segment.node));
+    part.style.flex = `${segment.size} 1 0`; part.style.background = packageColors[segment.state];
+    part.title = `${segment.id}: ${segment.state}, ${['', 'S', 'M', 'L'][segment.size]} (${segment.size} units)`;
+    part.setAttribute('aria-label', part.title); segments.append(part);
+  }
+  return segments;
+}
 function matrixTable(run) {
   const table = html('table', undefined, 'matrix'); table.setAttribute('aria-label', `${run.title} gate matrix`);
   const head = html('thead'), labels = html('tr');
@@ -797,19 +818,12 @@ function matrixTable(run) {
   head.append(labels); table.append(head);
   const body = html('tbody');
   for (const row of run.rows) {
-    const tr = html('tr'); tr.append(html('th', row.name));
+    const tr = html('tr'), slice = html('th'); slice.append(stepper(row)); tr.append(slice);
     for (const stage of stages) {
       const cell = row.cells[stage], td = html('td');
       if (stage === 'implementing') {
         td.append(html('div', `${cell.verified_units}/${cell.total_units} verified units`));
-        const segments = html('div', undefined, 'segments');
-        for (const segment of cell.segments) {
-          const part = button(segment.id, () => showContext({run: run.run, package: segment.id}, segment.node));
-          part.style.flex = `${segment.size} 1 0`; part.style.background = packageColors[segment.state];
-          part.title = `${segment.id}: ${segment.state}, ${['', 'S', 'M', 'L'][segment.size]} (${segment.size} units)`;
-          part.setAttribute('aria-label', part.title); segments.append(part);
-        }
-        td.append(segments);
+        td.append(segmentBar(run, row));
       } else if (stage === 'review') {
         for (const chip of cell.chips) {
           const badge = html('div', undefined, 'chip'); badge.append(html('div', chip.id), gateContent(run, row, chip.id, chip)); td.append(badge);

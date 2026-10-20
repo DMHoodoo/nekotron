@@ -34,20 +34,132 @@ def run_js(source):
 
 DOM = """
 class Element {
-  constructor() { this.children = []; this.textContent = ''; this.style = {}; }
+  constructor(tag = '') {
+    this.tagName = tag; this.children = []; this.textContent = '';
+    this.style = {}; this.attributes = {}; this.listeners = {};
+  }
   append(...items) { this.children.push(...items); }
   replaceChildren(...items) { this.children = items; }
-  setAttribute() {}
-  addEventListener() {}
+  setAttribute(name, value) { this.attributes[name] = value; }
+  addEventListener(name, action) { this.listeners[name] = action; }
+  click() { this.listeners.click?.(); }
 }
 const elements = new Map();
 const $ = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
-const document = {createElement: () => new Element(), createTextNode: text => String(text)};
+const document = {createElement: tag => new Element(tag), createTextNode: text => String(text),
+  createDocumentFragment: () => new Element()};
 const text = element => typeof element === 'string' ? element : element.textContent + element.children.map(text).join(' ');
+const descendants = element => [element, ...(element.children || []).flatMap(descendants)];
+const byClass = (element, name) => descendants(element).filter(child => (child.className || '').split(' ').includes(name));
+"""
+
+
+RUN_CLUSTER = """
+const stages = ['goal', 'design', 'plan', 'implementing', 'review', 'delivery', 'accepted'];
+const stageLabels = ['Goal', 'Design', 'Plan (readiness)', 'Implementing', 'Review', 'Delivery', 'Accepted'];
+const packageColors = {planned: '#6b7394', verified: '#298456', running: '#4f8ef7'};
+const makeRow = id => ({id, name: 'Slice ' + id, stage: 'implementing',
+  stepper: [1, 1, 1, 1, 0, 0, 0], live: [], cells: {
+    goal: {verdict: 'pass'}, design: {verdict: 'pass'}, plan: {verdict: 'pass'},
+    implementing: {verified_units: 2, total_units: 6, segments: [
+      {id: id + '-S', size: 1, state: 'planned', node: null},
+      {id: id + '-M', size: 2, state: 'verified', node: 'worker'},
+      {id: id + '-L', size: 3, state: 'running', node: null}]},
+    review: {chips: []}, delivery: {verdict: 'pending'}, accepted: {state: 'pending'}}});
+const run = {run: 'run_test', title: 'Review run', now: 'Checking the next delivery',
+  rows: [makeRow('1'), makeRow('2'), makeRow('3')],
+  proofs: [{id: 'E1', status: 'pass'}], chief_node: null};
+const info = {run: 'run_test', matrix_host: 'local', waiting: 0, stalled: 0};
+const snapshot = {clusters: {'Review run': info}, runs: {run_test: run}, nodes: []};
+const cluster = {id: 'cluster', name: 'Review run', host: 'local', panel: new Element()};
+const expanded = new Set(), nodes = new Map();
+let selectedId = null, selectedContext = null, miniViews = [];
+const selections = [];
+function showContext(context, node) { selections.push({context, node}); }
 """
 
 
 class FleetMapPage(unittest.TestCase):
+    def run_cluster_js(self, source):
+        return run_js(DOM + page_functions(
+            'html', 'button', 'clusterInfo', 'clusterRun', 'clusterItems',
+            'renderCluster', 'renderFallback', 'detailLine', 'stepper',
+            'matrixTable', 'gateContent', 'segmentBar', 'miniNode') + RUN_CLUSTER + source)
+
+    def test_collapsed_run_cluster_renders_now_line_and_slice_bars(self):
+        output = self.run_cluster_js("""
+renderCluster(cluster);
+const rows = byClass(cluster.panel, 'slice-row');
+for (const row of rows) byClass(row, 'segments')[0]?.children[1].click();
+console.log(JSON.stringify({panel: text(cluster.panel),
+  rows: rows.map(row => ({text: text(row), bars: byClass(row, 'segments').length,
+    parts: byClass(row, 'segments').flatMap(bar => bar.children.map(part => ({
+      flex: part.style.flex, color: part.style.background, label: part.attributes['aria-label']
+    })))})),
+  steppers: byClass(cluster.panel, 'stepper').length, selections}));
+""")
+        self.assertIn('Checking the next delivery', output['panel'])
+        self.assertNotIn('Proofs:', output['panel'])
+        self.assertEqual(len(output['rows']), 3)
+        for index, row in enumerate(output['rows'], 1):
+            self.assertIn(f'Slice {index}', row['text'])
+            self.assertIn('verified 2 of 6 units', row['text'])
+            self.assertEqual(row['bars'], 1)
+            self.assertEqual([part['flex'] for part in row['parts']],
+                             ['1 1 0', '2 1 0', '3 1 0'])
+            self.assertEqual(row['parts'][1]['color'], '#298456')
+            self.assertEqual(row['parts'][1]['label'],
+                             f'{index}-M: verified, M (2 units)')
+        self.assertEqual(output['steppers'], 0)
+        self.assertEqual(output['selections'], [
+            {'context': {'run': 'run_test', 'package': f'{index}-M'}, 'node': 'worker'}
+            for index in range(1, 4)])
+
+    def test_collapsed_counts_line_only_when_nonzero(self):
+        output = self.run_cluster_js("""
+const results = [];
+for (const projected of [true, false]) {
+  info.run = projected ? 'run_test' : null;
+  for (const [waiting, stalled] of [[0, 0], [1, 0], [0, 2], [0, 0]]) {
+    Object.assign(info, {waiting, stalled}); renderCluster(cluster);
+    results.push(byClass(cluster.panel, 'cluster-summary').map(text));
+  }
+}
+console.log(JSON.stringify(results));
+""")
+        self.assertEqual(output, [
+            [], ['waiting on you: 1 · 0 stalled'], ['waiting on you: 0 · 2 stalled'], []
+        ] * 2)
+
+    def test_matrix_holds_stepper_and_proofs(self):
+        output = self.run_cluster_js("""
+expanded.add(cluster.id); renderCluster(cluster);
+const table = byClass(cluster.panel, 'matrix')[0];
+const rows = table.children[1].children;
+const proof = cluster.panel.children[cluster.panel.children.indexOf(table) + 1];
+for (const row of rows) byClass(row.children[4], 'segments')[0].children[1].click();
+console.log(JSON.stringify({
+  rows: rows.map(row => ({first: text(row.children[0]),
+    steppers: byClass(row.children[0], 'stepper').length,
+    dots: descendants(row.children[0]).filter(child => child.tagName === 'i').length,
+    bars: byClass(row.children[4], 'segments').length})),
+  steppers: byClass(cluster.panel, 'stepper').length,
+  slices: byClass(cluster.panel, 'slice-row').length,
+  proof: proof ? {tag: proof.tagName, text: text(proof)} : null, selections}));
+""")
+        self.assertEqual(len(output['rows']), 3)
+        for index, row in enumerate(output['rows'], 1):
+            self.assertIn(f'Slice {index}', row['first'])
+            self.assertEqual(row['steppers'], 1)
+            self.assertEqual(row['dots'], 7)
+            self.assertEqual(row['bars'], 1)
+        self.assertEqual(output['steppers'], 3)
+        self.assertEqual(output['slices'], 0)
+        self.assertEqual(output['proof'], {'tag': 'p', 'text': 'Proofs: E1 pass'})
+        self.assertEqual(output['selections'], [
+            {'context': {'run': 'run_test', 'package': f'{index}-M'}, 'node': 'worker'}
+            for index in range(1, 4)])
+
     def test_fallback_objective_and_identity_render_in_header_and_rail(self):
         source = DOM + page_functions('html', 'button', 'clusterInfo', 'clusterRun',
                                      'clusterItems', 'renderCluster', 'detailLine',
