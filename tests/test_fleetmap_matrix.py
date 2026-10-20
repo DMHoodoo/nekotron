@@ -288,6 +288,106 @@ class GateMatrix(unittest.TestCase):
         self.assertEqual((cell['verified_units'], cell['total_units']), (2, 2))
         self.assertEqual(matrix['notes'], ['slice 1: unknown package missing; skipped'])
 
+    def test_invalid_stages_fall_back_to_goal_with_notes(self):
+        for stage in ('shipping', [], {}, None, 42):
+            with self.subTest(stage=stage):
+                p = projection(slices=[slice_row()])
+                p.slices[0]['stage'] = stage
+                matrix = build_matrix(p, self.resolver)
+                row = matrix['rows'][0]
+                self.assertEqual(row['stage'], 'goal')
+                self.assertEqual(row['stepper'], [1, 0, 0, 0, 0, 0, 0])
+                self.assertTrue(any('stage' in note for note in matrix['notes']))
+
+    def test_non_string_sizes_use_one_unit_with_notes(self):
+        for size in ([], {}, None, 42, True):
+            with self.subTest(size=size):
+                p = projection(packages=[package('P00', state='verified')])
+                p.packages[0]['size'] = size
+                matrix = build_matrix(p, self.resolver)
+                cell = matrix['rows'][0]['cells']['implementing']
+                self.assertEqual((cell['verified_units'], cell['total_units']), (1, 1))
+                self.assertEqual(cell['segments'][0]['size'], 1)
+                self.assertTrue(any('size' in note for note in matrix['notes']))
+
+    def test_malformed_packages_are_skipped_without_losing_valid_packages(self):
+        bad_records = [None, [], 'package', {}, {'id': []}]
+        for field in package('bad'):
+            record = package('bad')
+            del record[field]
+            bad_records.append(record)
+        for field, value in [('id', []), ('state', []), ('state', 'unknown'),
+                             ('dispatchId', []), ('machine', {}), ('blockedBy', None)]:
+            record = package('bad')
+            record[field] = value
+            bad_records.append(record)
+        for bad in bad_records:
+            with self.subTest(record=bad):
+                p = projection(packages=[package('P00', 'M', 'verified')])
+                p.packages.insert(0, bad)
+                matrix = build_matrix(p, self.resolver)
+                cell = matrix['rows'][0]['cells']['implementing']
+                self.assertEqual([segment['id'] for segment in cell['segments']], ['P00'])
+                self.assertEqual((cell['verified_units'], cell['total_units']), (2, 2))
+                self.assertTrue(any('packages[0]' in note for note in matrix['notes']))
+
+    def test_malformed_slices_are_skipped_without_losing_valid_rows(self):
+        bad_records = [None, [], 'slice', {}, {'id': []}]
+        for field in slice_row('bad'):
+            record = slice_row('bad')
+            del record[field]
+            bad_records.append(record)
+        for field, value in [('id', []), ('name', {}), ('gates', None),
+                             ('packages', None), ('packages', [[]])]:
+            record = slice_row('bad')
+            record[field] = value
+            bad_records.append(record)
+        for bad in bad_records:
+            with self.subTest(record=bad):
+                p = projection(slices=[slice_row()])
+                p.slices.insert(0, bad)
+                matrix = build_matrix(p, self.resolver)
+                self.assertEqual([row['id'] for row in matrix['rows']], ['1'])
+                self.assertTrue(any('slices[0]' in note for note in matrix['notes']))
+
+    def test_malformed_gates_are_skipped_at_run_and_slice_scope(self):
+        for bad in (None, [], {}, {'id': []},
+                    {'id': 'goal', 'verdict': [], 'at': None}):
+            for sliced in (False, True):
+                with self.subTest(gate=bad, sliced=sliced):
+                    p = projection(slices=[slice_row()] if sliced else [])
+                    p.gates = [bad, {'id': 'goal', 'verdict': 'pass', 'at': None}]
+                    if sliced:
+                        p.slices[0]['gates'] = [bad]
+                    matrix = build_matrix(p, self.resolver)
+                    self.assertEqual(matrix['rows'][0]['cells']['goal']['verdict'], 'pass')
+                    self.assertTrue(matrix['notes'])
+
+    def test_malformed_projection_containers_have_safe_defaults(self):
+        for field in ('packages', 'slices', 'gates', 'acceptance', 'decisions',
+                      'proofs', 'mergeGate'):
+            for value in (None, 42, 'bad'):
+                with self.subTest(field=field, value=value):
+                    p = projection()
+                    setattr(p, field, value)
+                    matrix = build_matrix(p, self.resolver)
+                    self.assertEqual(matrix['rows'][0]['stage'], 'goal')
+                    self.assertEqual(matrix['waiting'], 0)
+                    self.assertTrue(matrix['notes'])
+
+    def test_malformed_header_records_are_skipped_or_defaulted(self):
+        p = projection()
+        p.acceptance = {'state': []}
+        p.decisions = [None, {}, {'class': []}, {'class': 'C'}]
+        p.proofs = [None, {}, {'id': []}, {'id': 'E1', 'status': 'pass'}]
+        p.chiefTerminal = []
+        matrix = build_matrix(p, self.resolver)
+        self.assertEqual(matrix['rows'][0]['cells']['accepted'], {'state': 'pending'})
+        self.assertEqual(matrix['waiting'], 1)
+        self.assertEqual(matrix['proofs'], [{'id': 'E1', 'status': 'pass'}])
+        self.assertIsNone(matrix['chief_node'])
+        self.assertTrue(matrix['notes'])
+
 
 if __name__ == '__main__':
     unittest.main()
