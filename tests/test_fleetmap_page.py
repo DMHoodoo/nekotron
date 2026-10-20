@@ -699,12 +699,12 @@ console.log(JSON.stringify({collapsed, expanded: text(cluster.panel),
 
     def test_layout_preserves_positions_across_membership_thresholds_and_hosts(self):
         source = DOM + 'function viewportWidth() { return 1600; }\n' + page_functions('ensureRegion', 'ensureCluster', 'clusterInfo',
-                                     'clusterRun', 'nodeText', 'panelContentHeight', 'layoutFleet', 'endpoint',
+                                     'clusterRun', 'nodeText', 'panelContentHeight', 'layoutFleet', 'uiScale', 'viewportWidth', 'endpoint',
                                      'lastTouched', 'foldable', 'isFolded', 'clusterRetired')
         output = run_js(source + """
 const svg = () => new Element();
 const positions = new Map(), regions = new Map(), clusters = new Map(), expanded = new Set(), unfolded = new Set();
-const MIN_REGION = 420, CELL = 70, GAP = 16;
+const BASE_MIN_REGION = 420, BASE_CELL = 70, BASE_GAP = 16, LARGE_SCREEN = 2200, LARGE_RATIO = 14 / 12;
 let layoutSignature = '', layoutModeSignature = '', selectedId = null, searchQuery = '';
 function renderCluster() {}
 const clusterKey = node => JSON.stringify([node.host, node.cluster]);
@@ -807,10 +807,47 @@ renderDecisions();
 
     def test_decision_chip_has_three_lines(self):
         output = self.run_decision_js("""
-console.log(JSON.stringify(chip().children.map(text)));
+console.log(JSON.stringify(chip().children.filter(el => el.tagName === 'span').map(text)));
 """)
         self.assertEqual(output, ['Review run', 'Approve the delivery order for slice 2',
                                   'Class C · E3 · apply-by —'])
+
+    def test_long_hex_ids_are_shortened_in_now_lines(self):
+        output = self.run_decision_js("""
+const full = 'Reviewing c5a5627d' + 'a'.repeat(56) + ' now';
+const container = new Element('div');
+detailLine(container, 'Now', full);
+const line = container.children[0];
+console.log(JSON.stringify({text: text(line), title: line.attributes.title, full}));
+""")
+        self.assertEqual(output['text'], 'Now:  Reviewing c5a5627d… now')
+        self.assertEqual(output['title'], output['full'])
+
+    def test_decision_strip_label_and_attention_style(self):
+        output = self.run_decision_js("""
+const strip = descendants($('decisions'));
+const label = text($('decisions').children[0]);
+const first = chip();
+const open = {label, cls: first.className, dot: byClass(first, 'attention-dot').length};
+snapshot.decisions = []; renderDecisions();
+console.log(JSON.stringify({open, none: text($('decisions'))}));
+""")
+        self.assertEqual(output['open']['label'], 'Needs you · 1')
+        self.assertIn('attention', output['open']['cls'].split(' '))
+        self.assertEqual(output['open']['dot'], 1)
+        self.assertEqual(output['none'].strip(), 'Nothing needs you')
+
+    def test_large_screen_steps_font_and_node_size(self):
+        def probe(width):
+            return run_page_js(f"""
+var window = {{innerWidth: {width}}};
+const view = makeNode({{id: 'a', title: 'a', state: 'idle', kind: 'claude', host: 'local', cluster: 'T'}}, false);
+console.log(JSON.stringify({{font: baseFontPx(), radius: view.radius}}));
+""")
+        big, normal = probe(2560), probe(1512)
+        self.assertEqual(normal, {'font': 12, 'radius': 17})
+        self.assertEqual(big['font'], 14)
+        self.assertAlmostEqual(big['radius'], 17 * 14 / 12)
 
     def test_clicking_decision_opens_run_and_card(self):
         output = self.run_decision_js("""

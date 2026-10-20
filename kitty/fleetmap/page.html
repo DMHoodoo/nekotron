@@ -7,13 +7,13 @@
 <link rel="icon" href="data:,">
 <title>Fleet map</title>
 <style>
-:root { color-scheme: dark; font: 14px/1.5 system-ui, sans-serif; background: #10121a; color: #e4e7f0; }
+:root { --u: 1; color-scheme: dark; font: calc(14px * var(--u))/1.5 system-ui, sans-serif; background: #10121a; color: #e4e7f0; }
 * { box-sizing: border-box; }
 body { margin: 0; height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 58px auto minmax(0, 1fr) auto; }
-header input#search { margin-left: auto; background: #1b1f2c; border: 1px solid #303548; border-radius: 6px; color: inherit; font: inherit; font-size: 12px; padding: 4px 8px; width: 180px; }
+header input#search { margin-left: auto; background: #1b1f2c; border: 1px solid #303548; border-radius: 6px; color: inherit; font: inherit; font-size: calc(12px * var(--u)); padding: 4px 8px; width: 180px; }
 header { display: flex; align-items: center; gap: 20px; padding: 0 22px; border-bottom: 1px solid #303548; }
-h1 { font-size: 18px; margin: 0; font-weight: 650; }
-#status { color: #a0a8be; font-size: 12px; }
+h1 { font-size: calc(18px * var(--u)); margin: 0; font-weight: 650; }
+#status { color: #a0a8be; font-size: calc(12px * var(--u)); }
 #status button { background: none; border: 0; padding: 0 2px; color: inherit; font: inherit; cursor: pointer; text-decoration: underline dotted; }
 #status button[aria-pressed=true] { color: #fff; text-decoration: underline; }
 main { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; position: relative; }
@@ -38,12 +38,12 @@ main.rail-overlay #rail { position: fixed; top: 0; right: 0; bottom: 0; width: 9
 #map-scroll { overflow: auto; position: relative; }
 #map { display: block; min-width: 100%; min-height: 100%; }
 #rail { position: relative; overflow: auto; padding: 20px; padding-top: 34px; border-left: 1px solid #303548; background: #161924; }
-h2 { font-size: 17px; line-height: 1.4; margin: 0 0 10px; overflow-wrap: anywhere; }
+h2 { font-size: calc(17px * var(--u)); line-height: 1.4; margin: 0 0 10px; overflow-wrap: anywhere; }
 p { margin: 8px 0; }
 .muted, dt { color: #a0a8be; }
-#node-kind { font-size: 12px; color: #a0a8be; }
+#node-kind { font-size: calc(12px * var(--u)); color: #a0a8be; }
 dl { margin: 20px 0; }
-dt { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; margin-top: 15px; }
+dt { font-size: calc(11px * var(--u)); font-weight: 650; text-transform: uppercase; letter-spacing: .06em; margin-top: 15px; }
 dd { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 #partners, #moves { padding-left: 18px; margin: 6px 0; }
 #partners li, #moves li { margin-bottom: 6px; }
@@ -58,10 +58,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .error { background: #59252b; color: #ffd5d9; border: 1px solid #b75a67; border-radius: 5px; padding: 8px; margin-top: 10px; overflow-wrap: anywhere; }
 [hidden] { display: none !important; }
 form { margin-top: 18px; }
-label { display: block; margin: 8px 0 5px; color: #bfc6d9; font-size: 12px; }
+label { display: block; margin: 8px 0 5px; color: #bfc6d9; font-size: calc(12px * var(--u)); }
 input, select { width: 100%; min-width: 0; }
 form button { margin-top: 8px; }
-footer { padding: 10px 22px; border-top: 1px solid #303548; background: #161924; max-height: 27vh; overflow: auto; font-size: 11px; color: #b3bcd0; }
+footer { padding: 10px 22px; border-top: 1px solid #303548; background: #161924; max-height: 27vh; overflow: auto; font-size: calc(11px * var(--u)); color: #b3bcd0; }
 footer strong { color: #e4e7f0; }
 #legend-lines { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 3px 22px; margin-top: 5px; }
 #legend-lines p { margin: 0; }
@@ -70,32 +70,32 @@ footer strong { color: #e4e7f0; }
 dialog { width: min(820px, 90vw); max-height: 85vh; border: 1px solid #555f7a; border-radius: 12px; padding: 22px; background: #191e2b; color: #e4e7f0; }
 dialog::backdrop { background: #05070bd9; }
 .dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
-pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; background: #0e1119; padding: 16px; max-height: 60vh; overflow: auto; }
-.region-label { fill: #e4e7f0; font-size: 15px; font-weight: 650; }
-.cluster-label { fill: #bfc9e0; font-size: 12px; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font: calc(12px * var(--u))/1.5 ui-monospace, monospace; background: #0e1119; padding: 16px; max-height: 60vh; overflow: auto; }
+.region-label { fill: #e4e7f0; font-size: calc(15px * var(--u)); font-weight: 650; }
+.cluster-label { fill: #bfc9e0; font-size: calc(12px * var(--u)); }
 .fold-chip { cursor: pointer; }
 .fold-chip rect { fill: #232838; stroke: #4a5272; }
-.fold-chip text { fill: #bfc6d9; font-size: 11px; }
+.fold-chip text { fill: #bfc6d9; font-size: calc(11px * var(--u)); }
 .retired-chip { cursor: pointer; }
 .retired-chip rect { fill: #232838; stroke: #4a5272; stroke-dasharray: 3 2; }
-.retired-chip text { fill: #bfc6d9; font-size: 11px; }
-.node-label { fill: #bfc6d9; font-size: 10px; pointer-events: none; }
-.edge-badge { fill: #e4e7f0; stroke: #161924; stroke-width: 4px; paint-order: stroke; font-size: 10px; font-weight: 650; pointer-events: none; }
+.retired-chip text { fill: #bfc6d9; font-size: calc(11px * var(--u)); }
+.node-label { fill: #bfc6d9; font-size: calc(10px * var(--u)); pointer-events: none; }
+.edge-badge { fill: #e4e7f0; stroke: #161924; stroke-width: 4px; paint-order: stroke; font-size: calc(10px * var(--u)); font-weight: 650; pointer-events: none; }
 .node { cursor: pointer; outline: none; }
 .node .selection { stroke: transparent; }
 .node[aria-pressed="true"] .selection, .node:focus-visible .selection { stroke: #fff; }
 .attention { filter: drop-shadow(0 0 6px #f0803c); }
 #decisions { padding: 8px 22px; display: flex; gap: 8px; overflow: auto; max-height: 130px; border-bottom: 1px solid #303548; }
-#decisions button { min-width: 260px; text-align: left; font-size: 12px; }
+#decisions button { min-width: 260px; text-align: left; font-size: calc(12px * var(--u)); }
 #decisions button span { display: block; }
 #decisions .decision-title { font-weight: 600; }
 #decisions .decision-meta { color: #a0a8be; }
 .decision-card { border: 1px solid #303548; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
-.cluster-content { font-size: 12px; padding: 10px; overflow: auto; overflow-wrap: anywhere; height: 100%; box-sizing: border-box; }
+.cluster-content { font-size: calc(12px * var(--u)); padding: 10px; overflow: auto; overflow-wrap: anywhere; height: 100%; box-sizing: border-box; }
 .cluster-content p { margin: 6px 0; }
 .cluster-heading { display: flex; align-items: flex-start; gap: 10px; }
-.cluster-heading button { font-size: 12px; padding: 3px 6px; }
-.cluster-heading .cluster-toggle, .cluster-heading .cluster-name { font-weight: 650; font-size: 14px; }
+.cluster-heading button { font-size: calc(12px * var(--u)); padding: 3px 6px; }
+.cluster-heading .cluster-toggle, .cluster-heading .cluster-name { font-weight: 650; font-size: calc(14px * var(--u)); }
 .cluster-heading .cluster-toggle { flex: none; }
 .cluster-name { flex: 1 1 0; min-width: 0; padding-top: 3px; }
 .cluster-name { cursor: pointer; }
@@ -110,7 +110,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospac
 .slice-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; margin-top: 6px; }
 .slice-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slice-row .segments { grid-column: 1 / -1; }
-table { border-collapse: collapse; font-size: 11px; margin-top: 12px; width: 100%; }
+table { border-collapse: collapse; font-size: calc(11px * var(--u)); margin-top: 12px; width: 100%; }
 .matrix { min-width: 1130px; table-layout: fixed; }
 th, td { text-align: left; border: 1px solid #374058; padding: 8px; vertical-align: top; overflow-wrap: anywhere; }
 th { color: #bfc9e0; }
@@ -118,19 +118,24 @@ th { color: #bfc9e0; }
 .matrix th:nth-child(5) { width: 180px; }
 .matrix th:nth-child(6) { width: 150px; }
 .matrix th:last-child { width: 165px; }
-.chip { display: block; margin: 3px 0; padding: 2px 4px; border: 1px solid #555f7a; border-radius: 4px; font-size: 10px; }
+.chip { display: block; margin: 3px 0; padding: 2px 4px; border: 1px solid #555f7a; border-radius: 4px; font-size: calc(10px * var(--u)); }
 .pass, .accepted, .merged { color: #4cc38a; }
 .revise, .stale { color: #ffba71; }
 .pending { color: #a0a8be; }
 .stale { display: block; margin-top: 4px; }
 .segments { display: flex; gap: 2px; height: 26px; margin: 5px 0; }
-.segments button { min-width: 0; border: 0; white-space: nowrap; padding: 0; border-radius: 2px; font-size: 9px; color: #fff; overflow: hidden; }
+.segments button { min-width: 0; border: 0; white-space: nowrap; padding: 0; border-radius: 2px; font-size: calc(9px * var(--u)); color: #fff; overflow: hidden; }
 .live-node { display: inline-flex; flex-direction: column; align-items: center; width: 66px; vertical-align: top; }
-.live-node span { font-size: 10px; text-align: center; overflow-wrap: anywhere; }
+.live-node span { font-size: calc(10px * var(--u)); text-align: center; overflow-wrap: anywhere; }
 input[type=checkbox] { width: auto; }
 #overlay-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 #context-details { white-space: pre-wrap; overflow-wrap: anywhere; }
 #context-rail { margin-bottom: 20px; }
+#decisions { align-items: center; }
+#decisions strong.needs-you { color: #f0803c; }
+#decisions.empty { padding: 4px 22px; max-height: none; }
+#decisions button.decision-chip { border-color: #f0803c; }
+#decisions .attention-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #f0803c; box-shadow: 0 0 6px #f0803c; }
 </style>
 </head>
 <body>
@@ -234,7 +239,22 @@ const positions = new Map(); // Keyed by node id; ordinary polls retain the layo
 const regions = new Map();
 const clusters = new Map();
 const nodeViews = new Map();
-const MIN_REGION = 420, CELL = 70, GAP = 16;
+const BASE_MIN_REGION = 420, BASE_CELL = 70, BASE_GAP = 16;
+const LARGE_SCREEN = 2200, LARGE_RATIO = 14 / 12;
+function uiScale() { return viewportWidth() >= LARGE_SCREEN ? LARGE_RATIO : 1; }
+function baseFontPx() { return 12 * uiScale(); }
+let appliedScale = 1;
+function applyScale() {
+  const scale = uiScale();
+  if (typeof document !== 'undefined' && document.documentElement?.style?.setProperty)
+    document.documentElement.style.setProperty('--u', String(scale));
+  if (scale === appliedScale) return;
+  appliedScale = scale;
+  for (const view of nodeViews.values()) view.group.remove?.();
+  nodeViews.clear();
+  layoutModeSignature = '';
+}
+
 let layoutSignature = '', layoutModeSignature = '';
 let regionOrder = [];
 let snapshot = {hosts: [], nodes: [], edges: []};
@@ -385,10 +405,11 @@ function isFolded(node) {
     !(searchQuery && nodeMatches(node, searchQuery));
 }
 function layoutFleet(hosts) {
+  const scale = uiScale(), MIN_REGION = BASE_MIN_REGION * scale, CELL = BASE_CELL * scale, GAP = BASE_GAP * scale;
   const ordered = [...snapshot.nodes].sort((a, b) => a.id.localeCompare(b.id));
   const viewport = $('map-scroll').clientWidth;
   const phone = viewportWidth() < 700;
-  const mode = JSON.stringify([viewport, phone, [...expanded].sort()]);
+  const mode = JSON.stringify([viewport, phone, scale, [...expanded].sort()]);
   const repack = mode !== layoutModeSignature;
   layoutModeSignature = mode;
   let width = Math.max(viewport, phone ? 0 : hosts.length * MIN_REGION);
@@ -516,7 +537,7 @@ function layoutFleet(hosts) {
         const parent = positions.get(node.parent), point = positions.get(node.id);
         if (!parent || parent.cluster !== id) continue;
         // Outer selection rings: 22 px for a node, 22 * SUBAGENT_SCALE for a dot; keep a 4 px gap.
-        const stroke = 1.5, dotRadius = 22 * SUBAGENT_SCALE, reach = 22 + dotRadius + 4 + stroke;
+        const stroke = 1.5, dotRadius = 22 * scale * SUBAGENT_SCALE, reach = 22 * scale + dotRadius + 4 + stroke;
         for (let direction = 0; direction < 8; direction++) {
           const angle = direction * Math.PI / 4;
           const candidate = {x: parent.x + reach * Math.cos(angle), y: parent.y + reach * Math.sin(angle)};
@@ -587,7 +608,7 @@ const SUBAGENT_SCALE = 6 / 11;
 function makeNode(node, register = true) {
   const small = node.kind === 'subagent';
   // A subagent draws every ring at the same proportion to its 6 px core as a full node's 11 px core.
-  const k = small ? SUBAGENT_SCALE : 1;
+  const s = uiScale(), k = (small ? SUBAGENT_SCALE : 1) * s;
   const group = svg('g', {class: 'node', role: 'button', tabindex: 0});
   const title = svg('title');
   const hit = svg('circle', {r: 24 * k, fill: 'transparent'});
@@ -599,12 +620,12 @@ function makeNode(node, register = true) {
   defs.append(gradient);
   const pulse = svg('circle', {r: 11 * k, fill: 'none', 'stroke-width': 1.5 * k, opacity: .6});
   pulse.append(svg('animate', {attributeName: 'r', values: `${11 * k};${16 * k}`, dur: '1.6s', repeatCount: 'indefinite'}), svg('animate', {attributeName: 'opacity', values: '.6;0', dur: '1.6s', repeatCount: 'indefinite'}));
-  const body = svg('circle', {r: small ? 6 : 11, fill: `url(#${gradient.id})`});
-  const hatch = svg('circle', {r: small ? 6 : 11, fill: 'url(#stalled-hatch)', 'pointer-events': 'none'});
+  const body = svg('circle', {r: (small ? 6 : 11) * s, fill: `url(#${gradient.id})`});
+  const hatch = svg('circle', {r: (small ? 6 : 11) * s, fill: 'url(#stalled-hatch)', 'pointer-events': 'none'});
   const ringBackground = svg('circle', {r: 17 * k, fill: 'none', stroke: 'rgba(127,127,127,.25)', 'stroke-width': 3 * k});
   const ring = svg('circle', {r: 17 * k, fill: 'none', 'stroke-width': 3 * k, transform: 'rotate(-90)'});
-  const label = svg('text', {y: 36, 'text-anchor': 'middle', class: 'node-label'});
-  const badge = svg('text', {x: small ? 10 : 16, y: small ? -9 : -13, 'text-anchor': 'middle', class: 'edge-badge'});
+  const label = svg('text', {y: 36 * s, 'text-anchor': 'middle', class: 'node-label'});
+  const badge = svg('text', {x: (small ? 10 : 16) * s, y: (small ? -9 : -13) * s, 'text-anchor': 'middle', class: 'edge-badge'});
   // Decorative rings can cross a short parent attachment, but must not steal clicks.
   for (const decoration of [selection, ringBackground, ring, pulse]) decoration.setAttribute('pointer-events', 'none');
   group.append(defs, title, hit, selection, ringBackground, ring, pulse, body, hatch, label, badge);
@@ -905,6 +926,7 @@ function closeRail() {
   render(); paintFocus(); renderRail();
 }
 function render() {
+  applyScale();
   applyRail();
   nodes = new Map(snapshot.nodes.map(node => [node.id, node]));
   if (!nodes.has(hoveredId)) hoveredId = null;
@@ -1221,14 +1243,15 @@ function renderDecisions() {
   const signature = JSON.stringify(snapshot.decisions || []);
   if (decisionSignature === signature) return;
   decisionSignature = signature;
-  const strip = $('decisions'); strip.replaceChildren(html('strong', 'Decisions'));
-  for (const item of snapshot.decisions || []) {
-    const chip = button('', () => showDecision(item), 'decision-chip');
-    chip.append(html('span', item.title, 'decision-title'), html('span', item.text, 'decision-text'),
+  const strip = $('decisions'), open = snapshot.decisions || [];
+  strip.className = open.length ? '' : 'empty';
+  strip.replaceChildren(open.length ? html('strong', `Needs you · ${open.length}`, 'needs-you') : html('span', 'Nothing needs you', 'muted'));
+  for (const item of open) {
+    const chip = button('', () => showDecision(item), 'decision-chip attention');
+    chip.append(html('i', undefined, 'attention-dot'), html('span', item.title, 'decision-title'), html('span', item.text, 'decision-text'),
       html('span', `Class ${item.class} · ${item.id} · apply-by ${item.applyAt || '—'}`, 'decision-meta'));
     strip.append(chip);
   }
-  if (!snapshot.decisions?.length) strip.append(html('span', 'No open decisions', 'muted'));
 }
 function showDecision(item) {
   openRun(item.run, {run: item.run, decision: item.id});
@@ -1390,7 +1413,11 @@ function ladderTable(cluster) {
   table.append(body); return table;
 }
 function detailLine(container, label, value) {
-  const line = html('p'); line.append(html('strong', `${label}: `), document.createTextNode(value == null || value === '' ? '—' : String(value))); container.append(line);
+  const full = value == null || value === '' ? '—' : String(value);
+  const shown = full.replace(/[0-9a-fA-F]{32,}/g, token => token.slice(0, 8) + '…');
+  const line = html('p'); line.append(html('strong', `${label}: `), document.createTextNode(shown));
+  if (shown !== full) line.setAttribute('title', full);
+  container.append(line);
 }
 function renderFallback(container, info) {
   for (const fallback of info?.fallbacks || []) {
