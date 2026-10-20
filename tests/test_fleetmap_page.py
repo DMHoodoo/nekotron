@@ -535,7 +535,7 @@ console.log(JSON.stringify([collapsed, {text: text(name), title: name.attributes
              'title': 'Review run: finish the pending delivery with all evidence'}])
 
     def test_node_label_wraps_to_two_lines_at_a_space(self):
-        output = run_js(DOM + page_functions('nodeState', 'nodeMatches', 'nodeDimmed', 'paintNode') + """
+        output = run_js(DOM + page_functions('age', 'hoverText', 'nodeState', 'nodeMatches', 'nodeDimmed', 'paintNode') + """
 const svg = (tag, attrs = {}) => {
   const element = new Element(tag);
   for (const [key, value] of Object.entries(attrs)) element.setAttribute(key, value);
@@ -1127,6 +1127,41 @@ console.log(JSON.stringify({focused, stolen, prevented, query: searchQuery, valu
         self.assertEqual(output['value'], '')
         self.assertEqual(set(output['opacities'].values()), {1})
         self.assertNotIn('match', output['status'])
+
+    def test_hover_has_title_doing_said_ages_repo(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+const now = 1000000;
+const long = 'x'.repeat(200);
+const full = {id: 'h', title: 'Fix it', purpose: 'the first prompt', doing: long, last_said: long,
+  you_at: now - 7300, it_at: now - 310, repository: 'glow-core', repo: 'wt-dir', branch: 'fix/it'};
+const legacy = Object.assign({}, full, {repository: undefined});
+console.log(JSON.stringify({lines: hoverText(full, now).split('\\n'), legacy: hoverText(legacy, now).split('\\n')[4]}));
+""")
+        cut = 'x' * 79 + '…'
+        self.assertEqual(output['lines'], ['Fix it', 'Doing: ' + cut, 'Said: ' + cut,
+                                           'You: 2h · It: 5m', 'glow-core · fix/it'])
+        self.assertEqual(output['legacy'], 'wt-dir · fix/it')
+
+    def test_hover_omits_missing_lines_and_never_shows_prompt(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+const now = 1000000;
+const node = {id: 'h', title: 'Fix it', purpose: 'p'.repeat(10000), you_at: now - 60, it_at: now - 5,
+  repo: 'wt', branch: 'b'};
+const card = hoverText(node, now);
+console.log(JSON.stringify({lines: card.split('\\n'), hasPrompt: card.includes('ppp')}));
+""")
+        self.assertEqual(output['lines'], ['Fix it', 'You: 1m · It: 5s', 'wt · b'])
+        self.assertFalse(output['hasPrompt'])
+
+    def test_escape_in_dialog_leaves_search_alone(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+type('6897');
+$('overlay').open = true;
+document.dispatch('keydown', {key: 'Escape'});
+console.log(JSON.stringify({query: searchQuery, value: $('search').value}));
+""")
+        self.assertEqual(output['query'], '6897')
+        self.assertEqual(output['value'], '6897')
 
     def test_search_combines_with_state_filter(self):
         output = run_page_js(self.SEARCH_FIXTURE + """
