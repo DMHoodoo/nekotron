@@ -771,5 +771,84 @@ console.log(JSON.stringify({first, stages, boxes, stableBoxes, regionBoxes, stab
             self.assertIn(value, html)
 
 
+    def run_decision_js(self, source, chief=True):
+        return self.run_selection_js(page_functions(
+            'renderDecisions', 'openRun', 'showDecision', 'decisionCard', 'openSend',
+            'clusterKey', 'svg') + """
+let decisionSignature = '', actionBusy = false;
+const makeNode = () => ({group: new Element(), label: new Element()}), paintNode = () => {};
+const requests = [], NS = 'svg';
+document.createElementNS = (_, tag) => new Element(tag);
+const request = async (path, body) => requests.push([path, body]);
+const runAction = async work => work();
+$('send-form').hidden = true; $('send-text').value = 'stale'; $('send-text').focus = () => {};
+run.chief_node = 'chief';
+Object.assign(run, {merge_gate: {ready: false, classDOpen: 0, classBUnratified: 0},
+  run_plan: {path: 'plan.md', commit: 'abc'}, notes: []});
+""" + ("""
+const chief = {id: 'chief', title: 'Chief', cluster: 'Review run', host: 'local',
+  state: 'idle', kind: 'claude'};
+snapshot.nodes = [chief]; nodes.set('chief', chief);
+""" if chief else "") + """
+snapshot.decisions = [{run: 'run_test', title: 'Review run', id: 'E3', class: 'C',
+  text: 'Approve the delivery order for slice 2', packet: 'P-12', applyAt: null}];
+const chip = () => descendants($('decisions')).find(el => el.tagName === 'button');
+const card = () => byClass($('context-details'), 'decision-card')[0];
+const buttonNamed = (root, name) => descendants(root).find(el => el.tagName === 'button' && text(el) === name);
+renderDecisions();
+""" + source)
+
+    def test_decision_chip_has_three_lines(self):
+        output = self.run_decision_js("""
+console.log(JSON.stringify(chip().children.map(text)));
+""")
+        self.assertEqual(output, ['Review run', 'Approve the delivery order for slice 2',
+                                  'Class C · E3 · apply-by —'])
+
+    def test_clicking_decision_opens_run_and_card(self):
+        output = self.run_decision_js("""
+chip().click();
+const found = card();
+console.log(JSON.stringify({expanded: [...expanded], decision: selectedContext?.decision,
+  run: selectedContext?.run, card: found ? text(found) : null,
+  mini: found ? byClass(found, 'live-node').length : 0,
+  buttons: found ? descendants(found).filter(el => el.tagName === 'button').map(text) : []}));
+""")
+        self.assertEqual(output['expanded'], ['["local","Review run"]'])
+        self.assertEqual(output['decision'], 'E3')
+        self.assertEqual(output['run'], 'run_test')
+        for part in ('Approve the delivery order for slice 2', 'P-12',
+                     'Clears when the Chief records it'):
+            self.assertIn(part, output['card'])
+        self.assertEqual(output['mini'], 1)
+        self.assertEqual(output['buttons'], ['Reply to Chief', 'Open run plan'])
+
+    def test_reply_to_chief_prefills_send_overlay(self):
+        output = self.run_decision_js("""
+chip().click();
+buttonNamed(card(), 'Reply to Chief').click();
+console.log(JSON.stringify({dialog: $('overlay').open, node: dialogNodeId,
+  title: $('overlay-title').textContent, formHidden: $('send-form').hidden,
+  value: $('send-text').value}));
+""")
+        self.assertTrue(output['dialog'])
+        self.assertEqual(output['node'], 'chief')
+        self.assertIn('Chief', output['title'])
+        self.assertFalse(output['formHidden'])
+        self.assertEqual(output['value'], 'Decision E3: ')
+
+    def test_decision_card_without_chief_node(self):
+        output = self.run_decision_js("""
+chip().click();
+const found = card();
+console.log(JSON.stringify({card: found ? text(found) : null,
+  mini: found ? byClass(found, 'live-node').length : 0,
+  buttons: found ? descendants(found).filter(el => el.tagName === 'button').map(text) : []}));
+""", chief=False)
+        self.assertIn('Approve the delivery order for slice 2', output['card'])
+        self.assertEqual(output['mini'], 0)
+        self.assertEqual(output['buttons'], ['Open run plan'])
+
+
 if __name__ == "__main__":
     unittest.main()
