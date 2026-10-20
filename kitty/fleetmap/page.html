@@ -444,10 +444,19 @@ function updateNode(node) {
 function paintNode(node, view) {
   view.hatch.style.display = node.stalled ? '' : 'none';
   view.group.setAttribute('aria-pressed', String(selectedId === node.id));
-  const title = node.title || node.id;
+  const title = node.title || node.purpose || node.id;
   view.group.setAttribute('aria-label', `${title}, ${node.state}, ${node.kind}`);
+  view.group.setAttribute('title', title);
   view.title.textContent = `${title}\n${node.purpose || node.doing || ''}`;
-  view.label.textContent = title.length > 11 ? `${title.slice(0, 10)}…` : title;
+  let split = title.lastIndexOf(' ', 11);
+  if (split < 1) split = title.slice(0, 22).indexOf(' ');
+  const lines = title.length > 11 && split > 0
+    ? [title.slice(0, split), title.slice(split + 1).trimStart()] : [title];
+  view.label.replaceChildren(...lines.map((line, index) => {
+    const span = svg('tspan', {x: 0, dy: index ? 12 : 0});
+    span.textContent = line.length > 11 ? `${line.slice(0, 10)}…` : line;
+    return span;
+  }));
   const color = colors[node.state] || colors.idle;
   const hours = (secondsSince(node.it_at) || 0) / 3600;
   const centerOpacity = 1 - .85 * Math.min(1, Math.max(0, (hours - 1) / 47));
@@ -756,12 +765,13 @@ function renderCluster(cluster) {
   const priorViews = miniViews; miniViews = [];
   panel.replaceChildren();
   const heading = html('div', undefined, 'cluster-heading');
-  const toggle = button(`${open ? '▾' : '▸'} ${cluster.name}`, () => {
+  const toggle = button(`${open ? '▾' : '▸'} ${info.short_name || cluster.name}`, () => {
     if (elsewhere) { openRun(run.run); return; }
     if (expanded.has(cluster.id)) expanded.delete(cluster.id); else expanded.add(cluster.id);
     selectedContext = {cluster: cluster.name, run: run?.run}; selectedId = null;
     render();
   }, 'cluster-toggle');
+  toggle.setAttribute('title', info.name || cluster.name);
   toggle.setAttribute('aria-expanded', String(open));
   heading.append(toggle, button('Send to all', () => openBroadcast(cluster.name)));
   if (run) heading.append(button('Open run plan', () => runAction(async () => {

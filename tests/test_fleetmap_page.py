@@ -80,6 +80,52 @@ function showContext(context, node) { selections.push({context, node}); }
 
 
 class FleetMapPage(unittest.TestCase):
+    def test_cluster_heading_uses_short_name_with_full_title(self):
+        output = self.run_cluster_js("""
+info.name = cluster.name;
+info.short_name = 'Short review';
+renderCluster(cluster);
+let toggle = byClass(cluster.panel, 'cluster-toggle')[0];
+const collapsed = {text: text(toggle), title: toggle.attributes.title};
+expanded.add(cluster.id); renderCluster(cluster);
+toggle = byClass(cluster.panel, 'cluster-toggle')[0];
+console.log(JSON.stringify([collapsed, {text: text(toggle), title: toggle.attributes.title}]));
+""")
+        self.assertEqual(output, [
+            {'text': '▸ Short review', 'title': 'Review run'},
+            {'text': '▾ Short review', 'title': 'Review run'}])
+
+    def test_node_label_wraps_to_two_lines_at_a_space(self):
+        output = run_js(DOM + page_functions('paintNode') + """
+const svg = (tag, attrs = {}) => {
+  const element = new Element(tag);
+  for (const [key, value] of Object.entries(attrs)) element.setAttribute(key, value);
+  return element;
+};
+const selectedId = null, colors = {idle: '#888'}, secondsSince = () => 0;
+const view = Object.fromEntries(['hatch', 'group', 'title', 'label', 'center',
+  'rim', 'body', 'pulse', 'ring'].map(key => [key, new Element()]));
+const titles = ['Handoff scheduling engineering OS run', 'Report-task-four',
+  'Short', 'Eleven chars', 'One two three four five', 'Longfirstword second'];
+const results = titles.map(title => {
+  paintNode({id: 'node', title, state: 'idle', kind: 'claude'}, view);
+  return {lines: view.label.children.length ? view.label.children.map(child => child.textContent)
+    : [view.label.textContent], title: view.group.attributes.title,
+    positions: view.label.children.map(child => [child.attributes.x, child.attributes.dy])};
+});
+console.log(JSON.stringify(results));
+""")
+        for result, title, lines in zip(output, [
+                'Handoff scheduling engineering OS run', 'Report-task-four', 'Short',
+                'Eleven chars', 'One two three four five', 'Longfirstword second'], [
+                ['Handoff', 'scheduling…'], ['Report-tas…'], ['Short'],
+                ['Eleven', 'chars'], ['One two', 'three four…'],
+                ['Longfirstw…', 'second']]):
+            self.assertEqual(result['lines'], lines)
+            self.assertEqual(result['title'], title)
+            if len(lines) == 2:
+                self.assertEqual(result['positions'], [[0, 0], [0, 12]])
+
     def run_cluster_js(self, source):
         return run_js(DOM + page_functions(
             'html', 'button', 'clusterInfo', 'clusterRun', 'clusterItems',

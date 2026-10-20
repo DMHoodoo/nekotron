@@ -108,6 +108,31 @@ class SnapshotAssembler(unittest.TestCase):
                       [{'id': value.run, 'objective': 'Legacy objective',
                         'coordinator_handle': value.chiefTerminal}])
 
+    def test_short_name_keeps_initiative_names(self):
+        for name in ('Core lint speed', 'Core lint speed across every project today'):
+            with self.subTest(name=name):
+                self.config.write_text(json.dumps({
+                    'assign': {'s1': name},
+                    'projects': [{'name': name, 'slices': [{
+                        'name': 'Root cause', 'stage': 'review', 'sessions': ['s1']}]}]}))
+                snapshot = self.collector().snapshot()
+                self.assertEqual(snapshot['clusters'][name]['short_name'], name)
+
+    def test_every_snapshot_cluster_has_short_name(self):
+        title = 'Projected initiative name with more than five words'
+        self.write_projection(projection(title=title))
+        objective = 'Review PR 6869 under Engineering OS run 20261007'
+        self.orca.responses[None, ('orchestration', 'run-list')]['runs'].append({
+            'id': 'legacy', 'objective': objective})
+        snapshot = self.collector().snapshot()
+        self.assertGreaterEqual(len(snapshot['clusters']), 3)
+        for record in snapshot['clusters'].values():
+            self.assertIsInstance(record['short_name'], str)
+        self.assertEqual(snapshot['clusters'][title]['short_name'], title)
+        self.assertEqual(snapshot['clusters'][objective]['short_name'],
+                         'Review PR 6869 under Engineering…')
+        self.assertEqual(snapshot['clusters'][objective]['name'], objective)
+
     def test_local_worktree_run_status_reaches_run_and_cluster_and_refreshes(self):
         root = self.base / 'checkout'
         directory = root / 'engineering-os' / 'run_a'

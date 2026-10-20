@@ -9,7 +9,7 @@ import threading
 import time
 
 import fleet_tmux
-from .clusters import CONFIG_PATH, cluster_for, load, stage_for
+from .clusters import CONFIG_PATH, cluster_for, load, short_name, stage_for
 from .edges import Edge, Resolver, build_edges
 from .ladder import Ladder, never_prompted
 from .matrix import build_matrix, derive_stage
@@ -246,11 +246,18 @@ class Collector:
         projections = [p for p in projections if p.run in orca_runs]
         by_run = {p.run: p for p in projections}
         matrices, bindings, clusters = {}, {}, {}
+        initiative_names = ({name for name, _ in config.initiatives}
+                            | set(config.assign.values())
+                            | {project['name'] for project in config.projects}
+                            | {p.title for p in projections})
         with self._slow_lock:
             slow = self._slow
 
         def cluster_record(name):
-            return clusters.setdefault(name, dict(name=name, run=None, matrix_host=None,
+            return clusters.setdefault(name, dict(name=name,
+                                                  short_name=(name if name in initiative_names
+                                                              else short_name(name)),
+                                                  run=None, matrix_host=None,
                                                   waiting=0, stalled=0, notes=[], fallbacks=[]))
 
         for p in projections:
