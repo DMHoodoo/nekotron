@@ -339,6 +339,7 @@ class Collector:
                 data[host['name']] = self._poll_host(host['name'], sessions)
             except OrcaError as error:
                 host.update(reachable=False, error=str(error))
+                host.setdefault('degraded', []).append(f'terminals: {error}')
         # Unscoped worker-list inherits the launcher's run. A run and its
         # dispatch records can live on different runtimes, so query every known
         # run on each reachable host before resolving package dispatch IDs.
@@ -354,8 +355,6 @@ class Collector:
             degraded = data.get(host['name'], {}).get('degraded', [])
             if degraded:
                 host.setdefault('degraded', []).extend(degraded)
-        if 'local' not in data:
-            sessions = []
         tmux = self.tmux_sessions() if sessions else {}
         workers = {worker.get('agentTerminalHandle') for records in data.values()
                    for worker in records['workers'] if worker.get('agentTerminalHandle')}

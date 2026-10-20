@@ -366,7 +366,7 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertFalse([n for n in snap['nodes'] if n['host'] == 'laptop2'])
         self.assertEqual(len(snap['nodes']), 1)
 
-    def test_only_terminal_list_failure_discards_host_nodes(self):
+    def test_terminal_failure_retains_independent_local_sessions(self):
         self.orca.put('terminal list', 'terminals', [terminal('term_remote')], 'laptop2')
         for env in (None, 'laptop2'):
             with self.subTest(env=env):
@@ -375,7 +375,20 @@ class SnapshotAssembler(unittest.TestCase):
                 host = 'local' if env is None else env
                 record = next(h for h in snap['hosts'] if h['name'] == host)
                 self.assertEqual((record['reachable'], record['error']), (False, 'offline'))
-                self.assertFalse([n for n in snap['nodes'] if n['host'] == host])
+                self.assertEqual(len([n for n in snap['nodes'] if n['host'] == host]),
+                                 1 if host == 'local' else 0)
+
+    def test_local_missing_orca_and_timeout_keep_transcript_and_kitty(self):
+        self.local[0] = replace(self.local[0], kitty_key='111-7')
+        for error in ('orca missing', 'terminal-list timeout'):
+            with self.subTest(error=error):
+                self.orca.errors = {(None, ('terminal', 'list')): OrcaError(error)}
+                snap = self.collector().snapshot()
+                node = self.node(snap)
+                self.assertEqual(node['hosting'], 'kitty')
+                self.assertTrue(node['purpose'])
+                self.assertIsNone(node['terminal'])
+                self.assertIn(error, snap['hosts'][0]['degraded'][0])
 
     def test_optional_source_failure_preserves_host_nodes(self):
         self.orca.put('terminal list', 'terminals', [terminal(), terminal('term_other')])
