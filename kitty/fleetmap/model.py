@@ -76,7 +76,7 @@ def _node(node_id, host, kind, facts=None):
         stalled=False, ladder=None, stage=None, cluster_source='unsorted',
         activity_changed_at=None, transcript_offset=facts.offset, last_output_at=None,
         run=None, pin_overridden=None,
-        moves=[list(move) for move in facts.moves], terminal=None, tmux=None, kitty_window=None)
+        moves=[list(move) for move in facts.moves], terminal=None, tmux=None, kitty_window=None, kitty_pid=None)
 
 
 def _run_objectives(data):
@@ -405,6 +405,7 @@ class Collector:
                         repo=Path(root or session.cwd).name, hosting=hosting,
                         terminal=handle, tmux=tmux_name,
                         last_output_at=terminal.get('lastOutputAt'),
+                        kitty_pid=int(session.kitty_key.split('-', 1)[0]) if session.kitty_key else None,
                         kitty_window=int(session.kitty_key.rsplit('-', 1)[1]) if session.kitty_key else None,
                         ctx_pct=session.ctx_pct, cost=session.cost,
                         state=session.hook_state if session.hook_state in ('attention', 'done')

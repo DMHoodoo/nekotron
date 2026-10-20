@@ -128,7 +128,7 @@ class LocalRegistry(unittest.TestCase):
         with patch('os.path.exists', return_value=False):
             [session] = self.sessions(ps)
         self.assertEqual((session.kitty_key, session.hook_state, session.ctx_pct, session.cost),
-                         (None, None, None, None))
+                         ('123-4', None, None, None))
 
     def test_session_hook_takes_precedence_over_kitty_hook(self):
         self.write_registry()

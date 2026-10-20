@@ -301,7 +301,7 @@ class SnapshotAssembler(unittest.TestCase):
             'id', 'host', 'kind', 'parent', 'title', 'purpose', 'doing', 'last_said',
             'state', 'you_at', 'it_at', 'never_addressed', 'never_prompted', 'cluster', 'repo',
             'worktree', 'branch', 'hosting', 'model', 'ctx_pct', 'cost', 'moves',
-            'terminal', 'tmux', 'kitty_window', 'subagents_total', 'subagents_shown',
+            'terminal', 'tmux', 'kitty_window', 'kitty_pid', 'subagents_total', 'subagents_shown',
             'stalled', 'ladder', 'stage', 'cluster_source', 'activity_changed_at',
             'transcript_offset', 'last_output_at', 'run', 'pin_overridden'})
         self.assertEqual((node['title'], node['purpose'], node['doing'], node['last_said']),
@@ -535,6 +535,7 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertEqual((node['hosting'], node['tmux'], node['kitty_window']), ('tmux', 'neko-test', 7))
         self.tmux.clear()
         self.assertEqual(self.node(collector.snapshot())['hosting'], 'kitty')
+        self.assertEqual(self.node(collector.snapshot())['kitty_pid'], 456)
         self.local[0] = replace(self.local[0], kitty_key=None)
         snap = collector.snapshot()
         self.assertEqual(self.node(snap)['hosting'], 'orca')

@@ -23,7 +23,7 @@ from fleetmap.orca import OrcaClient
 
 def node(**fields):
     return dict(dict(hosting='orca', host='local', terminal='term_z',
-                     tmux=None, kitty_window=None), **fields)
+                     tmux=None, kitty_window=None, kitty_pid=os.getpid()), **fields)
 
 
 class ActionRouting(unittest.TestCase):
@@ -39,6 +39,9 @@ class ActionRouting(unittest.TestCase):
         self.sock.touch()
         self.addCleanup(patch.stopall)
         patch('fleetmap.actions.glob.glob', return_value=[str(self.sock)]).start()
+        exists = os.path.exists
+        patch('fleetmap.actions.os.path.exists', side_effect=lambda path:
+              True if str(path).startswith('/tmp/kitty-ctl-') else exists(path)).start()
 
     def fake(self, name, stdout=b'', stderr=b'', code=0):
         path = self.base / name
@@ -59,7 +62,7 @@ class ActionRouting(unittest.TestCase):
         return self.calls(name)[-1]['argv']
 
     def kitty_args(self, command):
-        return ['@', '--to', f'unix:{self.sock}', command, '--match', 'id:42']
+        return ['@', '--to', f'unix:/tmp/kitty-ctl-{os.getpid()}', command, '--match', 'id:42']
 
     def test_broadcast_continues_after_a_target_failure(self):
         targets = [node(id='bad', hosting='unknown'), node(id='good')]
@@ -248,25 +251,24 @@ class ActionRouting(unittest.TestCase):
             with self.assertRaisesRegex(ActionError, 'timed out text'):
                 actions.peek(target)
 
-    def test_newest_live_socket_skips_dead_and_malformed_names(self):
-        old = self.base / 'kitty-ctl-101'
-        new = self.base / 'kitty-ctl-102'
-        dead = self.base / 'kitty-ctl-103'
-        malformed = self.base / 'kitty-ctl-invalid'
-        for stamp, path in enumerate((old, new, dead, malformed), 1):
-            path.touch()
-            os.utime(path, (stamp, stamp))
-        with patch('fleetmap.actions.glob.glob', return_value=list(map(str, (old, dead, new, malformed)))):
-            with patch('fleetmap.actions.os.kill', side_effect=lambda pid, sig:
-                       (_ for _ in ()).throw(ProcessLookupError()) if pid == 103 else None) as kill:
-                self.actions.peek(node(hosting='kitty', kitty_window=42))
-        self.assertEqual(self.argv('kitten')[2], f'unix:{new}')
-        self.assertEqual(kill.call_args_list, [unittest.mock.call(103, 0), unittest.mock.call(102, 0)])
+    def test_overlapping_windows_use_only_the_owning_instance(self):
+        with patch('fleetmap.actions.os.kill', return_value=None), \
+                patch('fleetmap.actions.glob.glob', return_value=['/tmp/kitty-ctl-222']):
+            for pid in (111, 222):
+                target = node(hosting='kitty', kitty_pid=pid, kitty_window=7)
+                for action in ('peek', 'jump', 'send', 'close'):
+                    getattr(self.actions, action)(target, *(['line'] if action == 'send' else []))
+                    self.assertEqual(self.argv('kitten')[2], f'unix:/tmp/kitty-ctl-{pid}')
+                    self.assertIn('id:7', self.argv('kitten'))
 
-    def test_no_live_socket_raises_action_error(self):
-        with patch('fleetmap.actions.glob.glob', return_value=[]):
-            with self.assertRaisesRegex(ActionError, 'kitty.*socket'):
-                self.actions.peek(node(hosting='kitty', kitty_window=42))
+    def test_vanished_owner_never_uses_another_live_socket(self):
+        with patch('fleetmap.actions.os.path.exists', side_effect=lambda path: path.endswith('-222')), \
+                patch('fleetmap.actions.glob.glob', return_value=['/tmp/kitty-ctl-222']):
+            for action in ('peek', 'jump', 'send', 'close'):
+                with self.assertRaisesRegex(ActionError, 'socket disappeared'):
+                    getattr(self.actions, action)(node(hosting='kitty', kitty_pid=111, kitty_window=7),
+                                                  *(['line'] if action == 'send' else []))
+        self.assertFalse((self.base / 'kitten.jsonl').exists())
 
     def test_missing_targets_and_unknown_hosts_do_not_run_commands(self):
         for target in (node(terminal=None), node(hosting='kitty'),

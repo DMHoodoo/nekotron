@@ -142,13 +142,13 @@ def list_local_sessions(*, sessions_dir=SESSIONS, projects_dir=PROJECTS,
         kitty_pid = _env(command, 'KITTY_PID')
         kitty_window = _env(command, 'KITTY_WINDOW_ID')
         kitty_key = None
-        if (kitty_pid and kitty_window
-                and os.path.exists(f'/tmp/kitty-ctl-{kitty_pid}')):
+        if (kitty_pid and kitty_window and kitty_pid.isdigit() and kitty_window.isdigit()
+                and int(kitty_pid) > 0):
             kitty_key = f'{kitty_pid}-{kitty_window}'
 
         hook_state = _hook_state(state / f'sid-{sid}')
         ctx_pct = cost = None
-        if kitty_key:
+        if kitty_key and os.path.exists(f'/tmp/kitty-ctl-{kitty_pid}'):
             hook_state = hook_state or _hook_state(state / kitty_key)
             ctx_pct = _number(state / f'ctx-{kitty_key}', int)
             cost = _number(state / f'usage-{kitty_key}', float)
