@@ -117,8 +117,17 @@ class _Handler(BaseHTTPRequestHandler):
                     if not isinstance(text, str):
                         raise ValueError('text must be a string')
                     args.append(text)
-                output = getattr(fleet.actions, action)(*args)
-                result = {'ok': True, 'output': output or ''}
+                if action == 'peek':
+                    try:
+                        output = fleet.actions.peek(node)
+                    except ActionError as error:
+                        self._json({'ok': False, 'error': str(error), 'reason': error.reason})
+                        return
+                    result = {'ok': True, 'output': output or '',
+                              'reason': None if output else 'empty'}
+                else:
+                    output = getattr(fleet.actions, action)(*args)
+                    result = {'ok': True, 'output': output or ''}
             elif self.route.path in ('/api/promote', '/api/move', '/api/stage'):
                 node = self._node(body.get('node'))
                 fields = {'/api/promote': ('project', 'slice', 'stage'),

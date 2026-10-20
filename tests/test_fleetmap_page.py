@@ -1294,7 +1294,7 @@ console.log(JSON.stringify({purpose: $('purpose').textContent}));
   const unbound = {id: 'u', title: 'Unbound', state: 'idle', kind: 'claude', host: 'local', cluster: 'Box'};
   const result = {
     none: await reasonOf(unbound, async () => { throw new Error('should not be called'); }),
-    down: await reasonOf(away, async () => { throw new Error('ssh: connect timed out'); }),
+    down: await reasonOf(away, async () => { const e = new Error('ssh: connect timed out'); e.reason = 'host_unreachable'; throw e; }),
     empty: await reasonOf(away, async () => ({ok: true, output: ''})),
     shown: await reasonOf(away, async () => ({ok: true, output: 'hello screen'}))};
   result.screen = $('screen').textContent;
@@ -1309,6 +1309,42 @@ console.log(JSON.stringify({purpose: $('purpose').textContent}));
         self.assertEqual(output['shown']['text'], '')
         self.assertFalse(output['shown']['screenHidden'])
         self.assertEqual(output['screen'], 'hello screen')
+
+    def test_selecting_cluster_hides_previous_node_rail(self):
+        output = run_page_js(self.RAIL_FIXTURE + """
+selectNode('w');
+const shown = {rest: $('node-rest').hidden, details: $('details').hidden};
+const clusterIds = [...clusters.keys()];
+selectCluster(clusterIds.length ? clusterIds[0] : 'Box');
+console.log(JSON.stringify({shown, selectedId, rest: $('node-rest').hidden,
+  promote: $('promote-form').hidden, assign: $('assign-form').hidden,
+  details: $('details').hidden, card: $('context-rail').hidden}));
+""")
+        self.assertEqual(output['shown'], {'rest': False, 'details': False})
+        self.assertIsNone(output['selectedId'])
+        self.assertTrue(output['rest'])
+        self.assertTrue(output['details'])
+        self.assertFalse(output['card'])
+
+    def test_peek_reason_lines_follow_the_response(self):
+        output = run_page_js(self.RAIL_FIXTURE + """
+(async () => {
+  const away = {id: 'a', title: 'Away', state: 'idle', kind: 'claude', host: 'laptop2', cluster: 'Box', terminal: 't1', hosting: 'orca'};
+  const fail = (reason, message) => async () => { const e = new Error(message); e.reason = reason; throw e; };
+  const result = {
+    none: await reasonOf(away, fail('no_terminal', 'pane gone')),
+    down: await reasonOf(away, fail('host_unreachable', 'ssh timed out')),
+    empty: await reasonOf(away, async () => ({ok: true, output: '', reason: 'empty'})),
+    error: await reasonOf(away, fail('error', 'tmux exploded'))};
+  result.errorText = $('overlay-error').textContent; result.errorShown = !$('overlay-error').hidden;
+  console.log(JSON.stringify(result));
+})();
+""")
+        self.assertEqual(output['none']['text'], 'No terminal is bound to this session')
+        self.assertEqual(output['down']['text'], 'laptop2 is unreachable')
+        self.assertEqual(output['empty']['text'], 'The terminal returned nothing')
+        self.assertEqual(output['errorText'], 'tmux exploded')
+        self.assertTrue(output['errorShown'])
 
     def test_escape_in_dialog_leaves_search_alone(self):
         output = run_page_js(self.SEARCH_FIXTURE + """

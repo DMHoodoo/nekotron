@@ -15,19 +15,23 @@ KITTEN = shutil.which('kitten') or '/Applications/kitty.app/Contents/MacOS/kitte
 class ActionError(RuntimeError):
     """An action has no usable target or its hosting CLI failed."""
 
+    def __init__(self, message='', reason='error'):
+        super().__init__(message)
+        self.reason = reason
+
 
 def _kitty_socket(node=None):
     if node is not None:
         pid = node.get('kitty_pid')
         if type(pid) is not int or pid <= 0:
-            raise ActionError('No owning kitty PID for node')
+            raise ActionError('No owning kitty PID for node', 'no_terminal')
         path = f'/tmp/kitty-ctl-{pid}'
         if not os.path.exists(path):
-            raise ActionError(f'Owning kitty control socket disappeared: {path}')
+            raise ActionError(f'Owning kitty control socket disappeared: {path}', 'no_terminal')
         try:
             os.kill(pid, 0)
         except OSError as error:
-            raise ActionError(f'Owning kitty process disappeared: {pid}') from error
+            raise ActionError(f'Owning kitty process disappeared: {pid}', 'no_terminal') from error
         return path
     # New overlays/tmux attachments have no existing kitty destination.
     candidates = []
@@ -63,10 +67,10 @@ class Actions:
         elif hosting in ('kitty', 'tmux'):
             route, key = hosting, 'kitty_window' if hosting == 'kitty' else 'tmux'
         else:
-            raise ActionError(f'Unsupported hosting: {hosting}')
+            raise ActionError(f'Unsupported hosting: {hosting}', 'no_terminal')
         target = node.get(key)
         if target is None or target == '':
-            raise ActionError(f'No {key} target for {hosting} node')
+            raise ActionError(f'No {key} target for {hosting} node', 'no_terminal')
         return route, str(target)
 
     @staticmethod
@@ -94,15 +98,26 @@ class Actions:
         try:
             return getattr(self.orca, method)(target, *args, env=env)
         except OrcaError as error:
-            raise ActionError(str(error)) from error
+            message = str(error)
+            if 'terminal_not_found' in message:
+                reason = 'no_terminal'
+            else:
+                reason = 'error' if env is None else 'host_unreachable'
+            raise ActionError(message, reason) from error
 
     def peek(self, node) -> str:
         route, target = self._target(node)
         if route == 'orca':
             return self._orca('screen', node, target)
-        if route == 'kitty':
-            return self._kitty('get-text', '--match', f'id:{target}', node=node)
-        return self._run([self.tmux, 'capture-pane', '-p', '-t', target])
+        try:
+            if route == 'kitty':
+                return self._kitty('get-text', '--match', f'id:{target}', node=node)
+            return self._run([self.tmux, 'capture-pane', '-p', '-t', target])
+        except ActionError as error:
+            text = str(error).lower()
+            if error.reason == 'error' and ("can't find" in text or 'no matching windows' in text):
+                error.reason = 'no_terminal'
+            raise
 
     def jump(self, node) -> None:
         route, target = self._target(node)

@@ -261,7 +261,11 @@ async function request(path, body) {
   }
   const response = await fetch(path, options);
   const value = await response.json();
-  if (!response.ok || value.ok === false) throw new Error(value.error || `Request failed (${response.status})`);
+  if (!response.ok || value.ok === false) {
+    const failure = new Error(value.error || `Request failed (${response.status})`);
+    failure.reason = value.reason;
+    throw failure;
+  }
   return value;
 }
 function showError(error, inDialog = false) {
@@ -603,7 +607,7 @@ function stateLine(node, now = Date.now() / 1000) {
   if (node.stalled) return 'stalled';
   if (node.state === 'attention') return 'needs you';
   const since = node.it_at == null ? '' : ` ${age(node.it_at, now)}`;
-  if (node.state === 'working') return node.it_at == null ? 'working' : `working · pulsing ${age(node.it_at, now)}`;
+  if (node.state === 'working') return `working${node.it_at == null ? '' : ` · pulsing${since}`}`;
   return `${node.state === 'done' ? 'done' : 'idle'}${since}`;
 }
 function setSearchQuery(value) {
@@ -809,6 +813,7 @@ function renderRail() {
     const info = clusterInfo(cluster), run = clusterRun(cluster);
     $('empty').hidden = true;
     $('details').hidden = true;
+    $('node-rest').hidden = true;
     $('context-rail').hidden = false;
     $('context-title').textContent = info.full_name || info.name || cluster.name;
     const details = $('context-details'); details.replaceChildren();
@@ -846,7 +851,7 @@ function renderRail() {
     $('slice-stage').value = node.stage || 'goal';
     $('promote-form').dataset.node = promotionIdentity;
   }
-  setText('node-kind', `${node.kind === 'terminal' ? 'Terminal only' : node.kind === 'subagent' ? 'Subagent' : 'Claude session'} · ${node.state === 'attention' ? 'Needs you' : node.state} · ${node.cluster || 'Unsorted'}${node.subagents_total > 0 ? ` · ${node.subagents_total} subagents, ${node.subagents_shown} shown` : ''}`);
+  setText('node-kind', `${node.kind === 'terminal' ? 'Terminal only' : node.kind === 'subagent' ? 'Subagent' : 'Claude session'} · ${node.cluster || 'Unsorted'}${node.subagents_total > 0 ? ` · ${node.subagents_total} subagents, ${node.subagents_shown} shown` : ''}`);
   for (const field of ['purpose', 'doing', 'repo', 'worktree', 'branch', 'model']) setText(field, node[field]);
   setText('said', node.last_said);
   setText('you-age', node.never_addressed ? 'Never addressed' : node.you_at == null ? 'Unknown' : `${age(node.you_at)} ago`);
@@ -939,9 +944,16 @@ $('actions').addEventListener('click', event => {
       if (![node.terminal, node.tmux, node.kitty_window].some(value => value !== null && value !== undefined && value !== '')) {
         reason = 'No terminal is bound to this session';
       } else {
-        try { output = (await request('/api/action', {node: id, action})).output; }
-        catch (error) { failure = error; reason = `${node.host} is unreachable`; }
-        if (!reason && !output) reason = 'The terminal returned nothing';
+        try {
+          const response = await request('/api/action', {node: id, action});
+          output = response.output;
+          if (response.reason === 'empty' || !output) reason = 'The terminal returned nothing';
+        } catch (error) {
+          if (error.reason === 'no_terminal') reason = 'No terminal is bound to this session';
+          else if (error.reason === 'host_unreachable') reason = `${node.host} is unreachable`;
+          else if (error.reason === 'empty') reason = 'The terminal returned nothing';
+          else { failure = error; reason = 'Peek failed'; }
+        }
       }
       openOverlay(`Peek · ${node.title || 'session'}`, id);
       if (reason) {

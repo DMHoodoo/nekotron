@@ -49,9 +49,14 @@ class StubActions:
     def __init__(self):
         self.calls = []
 
+    peek_error = None
+    peek_output = 'screen café\n'
+
     def peek(self, node):
         self.calls.append(('peek', node))
-        return 'screen café\n'
+        if self.peek_error:
+            raise self.peek_error
+        return self.peek_output
 
     def jump(self, node):
         self.calls.append(('jump', node))
@@ -168,15 +173,32 @@ class FleetMapHTTP(unittest.TestCase):
         self.wait_for_snapshot()
         for action, output in [('peek', 'screen café\n'), ('jump', ''), ('send', '')]:
             with self.subTest(action=action):
+                expected = {'ok': True, 'output': output}
+                if action == 'peek':
+                    expected['reason'] = None
                 self.assertEqual(self.json_request('/api/action', body={
-                    'node': NODE['id'], 'action': action, 'text': 'hello café'}),
-                    {'ok': True, 'output': output})
+                    'node': NODE['id'], 'action': action, 'text': 'hello café'}), expected)
         token = self.json_request('/api/confirm?node=' + NODE['id'])['token']
         self.assertEqual(self.json_request('/api/action', body={
             'node': NODE['id'], 'action': 'close', 'token': token}),
             {'ok': False, 'error': 'terminal_not_found'})
         self.assertEqual(self.actions.calls, [
             ('peek', NODE), ('jump', NODE), ('send', NODE, 'hello café'), ('describe_close', NODE), ('close', NODE)])
+
+    def test_peek_response_states_its_reason(self):
+        self.wait_for_snapshot()
+        body = {'node': NODE['id'], 'action': 'peek'}
+        self.actions.peek_output = ''
+        self.assertEqual(self.json_request('/api/action', body=body),
+                         {'ok': True, 'output': '', 'reason': 'empty'})
+        for reason in ('no_terminal', 'host_unreachable'):
+            with self.subTest(reason=reason):
+                self.actions.peek_error = ActionError('gone', reason)
+                self.assertEqual(self.json_request('/api/action', body=body),
+                                 {'ok': False, 'error': 'gone', 'reason': reason})
+        self.actions.peek_error = ActionError('boom')
+        self.assertEqual(self.json_request('/api/action', body=body),
+                         {'ok': False, 'error': 'boom', 'reason': 'error'})
 
     def test_invalid_actions_and_nodes_do_not_call_actions(self):
         self.wait_for_snapshot()
