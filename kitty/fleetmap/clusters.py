@@ -164,10 +164,23 @@ def stage_for(node_id: str, config: ClusterConfig) -> str | None:
     return membership[1].get('stage') if membership is not None else None
 
 
+def repository_from_path(path: str) -> str | None:
+    """Name the repository a worktree path belongs to without running git."""
+    parts = [part for part in (path or '').split('/') if part]
+    for index in range(1, len(parts)):
+        if parts[index - 1:index + 1] == ['.claude', 'worktrees'] and index >= 2:
+            return parts[index - 2]
+    for index in range(len(parts) - 2):
+        if parts[index:index + 2] == ['orca', 'workspaces']:
+            return parts[index + 2]
+    return parts[-1] if parts else None
+
+
 def cluster_for(node_id: str, *, run_objective: str | None, title: str,
                 purpose: str | None, worktree: str, branch: str,
-                config: ClusterConfig, projection_cluster: str | None = None) -> str:
-    """Resolve projection, pin/project, run objective, match, worktree, Unsorted.
+                config: ClusterConfig, projection_cluster: str | None = None,
+                repository: str | None = None) -> str:
+    """Resolve projection, pin/project, run objective, match, repository, Unsorted.
 
     A None purpose means no human prompt, so worktree inference is skipped.
     The legacy run-objective fallback remains for runs without a projection.
@@ -190,6 +203,6 @@ def cluster_for(node_id: str, *, run_objective: str | None, title: str,
     for name, patterns in config.initiatives:
         if any(pattern.casefold() in value for pattern in patterns for value in fields):
             return name
-    if purpose is not None and worktree and branch:
-        return branch.removeprefix('refs/heads/').rsplit('/', 1)[-1]
+    if purpose is not None and repository:
+        return repository
     return 'Unsorted'

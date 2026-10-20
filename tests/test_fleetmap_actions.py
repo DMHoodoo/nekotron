@@ -223,6 +223,26 @@ class ActionRouting(unittest.TestCase):
             self.actions.peek(node(terminal='gone'))
         self.assertEqual(len(self.calls('orca')), 1)
 
+    def test_peek_failures_carry_a_reason(self):
+        self.fake('orca', stderr=b'{"ok":false,"error":"terminal_not_found"}', code=1)
+        with self.assertRaises(ActionError) as caught:
+            self.actions.peek(node(terminal='gone'))
+        self.assertEqual(caught.exception.reason, 'no_terminal')
+        with self.assertRaises(ActionError) as caught:
+            self.actions.peek(node(hosting='tmux', tmux=None))
+        self.assertEqual(caught.exception.reason, 'no_terminal')
+        self.fake('tmux', stderr=b"can't find session: neko-abc", code=1)
+        with self.assertRaises(ActionError) as caught:
+            self.actions.peek(node(hosting='tmux', tmux='neko-abc'))
+        self.assertEqual(caught.exception.reason, 'no_terminal')
+        self.fake('orca', stderr=b'ssh: connect timed out', code=1)
+        with self.assertRaises(ActionError) as caught:
+            self.actions.peek(node(host='laptop2'))
+        self.assertEqual(caught.exception.reason, 'host_unreachable')
+        with self.assertRaises(ActionError) as caught:
+            self.actions.peek(node(host='local'))
+        self.assertEqual(caught.exception.reason, 'error')
+
     def test_failed_orca_envelope_is_action_error(self):
         self.fake('orca', stdout=b'{"ok":false,"error":"terminal_not_found"}')
         with self.assertRaisesRegex(ActionError, 'terminal_not_found'):

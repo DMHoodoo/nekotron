@@ -122,3 +122,70 @@
 - [ ] **Step 3: Implement** per Decision 28.
 - [ ] **Step 4: Run** both complete suites; expect pass.
 - [ ] **Step 5: Commit** `feat(declutter): decision card with reply to Chief`.
+
+## Second round (2026-10-20 10:44 PDT): Decisions 29 to 35
+
+Branch `fleet-map-declutter-2` from master `ece5aa4`. Same global constraints and review focus. Tasks run in order; each is one commit prefixed `feat(declutter2):`.
+
+### Task 30: Header summary, state filter, region status word
+
+**Files:** Modify `kitty/fleetmap/page.html` (`render`, the status line, region metrics); Test `tests/test_fleetmap_page.py`.
+
+**Interfaces:** Produces `stateFilter` (null or one of `working`, `attention`, `idle`), `setStateFilter(state)`, and `nodeDimmed(node)` used by `paintNode`. Idle counts `idle` plus `done`.
+
+- [ ] Failing tests: `test_header_counts_by_state` (2 working, 1 attention, 15 idle plus done renders `22 sessions · 2 working · 1 need you · 15 idle`), `test_state_filter_dims_others_and_toggles_off` (clicking the working count sets `stateFilter` and gives non-working nodes opacity 0.25; clicking it again clears), `test_region_status_word` (`OK`, `Tight` below 40% free, `Over cap` when workers exceed cap).
+- [ ] Run; expect FAIL. Implement per Decision 29. Run both suites. Commit `feat(declutter2): header counts with a state filter; region status word`.
+
+### Task 31: Fold idle sessions
+
+**Files:** Modify `kitty/fleetmap/page.html` (`layoutFleet`, `renderCluster`, `paintNode`); Test `tests/test_fleetmap_page.py`.
+
+**Interfaces:** Produces `foldable(node, now)` (idle or done, newer of `you_at`/`it_at` older than 24 h, or never prompted), `unfolded` (a Set of cluster ids), and a `.fold-chip` element per cluster with text `k idle`.
+
+- [ ] Failing tests: `test_old_idle_nodes_fold_into_a_chip` (three idle nodes aged 30 h in one cluster render no node circles and one chip `3 idle`), `test_working_and_recent_nodes_never_fold` (a working node aged 30 h and an idle node aged 2 h both render), `test_clicking_chip_unfolds_cluster` (after the click the three nodes render and the chip is gone), `test_header_counts_include_folded` (the Decision 29 counts are unchanged by folding).
+- [ ] Run; FAIL. Implement per Decision 30. Both suites. Commit `feat(declutter2): fold old idle sessions into a chip`.
+
+### Task 32: Search
+
+**Files:** Modify `kitty/fleetmap/page.html` (header input, `render`, `paintNode`, key handling); Test `tests/test_fleetmap_page.py`.
+
+**Interfaces:** Produces `searchQuery`, `nodeMatches(node, query)` over title, purpose, doing, last_said, repo, branch (case-insensitive substring), and the status suffix `· m match`.
+
+- [ ] Failing tests: `test_search_dims_non_matches_and_counts` (query `6897` gives one match at full opacity, others at 0.25, status ends `· 1 match`), `test_search_unfolds_matching_folded_node` (a folded idle node matching the query renders), `test_slash_focuses_and_escape_clears` (`/` focuses the box when no input has focus; Escape clears the query and the dimming), `test_search_combines_with_state_filter`.
+- [ ] Run; FAIL. Implement per Decision 31. Both suites. Commit `feat(declutter2): find a session`.
+
+### Task 33: Hover card
+
+**Files:** Modify `kitty/fleetmap/page.html` (`paintNode` title); Test `tests/test_fleetmap_page.py`.
+
+**Interfaces:** Produces `hoverText(node, now)` returning at most five lines per Decision 32.
+
+- [ ] Failing tests: `test_hover_has_title_doing_said_ages_repo` (exact five lines for a full node, `Doing:` and `Said:` cut to 80 characters with `…`), `test_hover_omits_missing_lines_and_never_shows_prompt` (a node with no doing and no said yields three lines; a 10,000-character purpose never appears).
+- [ ] Run; FAIL. Implement. Both suites. Commit `feat(declutter2): hover card instead of the first prompt`.
+
+### Task 34: Rail order, vocabulary, Peek reasons
+
+**Files:** Modify `kitty/fleetmap/page.html` (`renderRail`, node actions, Peek overlay), `kitty/fleetmap/server.py` and `kitty/fleetmap/actions.py` only if the Peek response needs a `reason` field; Test `tests/test_fleetmap_page.py`, `tests/test_fleetmap_server.py` if the response changed.
+
+**Interfaces:** Produces the rail order of Decision 33, `stateLine(node, now)`, a `<details>` labeled `First prompt`, omitted unavailable actions, and the Peek reason line.
+
+- [ ] Failing tests: `test_rail_leads_with_state_doing_said_ages` (child order: title, state line, Doing, Said, ages, actions, run card, details), `test_rail_omits_unavailable_actions_and_parent` (no button text contains `unavailable`; no parent link when the parent is absent), `test_rail_button_labels` (`Add to a project`, `Move to another box`), `test_first_prompt_is_collapsed` (the details element is closed and holds the purpose), `test_peek_empty_screen_states_reason` (each of the three reasons renders its exact line).
+- [ ] Run; FAIL. Implement. Both suites. Commit `feat(declutter2): rail leads with what the session is doing`.
+
+### Task 35: Retired worker terminals
+
+**Files:** Modify `kitty/fleetmap/model.py` (terminal nodes, host worker counts), `kitty/fleetmap/orca.py` only if worker records lack the fields, `kitty/fleetmap/page.html` (chip, rail list); Test `tests/test_fleetmap_model.py`, `tests/test_fleetmap_page.py`.
+
+**Interfaces:** A worker record from `orca orchestration worker-list --run <id> --json` carries `workerState` (`succeeded`, `released`, `abandoned`, `failed`, `ready`, …) and `terminalState` (`retained` or absent). Produces `retired_workers` per cluster in the snapshot (`[{title, dispatchId, state, retainedFor}]`), terminal nodes excluded for them, `hosts[].workers` counting live workers only, and a `.retired-chip` `k retired workers` with a rail list.
+
+- [ ] Failing tests (model, with the FakeOrca fixture): `test_retired_worker_terminals_are_not_nodes` (a released and an abandoned retained terminal yield no nodes and a two-entry `retired_workers` on their cluster), `test_live_agent_terminal_is_never_retired` (a retained terminal with a live agent process stays a node), `test_host_worker_count_excludes_retired`; page: `test_retired_chip_lists_in_rail`.
+- [ ] Run; FAIL. Implement per Decision 34. Both suites. Commit `feat(declutter2): retired worker terminals fold into a chip`.
+
+### Task 36: Boxes by repository
+
+**Files:** Modify `kitty/fleetmap/clusters.py` (`cluster_for`), `kitty/fleetmap/model.py` (repository lookup in the slow thread, cached per worktree root), `kitty/fleetmap/registry.py` or `kitty/fleetmap/signals.py` for the git call if one of them owns git probes today; Test `tests/test_fleetmap_clusters.py`, `tests/test_fleetmap_model.py`.
+
+**Interfaces:** Produces `repository_name(worktree_root) -> str | None` (basename of the parent of `git rev-parse --git-common-dir`, resolved to an absolute path; `None` outside a repository), cached per root for the slow thread's TTL, and `cluster_for(...)` grouping unclaimed nodes by that name with `Unsorted` as the fallback. Node `repo` keeps today's worktree basename; a new node field `repository` carries the name.
+
+- [ ] Failing tests: `test_repository_name_from_common_dir` (two worktrees of one temp repository both yield the repository's directory name; a plain directory yields None), `test_unclaimed_nodes_cluster_by_repository_not_branch` (nodes on branches `main` and `feature` in two worktrees of one repository share the cluster named after it), `test_run_and_pin_claims_still_win`, `test_no_repository_goes_to_unsorted`, and a model test that the lookup runs in the slow thread and is cached (the fast thread never calls git).
+- [ ] Run; FAIL. Implement per Decision 35. Both suites. Commit `feat(declutter2): boxes named by repository`.

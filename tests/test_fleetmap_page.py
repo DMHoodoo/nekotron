@@ -43,6 +43,8 @@ class Element {
   setAttribute(name, value) { this.attributes[name] = value; }
   addEventListener(name, action) { this.listeners[name] = action; }
   click() { this.listeners.click?.(); }
+  focus() { document.activeElement = this; }
+  blur() { if (document.activeElement === this) document.activeElement = null; }
 }
 const elements = new Map();
 const $ = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
@@ -60,7 +62,10 @@ def run_page_js(source, storage="{}"):
     script = script.replace("const $ = id => document.getElementById(id);", "")
     return run_js(DOM + """
 document.createElementNS = (_, tag) => new Element(tag);
-document.addEventListener = () => {};
+document.listeners = {};
+document.activeElement = null;
+document.addEventListener = (name, action) => { (document.listeners[name] = document.listeners[name] || []).push(action); };
+document.dispatch = (name, event) => { event.preventDefault = event.preventDefault || (() => {}); (document.listeners[name] || []).forEach(action => action(event)); };
 document.visibilityState = 'hidden';
 const location = {search: ''};
 const ResizeObserver = class { observe() {} };
@@ -394,7 +399,7 @@ console.log(JSON.stringify({children: heading.children.map(text),
 
     def run_selection_js(self, source):
         return self.run_cluster_js(page_functions(
-            'selectCluster', 'renderRail', 'renderContext', 'openBroadcast',
+            'selectCluster', 'renderRail', 'lastTouched', 'foldable', 'stateLine', 'renderContext', 'openBroadcast',
             'openOverlay', 'updateBroadcastCount', 'broadcastTargets',
             'selectNode', 'showContext', 'setText', 'age', 'secondsSince',
             'paintFocus', 'drawEdges') + """
@@ -530,13 +535,13 @@ console.log(JSON.stringify([collapsed, {text: text(name), title: name.attributes
              'title': 'Review run: finish the pending delivery with all evidence'}])
 
     def test_node_label_wraps_to_two_lines_at_a_space(self):
-        output = run_js(DOM + page_functions('paintNode') + """
+        output = run_js(DOM + page_functions('age', 'hoverText', 'nodeState', 'nodeMatches', 'nodeDimmed', 'paintNode') + """
 const svg = (tag, attrs = {}) => {
   const element = new Element(tag);
   for (const [key, value] of Object.entries(attrs)) element.setAttribute(key, value);
   return element;
 };
-const selectedId = null, hoveredId = null, snapshot = {edges: []};
+const stateFilter = null, searchQuery = '', selectedId = null, hoveredId = null, snapshot = {edges: []};
 const colors = {idle: '#888'}, secondsSince = () => 0;
 const view = Object.fromEntries(['hatch', 'group', 'title', 'label', 'center',
   'rim', 'body', 'pulse', 'ring', 'badge'].map(key => [key, new Element()]));
@@ -545,7 +550,7 @@ const titles = ['Handoff scheduling engineering OS run', 'Report-task-four',
 const results = titles.map(title => {
   paintNode({id: 'node', title, state: 'idle', kind: 'claude'}, view);
   return {lines: view.label.children.length ? view.label.children.map(child => child.textContent)
-    : [view.label.textContent], title: view.group.attributes.title,
+    : [view.label.textContent], aria: view.group.attributes['aria-label'],
     positions: view.label.children.map(child => [child.attributes.x, child.attributes.dy])};
 });
 console.log(JSON.stringify(results));
@@ -557,7 +562,7 @@ console.log(JSON.stringify(results));
                 ['Eleven', 'chars'], ['One two', 'three four…'],
                 ['Longfirstw…', 'second']]):
             self.assertEqual(result['lines'], lines)
-            self.assertEqual(result['title'], title)
+            self.assertEqual(result['aria'], title + ', idle, claude')
             if len(lines) == 2:
                 self.assertEqual(result['positions'], [[0, 0], [0, 12]])
 
@@ -692,12 +697,13 @@ console.log(JSON.stringify({collapsed, expanded: text(cluster.panel),
 
     def test_layout_preserves_positions_across_membership_thresholds_and_hosts(self):
         source = DOM + page_functions('ensureRegion', 'ensureCluster', 'clusterInfo',
-                                     'clusterRun', 'nodeText', 'panelContentHeight', 'layoutFleet', 'endpoint')
+                                     'clusterRun', 'nodeText', 'panelContentHeight', 'layoutFleet', 'endpoint',
+                                     'lastTouched', 'foldable', 'isFolded', 'clusterRetired')
         output = run_js(source + """
 const svg = () => new Element();
-const positions = new Map(), regions = new Map(), clusters = new Map(), expanded = new Set();
+const positions = new Map(), regions = new Map(), clusters = new Map(), expanded = new Set(), unfolded = new Set();
 const MIN_REGION = 420, CELL = 70, GAP = 16;
-let layoutSignature = '', layoutModeSignature = '';
+let layoutSignature = '', layoutModeSignature = '', selectedId = null, searchQuery = '';
 function renderCluster() {}
 const clusterKey = node => JSON.stringify([node.host, node.cluster]);
 const member = (id, host = 'local', cluster = 'A') => ({id, host, cluster, kind: 'claude'});
@@ -872,6 +878,656 @@ await Promise.resolve();
 console.log(JSON.stringify(requests));
 """.replace('await Promise.resolve();', ''))
         self.assertEqual(output, [['/api/open-plan', {'run': 'run_test'}]])
+
+
+    HEADER_FIXTURE = """
+const states = [...Array(2).fill('working'), 'attention', ...Array(10).fill('idle'),
+  ...Array(5).fill('done'), ...Array(4).fill('unknown')];
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], generated_at: Date.now() / 1000,
+  nodes: states.map((state, index) => ({id: 'n' + index, title: 'n' + index, state, kind: 'claude',
+    host: 'local', cluster: 'Traffic'}))};
+$('map-scroll').clientWidth = 1200;
+render();
+renderStatus();
+const counts = () => descendants($('status')).filter(item => item.dataset?.state);
+const countFor = state => counts().find(item => item.dataset.state === state);
+const opacities = () => Object.fromEntries(snapshot.nodes.map(node =>
+  [node.id, nodeViews.get(node.id).group.style.opacity]));
+"""
+
+    def test_header_counts_by_state(self):
+        output = run_page_js(self.HEADER_FIXTURE + """
+console.log(JSON.stringify({text: text($('status')).replace(/\\s+/g, ' ').trim(),
+  states: counts().map(item => item.dataset.state)}));
+""")
+        self.assertTrue(output['text'].startswith(
+            '22 sessions · 2 working · 1 need you · 15 idle'), output['text'])
+        self.assertEqual(output['states'], ['working', 'attention', 'idle'])
+
+    def test_state_filter_dims_others_and_toggles_off(self):
+        output = run_page_js(self.HEADER_FIXTURE + """
+countFor('working').click();
+const on = {filter: stateFilter, opacities: opacities()};
+countFor('working').click();
+const off = {filter: stateFilter, opacities: opacities()};
+countFor('idle').click();
+const idle = opacities();
+countFor('attention').click();
+console.log(JSON.stringify({on, off, idleDone: [idle.n13, idle.n0], filter: stateFilter,
+  attention: opacities().n2}));
+""")
+        self.assertEqual(output['on']['filter'], 'working')
+        self.assertEqual(output['on']['opacities']['n0'], 1)
+        self.assertEqual(output['on']['opacities']['n2'], 0.25)
+        self.assertEqual(output['on']['opacities']['n5'], 0.25)
+        self.assertIsNone(output['off']['filter'])
+        self.assertEqual(set(output['off']['opacities'].values()), {1})
+        self.assertEqual(output['idleDone'], [1, 0.25])
+        self.assertEqual(output['filter'], 'attention')
+        self.assertEqual(output['attention'], 1)
+
+    def test_region_status_word(self):
+        output = run_page_js("""
+$('map-scroll').clientWidth = 1200;
+const word = host => {
+  snapshot = {hosts: [Object.assign({name: 'local'}, host)], clusters: {}, runs: {}, nodes: [], edges: []};
+  render();
+  return regions.get('local').metrics.textContent;
+};
+console.log(JSON.stringify([
+  word({memory: {free_pct: 55, swap_gb: 0}, workers: 1, cap: 4}),
+  word({memory: {free_pct: 39.9, swap_gb: 0}, workers: 1, cap: 4}),
+  word({memory: {free_pct: 55, swap_gb: 0}, workers: 5, cap: 4}),
+  word({memory: {free_pct: 40, swap_gb: 0}, workers: 4, cap: 4})]));
+""")
+        self.assertTrue(output[0].startswith('OK · 55.0% free'), output[0])
+        self.assertTrue(output[1].startswith('Tight · '), output[1])
+        self.assertTrue(output[2].startswith('Over cap · '), output[2])
+        self.assertTrue(output[3].startswith('OK · '), output[3])
+
+    FOLD_FIXTURE = """
+$('map-scroll').clientWidth = 1200;
+const hours = h => Date.now() / 1000 - h * 3600;
+const mk = (id, state, h, extra = {}) => Object.assign({id, title: id, state, kind: 'claude',
+  host: 'local', cluster: 'Box', you_at: hours(h), it_at: hours(h)}, extra);
+const load = list => {
+  snapshot = {generated_at: Date.now() / 1000, hosts: [{name: 'local'}], clusters: {}, runs: {},
+    nodes: list, edges: []};
+  render(); renderStatus();
+};
+const cluster = () => [...clusters.values()][0];
+const unique = list => [...new Set(list)];
+const drawnNodes = () => unique(byClass(cluster().grid, 'node')).filter(g => g.style.display !== 'none');
+const chips = () => unique(byClass(cluster().grid, 'fold-chip')).filter(g => g.style.display !== 'none');
+"""
+
+    def test_old_idle_nodes_fold_into_a_chip(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([mk('a', 'idle', 30), mk('b', 'idle', 30), mk('c', 'done', 30)]);
+console.log(JSON.stringify({nodes: drawnNodes().length, chips: chips().map(text)}));
+""")
+        self.assertEqual(output['nodes'], 0)
+        self.assertEqual([chip.strip() for chip in output['chips']], ['3 idle'])
+
+    def test_working_and_recent_nodes_never_fold(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([mk('w', 'working', 30), mk('r', 'idle', 2), mk('t', 'attention', 30), mk('o', 'idle', 30)]);
+console.log(JSON.stringify({nodes: drawnNodes().length, chips: chips().map(text)}));
+""")
+        self.assertEqual(output['nodes'], 3)
+        self.assertEqual([chip.strip() for chip in output['chips']], ['1 idle'])
+
+    def test_never_prompted_idle_node_folds(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([{id: 'n', title: 'n', state: 'idle', kind: 'claude', host: 'local', cluster: 'Box',
+  never_prompted: true, you_at: null, it_at: null}]);
+console.log(JSON.stringify({nodes: drawnNodes().length, chips: chips().length}));
+""")
+        self.assertEqual(output, {'nodes': 0, 'chips': 1})
+
+    def test_retired_chip_lists_in_rail(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+const retired = [
+  {title: 'Worker one', dispatchId: 'd1', state: 'released', retainedFor: 7200, host: 'local'},
+  {title: 'Worker two', dispatchId: 'd2', state: 'abandoned', retainedFor: 90, host: 'local'}];
+const shownRetired = () => unique(byClass(cluster().grid, 'retired-chip')).filter(g => g.style.display !== 'none');
+snapshot = {generated_at: Date.now() / 1000, hosts: [{name: 'local'}],
+  clusters: {Box: {name: 'Box', full_name: 'Box', short_name: 'Box', retired_workers: retired}},
+  runs: {}, nodes: [mk('a', 'working', 1)], edges: []};
+render(); renderStatus();
+const shown = shownRetired().map(text);
+const slot = positions.get('retired:' + cluster().id);
+const overlap = [...positions].filter(([id, p]) => id !== 'retired:' + cluster().id && p.cluster === cluster().id && p.x === slot.x && p.y === slot.y).length;
+shownRetired()[0].click();
+const rail = text($('context-details'));
+const railHidden = $('context-rail').hidden;
+const labels = [];
+labels.push(shownRetired()[0].attributes['aria-label']);
+const dimmed = {};
+for (const filter of ['working', 'attention', 'idle']) { stateFilter = filter; render(); dimmed[filter] = shownRetired()[0].style.opacity; }
+stateFilter = null; render();
+snapshot.clusters.Box.retired_workers = retired.slice(0, 1); render();
+labels.push(shownRetired()[0].attributes['aria-label'], text(shownRetired()[0]).trim());
+snapshot.clusters.Box.retired_workers = []; render();
+console.log(JSON.stringify({shown, overlap, rail, railHidden, dimmed, labels, gone: shownRetired().length,
+  nodes: drawnNodes().length}));
+""")
+        self.assertEqual([c.strip() for c in output['shown']], ['2 retired workers'])
+        self.assertEqual(output['overlap'], 0)
+        self.assertFalse(output['railHidden'])
+        for expected in ('Worker one', 'released', '2h', 'Worker two', 'abandoned', '1m'):
+            self.assertIn(expected, output['rail'])
+        self.assertEqual(output['dimmed'], {'working': .25, 'attention': .25, 'idle': 1})
+        self.assertEqual(output['labels'], ['2 retired workers; list them', '1 retired worker; list them',
+                                            '1 retired worker'])
+        self.assertEqual((output['gone'], output['nodes']), (0, 1))
+
+    def test_retired_only_box_stays_lit_while_a_retired_title_matches(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+const retired = [{title: 'Worker one', dispatchId: 'd1', state: 'released', retainedFor: 60, host: 'local'}];
+snapshot = {generated_at: Date.now() / 1000, hosts: [{name: 'local'}],
+  clusters: {Past: {name: 'Past', full_name: 'Past', short_name: 'Past', retired_workers: retired}},
+  runs: {}, nodes: [], edges: []};
+render(); renderStatus();
+const box = () => cluster().content.style.opacity;
+const chip = () => unique(byClass(cluster().grid, 'retired-chip'))[0].style.opacity;
+searchQuery = 'one'; dimClusters(); paintRetiredChips();
+const hit = [box(), chip()];
+searchQuery = 'zzz'; dimClusters(); paintRetiredChips();
+console.log(JSON.stringify({hit, miss: [box(), chip()]}));
+""")
+        self.assertEqual(output, {'hit': [1, 1], 'miss': [.25, .25]})
+
+    def test_selected_folded_node_stays_drawn_with_its_edges(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([mk('a', 'idle', 30), mk('b', 'idle', 30), mk('c', 'idle', 1)]);
+const before = {nodes: drawnNodes().length, chips: chips().length};
+selectNode('a');
+const selected = {nodes: drawnNodes().length, chips: chips().length, endpoint: endpoint('a') !== null};
+selectNode('c');
+render();
+console.log(JSON.stringify({before, selected, after: {nodes: drawnNodes().length, chips: chips().length, a: endpoint('a')}}));
+""")
+        self.assertEqual(output['before'], {'nodes': 1, 'chips': 1})
+        self.assertEqual(output['selected'], {'nodes': 2, 'chips': 1, 'endpoint': True})
+        self.assertEqual(output['after'], {'nodes': 1, 'chips': 1, 'a': None})
+
+    def test_clicking_chip_unfolds_cluster(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([mk('a', 'idle', 30), mk('b', 'idle', 30), mk('c', 'idle', 30)]);
+chips()[0].click();
+const after = {nodes: drawnNodes().length, chips: chips().length};
+load(snapshot.nodes);
+console.log(JSON.stringify({after, reload: {nodes: drawnNodes().length, chips: chips().length}}));
+""")
+        self.assertEqual(output['after'], {'nodes': 3, 'chips': 0})
+        self.assertEqual(output['reload'], {'nodes': 3, 'chips': 0})
+
+    def test_retired_only_cluster_renders_box_and_chip(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+const retired = ['a', 'b', 'c', 'd', 'e'].map(n => ({title: 'Worker ' + n, dispatchId: 'd' + n,
+  state: 'released', retainedFor: 600, host: 'local'}));
+snapshot = {generated_at: Date.now() / 1000, hosts: [{name: 'local'}],
+  clusters: {Past: {name: 'Past', full_name: 'Past', short_name: 'Past', retired_workers: retired}},
+  runs: {}, nodes: [], edges: []};
+render(); renderStatus();
+const box = [...clusters.values()].filter(c => c.group.style.display !== 'none').length;
+const shown = unique(byClass(cluster().grid, 'retired-chip')).filter(g => g.style.display !== 'none');
+shown[0].click();
+console.log(JSON.stringify({box, shown: shown.map(text), rail: text($('context-details'))}));
+""")
+        self.assertEqual(output['box'], 1)
+        self.assertEqual([c.strip() for c in output['shown']], ['5 retired workers'])
+        for title in ('Worker a', 'Worker b', 'Worker c', 'Worker d', 'Worker e'):
+            self.assertIn(title, output['rail'])
+
+    def test_unfolding_restores_node_positions(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+const list = [mk('a', 'idle', 1), mk('b', 'idle', 1), mk('c', 'idle', 1)];
+load(list);
+const before = Object.fromEntries(list.map(n => [n.id, endpoint(n.id)]));
+list[0].you_at = list[0].it_at = hours(30); list[1].you_at = list[1].it_at = hours(30);
+load(list);
+const folded = {nodes: drawnNodes().length, chips: chips().length, c: endpoint('c')};
+chips()[0].click();
+console.log(JSON.stringify({before, folded, after: Object.fromEntries(list.map(n => [n.id, endpoint(n.id)]))}));
+""")
+        self.assertEqual(output['folded'], {'nodes': 1, 'chips': 1, 'c': output['before']['c']})
+        self.assertEqual(output['after'], output['before'])
+    def test_chip_never_shares_a_slot_with_a_reactivated_node(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+const list = [mk('a', 'idle', 1), mk('b', 'idle', 1), mk('c', 'idle', 1)];
+load(list);
+for (const node of list) node.you_at = node.it_at = hours(30);
+load(list);
+list[0].state = 'working'; list[0].you_at = list[0].it_at = hours(0);
+load(list);
+const chip = chips()[0].attributes.transform;
+console.log(JSON.stringify({chip, chips: chips().map(text), drawn: drawnNodes().length,
+  node: nodeViews.get('a').group.attributes.transform}));
+""")
+        self.assertEqual([c.strip() for c in output['chips']], ['2 idle'])
+        self.assertEqual(output['drawn'], 1)
+        self.assertNotEqual(output['chip'], output['node'])
+
+    def test_chip_dims_with_the_state_filter(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([mk('a', 'idle', 30), mk('b', 'working', 1)]);
+const opacity = () => chips()[0].style.opacity;
+const none = opacity();
+setStateFilter('working'); const working = opacity();
+setStateFilter('working'); setStateFilter('idle'); const idle = opacity();
+console.log(JSON.stringify({none, working, idle}));
+""")
+        self.assertEqual(output, {'none': 1, 'working': 0.25, 'idle': 1})
+
+    def test_header_counts_include_folded(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([mk('a', 'idle', 30), mk('b', 'done', 30), mk('c', 'working', 30), mk('d', 'attention', 1)]);
+console.log(JSON.stringify({chips: chips().length, text: text($('status')).replace(/\\s+/g, ' ').trim()}));
+""")
+        self.assertEqual(output['chips'], 1)
+        self.assertTrue(output['text'].startswith(
+            '4 sessions · 1 working · 1 need you · 2 idle'), output['text'])
+
+    def test_region_status_word_omitted_when_unknown(self):
+        output = run_page_js("""
+$('map-scroll').clientWidth = 1200;
+const word = host => {
+  snapshot = {hosts: [Object.assign({name: 'local'}, host)], clusters: {}, runs: {}, nodes: [], edges: []};
+  render();
+  return regions.get('local').metrics.textContent;
+};
+console.log(JSON.stringify([
+  word({memory: {swap_gb: 0}, workers: 1, cap: 4}),
+  word({memory: {free_pct: 55, swap_gb: 0}, cap: 4}),
+  word({memory: {free_pct: 55, swap_gb: 0}, workers: 1}),
+  word({})]));
+""")
+        for line in output:
+            for status in ('OK', 'Tight', 'Over cap'):
+                self.assertFalse(line.startswith(status), line)
+            self.assertFalse(line.startswith(' ·'), line)
+        self.assertTrue(output[1].startswith('55.0% free'), output[1])
+
+
+    SEARCH_FIXTURE = """
+const list = [
+  {id: 'n1', title: 'Fix PR 6897 flaky test', state: 'working', kind: 'claude', host: 'local', cluster: 'Box'},
+  {id: 'n2', title: 'Other', state: 'idle', kind: 'claude', host: 'local', cluster: 'Box', branch: 'main'},
+  {id: 'n3', title: 'Third', state: 'working', kind: 'claude', host: 'local', cluster: 'Box', last_said: 'Done'}];
+snapshot = {generated_at: Date.now() / 1000, hosts: [{name: 'local'}], clusters: {}, runs: {},
+  nodes: list, edges: []};
+$('map-scroll').clientWidth = 1200;
+render(); renderStatus();
+const statusText = () => text($('status')).replace(/\\s+/g, ' ').trim();
+const opacities = () => Object.fromEntries(snapshot.nodes.map(node =>
+  [node.id, nodeViews.get(node.id).group.style.opacity]));
+const type = value => { $('search').value = value; $('search').listeners.input({target: $('search')}); };
+"""
+
+    def test_search_dims_non_matches_and_counts(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+type('6897');
+console.log(JSON.stringify({opacities: opacities(), status: statusText(),
+  fields: ['main', 'DONE'].map(q => snapshot.nodes.filter(n => nodeMatches(n, q)).map(n => n.id))}));
+""")
+        self.assertEqual(output['opacities'], {'n1': 1, 'n2': 0.25, 'n3': 0.25})
+        self.assertTrue(output['status'].endswith('· 1 match'), output['status'])
+        self.assertEqual(output['fields'], [['n2'], ['n3']])
+
+    def test_status_buttons_survive_polls_and_search(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+const buttons = () => descendants($('status')).filter(el => el.tagName === 'button');
+const first = buttons();
+snapshot.generated_at += 3; renderStatus();
+type('6897');
+const same = buttons().every((button, i) => button === first[i]) && first.length === 3;
+console.log(JSON.stringify({same, status: statusText()}));
+""")
+        self.assertTrue(output['same'])
+        self.assertIn('· 1 match', output['status'])
+
+    def test_header_recovers_after_paused_and_error_states(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+const status = $('status');
+let content = '';
+Object.defineProperty(status, 'textContent', {
+  get: () => content, set: value => { content = value; status.children = []; }});
+const buttons = () => descendants(status).filter(el => el.tagName === 'button');
+const stage = {};
+const reply = JSON.parse(JSON.stringify(snapshot));
+const ok = async () => JSON.parse(JSON.stringify(reply));
+(async () => {
+  request = ok;
+  document.visibilityState = 'visible';
+  await refresh();
+  stage.initial = [buttons().length, statusText()];
+  document.visibilityState = 'hidden';
+  document.dispatch('visibilitychange', {});
+  stage.paused = [buttons().length, statusText()];
+  document.visibilityState = 'visible';
+  reply.nodes = reply.nodes.slice(0, 2);
+  await refresh();
+  stage.afterPause = [buttons().length, statusText()];
+  request = async () => { throw new Error('offline'); };
+  await refresh();
+  stage.error = [buttons().length, statusText()];
+  request = ok;
+  reply.nodes = reply.nodes.slice(0, 1);
+  await refresh();
+  stage.afterError = [buttons().length, statusText()];
+  console.log(JSON.stringify(stage)); process.exit(0);
+})();
+""")
+        self.assertEqual(output['initial'][0], 3)
+        self.assertIn('3 sessions', output['initial'][1])
+        self.assertEqual(output['paused'], [0, 'Paused while hidden'])
+        self.assertEqual(output['afterPause'][0], 3)
+        self.assertIn('2 sessions', output['afterPause'][1])
+        self.assertEqual(output['error'][0], 0)
+        self.assertIn('Connection error', output['error'][1])
+        self.assertEqual(output['afterError'][0], 3)
+        self.assertIn('1 sessions', output['afterError'][1])
+
+    def test_search_matches_the_repository_name_as_well_as_the_worktree_name(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+const node = {title: 'T', repository: 'glow-core', repo: 'lookdown', branch: 'main'};
+console.log(JSON.stringify(['glow-core', 'GLOW', 'lookdown', 'nekotron'].map(q => nodeMatches(node, q))));
+""")
+        self.assertEqual(output, [True, True, True, False])
+
+    def test_search_unfolds_matching_folded_node(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([mk('a', 'idle', 30, {title: 'Fix PR 6897'}), mk('b', 'idle', 30), mk('c', 'idle', 30)]);
+const state = () => ({nodes: drawnNodes().length, chips: chips().length});
+const before = state();
+$('search').value = '6897'; $('search').listeners.input({target: $('search')});
+const during = Object.assign(state(), {opacity: drawnNodes()[0].style.opacity});
+const unfoldedKept = unfolded.size;
+$('search').value = ''; $('search').listeners.input({target: $('search')});
+console.log(JSON.stringify({before, during, after: state(), unfoldedKept}));
+""")
+        self.assertEqual(output['before'], {'nodes': 0, 'chips': 1})
+        self.assertEqual(output['during'], {'nodes': 1, 'opacity': 1, 'chips': 1})
+        self.assertEqual(output['after'], {'nodes': 0, 'chips': 1})
+
+    def test_slash_focuses_and_escape_clears(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+document.dispatch('keydown', {key: '/'});
+const focused = document.activeElement === $('search');
+const other = new Element('input'); document.activeElement = other;
+let prevented = false;
+document.dispatch('keydown', {key: '/', preventDefault: () => { prevented = true; }});
+const stolen = document.activeElement !== other;
+document.activeElement = null;
+type('6897');
+document.dispatch('keydown', {key: 'Escape'});
+console.log(JSON.stringify({focused, stolen, prevented, query: searchQuery, value: $('search').value,
+  opacities: opacities(), status: statusText()}));
+""")
+        self.assertTrue(output['focused'])
+        self.assertFalse(output['stolen'])
+        self.assertFalse(output['prevented'])
+        self.assertEqual(output['query'], '')
+        self.assertEqual(output['value'], '')
+        self.assertEqual(set(output['opacities'].values()), {1})
+        self.assertNotIn('match', output['status'])
+
+    def test_hover_has_title_doing_said_ages_repo(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+const now = 1000000;
+const long = 'x'.repeat(200);
+const full = {id: 'h', title: 'Fix it', purpose: 'the first prompt', doing: long, last_said: long,
+  you_at: now - 7300, it_at: now - 310, repository: 'glow-core', repo: 'wt-dir', branch: 'fix/it'};
+const legacy = Object.assign({}, full, {repository: undefined});
+console.log(JSON.stringify({lines: hoverText(full, now).split('\\n'), legacy: hoverText(legacy, now).split('\\n')[4]}));
+""")
+        cut = 'x' * 79 + '…'
+        self.assertEqual(output['lines'], ['Fix it', 'Doing: ' + cut, 'Said: ' + cut,
+                                           'You: 2h · It: 5m', 'glow-core · fix/it'])
+        self.assertEqual(output['legacy'], 'wt-dir · fix/it')
+
+    def test_rail_repo_row_shows_the_repository_name(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+load([mk('a', 'working', 1, {repository: 'glow-core', repo: 'lookdown'}), mk('b', 'working', 1, {repo: 'wt'})]);
+selectNode('a');
+const first = $('repo').textContent;
+selectNode('b');
+console.log(JSON.stringify([first, $('repo').textContent]));
+""")
+        self.assertEqual(output, ['glow-core', 'wt'])
+
+    def test_hover_omits_missing_lines_and_never_shows_prompt(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+const now = 1000000;
+const node = {id: 'h', title: 'Fix it', purpose: 'p'.repeat(10000), you_at: now - 60, it_at: now - 5,
+  repo: 'wt', branch: 'b'};
+const card = hoverText(node, now);
+console.log(JSON.stringify({lines: card.split('\\n'), hasPrompt: card.includes('ppp')}));
+""")
+        self.assertEqual(output['lines'], ['Fix it', 'You: 1m · It: 5s', 'wt · b'])
+        self.assertFalse(output['hasPrompt'])
+
+    def test_rendered_node_hover_never_contains_prompt(self):
+        output = run_page_js("""
+const now = 1000000;
+const node = {id: 'untitled-1', title: '', purpose: 'SECRET '.repeat(1430), state: 'idle', kind: 'claude'};
+snapshot = {hosts: [], clusters: {}, runs: {}, nodes: [node], edges: []};
+const view = makeNode(node);
+paintNode(node, view);
+console.log(JSON.stringify({title: view.title.textContent, expected: hoverText(node, now),
+  attr: view.group.attributes.title ?? null, aria: view.group.attributes['aria-label']}));
+""")
+        self.assertEqual(output['title'], output['expected'])
+        self.assertEqual(output['title'], 'untitled-1')
+        self.assertIsNone(output['attr'])
+        self.assertEqual(output['aria'], 'untitled-1, idle, claude')
+        for text in (output['title'], output['aria']):
+            self.assertNotIn('SECRET', text)
+
+    def test_rendered_node_hover_shows_full_card(self):
+        output = run_page_js("""
+const now = Date.now() / 1000;
+const node = {id: 'full', title: 'Full card', purpose: 'SECRET prompt', doing: 'Fixing the test',
+  last_said: 'Tests pass', you_at: now - 7300, it_at: now - 310, repository: 'glow-core',
+  branch: 'fix/it', state: 'idle', kind: 'claude'};
+snapshot = {hosts: [], clusters: {}, runs: {}, nodes: [node], edges: []};
+const view = makeNode(node);
+paintNode(node, view);
+console.log(JSON.stringify({lines: view.title.textContent.split('\\n')}));
+""")
+        self.assertEqual(output['lines'], ['Full card', 'Doing: Fixing the test', 'Said: Tests pass',
+                                           'You: 2h · It: 5m', 'glow-core · fix/it'])
+
+    def test_on_map_label_never_falls_back_to_the_purpose(self):
+        output = run_page_js("""
+const node = {id: 'untitled-1', title: '', purpose: 'Write the quarterly report', state: 'idle', kind: 'claude'};
+snapshot = {hosts: [], clusters: {}, runs: {}, nodes: [node], edges: []};
+const view = makeNode(node);
+paintNode(node, view);
+console.log(JSON.stringify({label: text(view.label)}));
+""")
+        self.assertNotIn('Write', output['label'])
+        self.assertIn('untitled-1', output['label'])
+
+    def test_search_box_sits_next_to_the_help_button(self):
+        html = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        self.assertIn('header input#search { margin-left: auto', html)
+        self.assertNotIn('#legend-toggle { margin-left', html)
+
+    RAIL_FIXTURE = """
+const now = Date.now() / 1000;
+const worker = {id: 'w', title: 'Worker', state: 'working', kind: 'claude', host: 'local', cluster: 'Box',
+  doing: 'Fixing', last_said: 'Hi', you_at: now - 60, it_at: now - 300, purpose: 'First words',
+  tmux: 'sess', hosting: 'tmux'};
+snapshot = {generated_at: now, hosts: [{name: 'local'}], clusters: {}, runs: {}, nodes: [worker], edges: []};
+$('map-scroll').clientWidth = 1200;
+render();
+document.querySelectorAll = () => [];
+$('overlay').showModal = () => {}; $('screen').focus = () => {};
+const reasonOf = async (node, behavior) => {
+  nodes.set(node.id, node); selectedId = node.id;
+  request = behavior;
+  await $('actions').listeners.click({target: {dataset: {action: 'peek'}}});
+  await new Promise(resolve => setTimeout(resolve, 5));
+  return {text: $('overlay-text').textContent, screenHidden: $('screen').hidden};
+};
+"""
+
+    def test_rail_leads_with_state_doing_said_ages(self):
+        html = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        rail = html[html.index('<aside id="rail"'):html.index('</aside>')]
+        order = re.findall(r'<(?:section|h2|p|dd|div|details|form)[^>]* id="([^"]+)"', rail)
+        wanted = ['node-title', 'state-line', 'doing', 'said', 'you-age', 'it-age', 'actions',
+                  'context-rail', 'first-prompt']
+        positions = [order.index(name) for name in wanted]
+        self.assertEqual(positions, sorted(positions), order)
+        self.assertRegex(rail, r'<details id="first-prompt">\s*<summary>First prompt</summary>')
+        output = run_page_js(self.RAIL_FIXTURE + """
+const lines = {};
+for (const [name, patch] of Object.entries({working: {}, stalled: {stalled: true}, attention: {state: 'attention'},
+  idle: {state: 'idle', you_at: now - 5 * 86400, it_at: now - 3 * 86400},
+  youNewer: {state: 'idle', you_at: now - 120, it_at: now - 3 * 86400},
+  done: {state: 'done', you_at: now - 3 * 86400, it_at: now - 7200},
+  doneYouNewer: {state: 'done', you_at: now - 600, it_at: now - 7200},
+  quiet: {state: 'idle', you_at: null, it_at: null}}))
+  lines[name] = stateLine(Object.assign({}, worker, patch), now);
+selectNode('w');
+console.log(JSON.stringify({lines, rendered: text($('state-line')), doing: $('doing').textContent, said: $('said').textContent}));
+""")
+        self.assertEqual(output['lines'], {
+            'working': 'working · pulsing 5m', 'stalled': 'stalled', 'attention': 'needs you',
+            'idle': 'idle 3d', 'youNewer': 'idle 2m', 'done': 'done 2h', 'doneYouNewer': 'done 10m',
+            'quiet': 'idle'})
+        self.assertEqual(output['rendered'], 'working · pulsing 5m')
+        self.assertEqual((output['doing'], output['said']), ('Fixing', 'Hi'))
+
+    def test_rail_omits_unavailable_actions_and_parent(self):
+        output = run_page_js(self.RAIL_FIXTURE + """
+const sub = {id: 's', title: 'Sub', state: 'idle', kind: 'subagent', host: 'local', cluster: 'Box', parent: 'gone'};
+const bare = {id: 'b', title: 'Bare', state: 'idle', kind: 'claude', host: 'local', cluster: 'Box'};
+const kid = {id: 'k', title: 'Kid', state: 'idle', kind: 'subagent', host: 'local', cluster: 'Box', parent: 'w'};
+snapshot.nodes.push(sub, bare, kid);
+for (const node of snapshot.nodes) nodes.set(node.id, node);
+const seen = {};
+for (const id of ['w', 's', 'b', 'k']) {
+  selectNode(id);
+  seen[id] = {actionsHidden: $('actions').hidden, parentHidden: $('parent-row').hidden,
+    parent: text($('parent-link')), railText: text($('details'))};
+}
+console.log(JSON.stringify(seen));
+""")
+        self.assertFalse(output['w']['actionsHidden'])
+        self.assertTrue(output['b']['actionsHidden'])
+        self.assertTrue(output['s']['parentHidden'])
+        self.assertFalse(output['k']['parentHidden'])
+        self.assertEqual(output['k']['parent'], 'Open parent: Worker')
+        for view in output.values():
+            self.assertNotIn('unavailable', view['railText'] + view['parent'])
+        html = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        self.assertNotIn("|| 'unavailable'", html)
+
+    def test_rail_button_labels(self):
+        html = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        rail = html[html.index('<aside id="rail"'):html.index('</aside>')]
+        labels = re.findall(r'<button[^>]*>([^<]+)</button>', rail)
+        for label in ('Peek', 'Jump', 'Send', 'Close', 'Add to a project', 'Move to another box'):
+            self.assertIn(label, labels)
+        for old in ('Save slice / stage', 'Move session'):
+            self.assertNotIn(old, labels)
+
+    def test_first_prompt_is_collapsed(self):
+        html = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        tag = re.search(r'<details id="first-prompt"([^>]*)>(.*?)</details>', html, re.DOTALL)
+        self.assertNotIn('open', tag.group(1))
+        self.assertIn('id="purpose"', tag.group(2))
+        output = run_page_js(self.RAIL_FIXTURE + """
+selectNode('w');
+console.log(JSON.stringify({purpose: $('purpose').textContent}));
+""")
+        self.assertEqual(output['purpose'], 'First words')
+
+    def test_peek_empty_screen_states_reason(self):
+        output = run_page_js(self.RAIL_FIXTURE + """
+(async () => {
+  const away = {id: 'a', title: 'Away', state: 'idle', kind: 'claude', host: 'laptop2', cluster: 'Box', terminal: 't1', hosting: 'orca'};
+  const unbound = {id: 'u', title: 'Unbound', state: 'idle', kind: 'claude', host: 'local', cluster: 'Box'};
+  const result = {
+    none: await reasonOf(unbound, async () => { throw new Error('should not be called'); }),
+    down: await reasonOf(away, async () => { const e = new Error('ssh: connect timed out'); e.reason = 'host_unreachable'; throw e; }),
+    empty: await reasonOf(away, async () => ({ok: true, output: ''})),
+    shown: await reasonOf(away, async () => ({ok: true, output: 'hello screen'}))};
+  result.screen = $('screen').textContent;
+  console.log(JSON.stringify(result));
+})();
+""")
+        self.assertEqual(output['none']['text'], 'No terminal is bound to this session')
+        self.assertEqual(output['down']['text'], 'laptop2 is unreachable')
+        self.assertEqual(output['empty']['text'], 'The terminal returned nothing')
+        for name in ('none', 'down', 'empty'):
+            self.assertTrue(output[name]['screenHidden'], name)
+        self.assertEqual(output['shown']['text'], '')
+        self.assertFalse(output['shown']['screenHidden'])
+        self.assertEqual(output['screen'], 'hello screen')
+
+    def test_selecting_cluster_hides_previous_node_rail(self):
+        output = run_page_js(self.RAIL_FIXTURE + """
+selectNode('w');
+const shown = {rest: $('node-rest').hidden, details: $('details').hidden};
+const clusterIds = [...clusters.keys()];
+selectCluster(clusterIds.length ? clusterIds[0] : 'Box');
+console.log(JSON.stringify({shown, selectedId, rest: $('node-rest').hidden,
+  promote: $('promote-form').hidden, assign: $('assign-form').hidden,
+  details: $('details').hidden, card: $('context-rail').hidden}));
+""")
+        self.assertEqual(output['shown'], {'rest': False, 'details': False})
+        self.assertIsNone(output['selectedId'])
+        self.assertTrue(output['rest'])
+        self.assertTrue(output['details'])
+        self.assertFalse(output['card'])
+
+    def test_peek_reason_lines_follow_the_response(self):
+        output = run_page_js(self.RAIL_FIXTURE + """
+(async () => {
+  const away = {id: 'a', title: 'Away', state: 'idle', kind: 'claude', host: 'laptop2', cluster: 'Box', terminal: 't1', hosting: 'orca'};
+  const fail = (reason, message) => async () => { const e = new Error(message); e.reason = reason; throw e; };
+  const result = {
+    none: await reasonOf(away, fail('no_terminal', 'pane gone')),
+    down: await reasonOf(away, fail('host_unreachable', 'ssh timed out')),
+    empty: await reasonOf(away, async () => ({ok: true, output: '', reason: 'empty'})),
+    error: await reasonOf(away, fail('error', 'tmux exploded'))};
+  result.errorText = $('overlay-error').textContent; result.errorShown = !$('overlay-error').hidden;
+  console.log(JSON.stringify(result));
+})();
+""")
+        self.assertEqual(output['none']['text'], 'No terminal is bound to this session')
+        self.assertEqual(output['down']['text'], 'laptop2 is unreachable')
+        self.assertEqual(output['empty']['text'], 'The terminal returned nothing')
+        self.assertEqual(output['errorText'], 'tmux exploded')
+        self.assertTrue(output['errorShown'])
+
+    def test_escape_in_dialog_leaves_search_alone(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+type('6897');
+$('overlay').open = true;
+document.dispatch('keydown', {key: 'Escape'});
+console.log(JSON.stringify({query: searchQuery, value: $('search').value}));
+""")
+        self.assertEqual(output['query'], '6897')
+        self.assertEqual(output['value'], '6897')
+
+    def test_search_combines_with_state_filter(self):
+        output = run_page_js(self.SEARCH_FIXTURE + """
+type('o');
+const query = opacities();
+setStateFilter('working');
+const both = opacities();
+console.log(JSON.stringify({query, both, status: statusText()}));
+""")
+        self.assertEqual(output['query'], {'n1': 0.25, 'n2': 1, 'n3': 1})
+        self.assertEqual(output['both'], {'n1': 0.25, 'n2': 0.25, 'n3': 1})
+        self.assertTrue(output['status'].endswith('· 2 match'), output['status'])
 
 
 if __name__ == "__main__":

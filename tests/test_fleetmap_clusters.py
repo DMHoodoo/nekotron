@@ -63,9 +63,26 @@ class InitiativeClusters(unittest.TestCase):
         self.assertEqual(cluster_for("x", run_objective=None, title="", purpose="", worktree="",
                                      branch="refs/heads/DMHoodoo/PR-6869-review-chief", config=cfg), "PR 6869 review")
 
-    def test_worktree_rule_names_branch_segment(self):
+    def test_unclaimed_nodes_cluster_by_repository_not_branch(self):
+        for branch in ("refs/heads/main", "refs/heads/hok/feature"):
+            self.assertEqual(cluster_for("x", run_objective=None, title="", purpose="", worktree="/w/a",
+                                         branch=branch, repository="glow-core",
+                                         config=ClusterConfig([], {})), "glow-core")
+
+    def test_run_and_pin_claims_still_win(self):
+        cfg = ClusterConfig([], {"x": "Pinned"})
+        self.assertEqual(cluster_for("x", run_objective="Run", title="", purpose="", worktree="/w",
+                                     branch="b", repository="glow-core", config=cfg), "Pinned")
+        self.assertEqual(cluster_for("y", run_objective="Run: go", title="", purpose="", worktree="/w",
+                                     branch="b", repository="glow-core", config=ClusterConfig([], {})), "Run")
+        self.assertEqual(cluster_for("y", run_objective=None, title="", purpose="", worktree="/w",
+                                     branch="b", repository="glow-core", projection_cluster="Proj",
+                                     config=ClusterConfig([], {})), "Proj")
+
+    def test_no_repository_goes_to_unsorted(self):
         self.assertEqual(cluster_for("x", run_objective=None, title="", purpose="", worktree="/w/lookdown",
-                                     branch="refs/heads/hok/handoff-l2", config=ClusterConfig([], {})), "handoff-l2")
+                                     branch="refs/heads/hok/handoff-l2", repository=None,
+                                     config=ClusterConfig([], {})), "Unsorted")
 
     def test_unsorted_when_nothing_matches(self):
         self.assertEqual(cluster_for("x", run_objective=None, title="", purpose="", worktree="", branch="",
@@ -76,7 +93,7 @@ class InitiativeClusters(unittest.TestCase):
         self.assertEqual(load(self.path).assign, {"local:sid:s1": "Commissions"})
 
     def cluster(self, config=None, node_id='x', **fields):
-        values = dict(run_objective=None, title='', purpose='', worktree='', branch='')
+        values = dict(run_objective=None, title='', purpose='', worktree='', branch='', repository=None)
         values.update(fields)
         return cluster_for(node_id, config=config or ClusterConfig([], {}), **values)
 
@@ -135,17 +152,15 @@ class InitiativeClusters(unittest.TestCase):
                 self.assertEqual(self.cluster(cfg, **{field: 'prefix-NEEDLE-suffix'}), 'First')
 
     def test_empty_objective_falls_through(self):
-        self.assertEqual(self.cluster(run_objective='', worktree='/w', branch='topic'), 'topic')
+        self.assertEqual(self.cluster(run_objective='', worktree='/w', branch='topic',
+                                      repository='glow-core'), 'glow-core')
 
-    def test_worktree_and_branch_are_both_required(self):
-        for worktree, branch in (('', 'topic'), ('/w', ''), ('', '')):
-            with self.subTest(worktree=worktree, branch=branch):
-                self.assertEqual(self.cluster(worktree=worktree, branch=branch), 'Unsorted')
-
-    def test_worktree_branch_prefix_and_nested_segment(self):
-        for branch in ('refs/heads/hok/topic', 'hok/topic', 'refs/heads/topic', 'topic'):
+    def test_repository_is_required_and_branch_is_ignored(self):
+        for branch in ('', 'topic', 'refs/heads/hok/topic'):
             with self.subTest(branch=branch):
-                self.assertEqual(self.cluster(worktree='/w', branch=branch), 'topic')
+                self.assertEqual(self.cluster(worktree='/w', branch=branch), 'Unsorted')
+                self.assertEqual(self.cluster(worktree='/w', branch=branch, repository='glow-core'),
+                                 'glow-core')
 
     def write_config(self, data):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -181,7 +196,17 @@ class InitiativeClusters(unittest.TestCase):
                              for project in cfg.projects for item in project['slices']))
 
     def test_never_prompted_session_is_unsorted_not_branch(self):
-        self.assertEqual(self.cluster(purpose=None, worktree='/w', branch='topic'), 'Unsorted')
+        self.assertEqual(self.cluster(purpose=None, worktree='/w', branch='topic',
+                                      repository='glow-core'), 'Unsorted')
+
+    def test_repository_from_path_handles_claude_worktrees_orca_workspaces_and_plain_repos(self):
+        for path, expected in (
+                ('/Users/hok/Documents/GlowDevelopment/glow-core/.claude/worktrees/handoff-pr3-fix', 'glow-core'),
+                ('/Users/hok/orca/workspaces/nekotron/fleet-map', 'nekotron'),
+                ('/Users/hok/Documents/GlowDevelopment/glow-core', 'glow-core'),
+                ('', None)):
+            with self.subTest(path=path):
+                self.assertEqual(clusters.repository_from_path(path), expected)
 
     def test_never_prompted_session_can_still_be_explicitly_clustered_or_matched(self):
         cfg = ClusterConfig([('Matched', ['needle'])], {'local:sid:s1': 'Pinned'})

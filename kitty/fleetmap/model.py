@@ -9,7 +9,7 @@ import threading
 import time
 
 import fleet_tmux
-from .clusters import CONFIG_PATH, cluster_for, load, short_name, stage_for
+from .clusters import CONFIG_PATH, cluster_for, load, repository_from_path, short_name, stage_for
 from .edges import Edge, Resolver, build_edges
 from .ladder import Ladder, never_prompted
 from .matrix import build_matrix, derive_stage
@@ -37,6 +37,26 @@ def _match_terminals(sessions, terminals):
     return matched
 
 
+RETIRED_STATES = ('released', 'abandoned', 'failed', 'succeeded')
+
+
+def _retired_workers(data, live_handles):
+    """Map (host, terminal handle) to the worker record of each retired worker terminal.
+
+    A worker is retired when its dispatch is over and Orca still retains the terminal.
+    A terminal that hosts a live agent process is never retired."""
+    records = {}
+    for entry in data.values():
+        for worker in entry['workers']:
+            handle = worker.get('agentTerminalHandle')
+            if (handle and worker.get('workerState') in RETIRED_STATES
+                    and worker.get('terminalState') == 'retained'):
+                records[handle] = worker
+    return {(host, terminal['handle']): records[terminal['handle']]
+            for host, entry in data.items() for terminal in entry['terminals']
+            if terminal['handle'] in records and terminal['handle'] not in live_handles}
+
+
 def _git_metadata(cwd):
     """Read local git facts only; remote paths must never be probed locally."""
     if not cwd:
@@ -53,13 +73,28 @@ def _git_metadata(cwd):
         return '', ''
 
 
+def repository_name(worktree_root):
+    """Name of the repository owning a worktree: the directory holding its common git directory."""
+    if not worktree_root:
+        return None
+    try:
+        out = subprocess.run(['git', '-C', worktree_root, 'rev-parse', '--path-format=absolute',
+                              '--git-common-dir'], capture_output=True, text=True, timeout=5)
+        if out.returncode or not out.stdout.strip():
+            return None
+        common = Path(out.stdout.strip()).resolve()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return common.parent.name or None
+
+
 def _node(node_id, host, kind, facts=None):
     facts = facts or TranscriptFacts.empty()
     return dict(
         id=node_id, host=host, kind=kind, parent=None, title=facts.title or '',
         purpose=facts.purpose or '', doing=facts.doing or '', last_said=facts.last_said or '',
         state='idle', you_at=facts.you_at, it_at=facts.it_at,
-        never_addressed=facts.you_at is None, cluster='Unsorted', repo='', worktree='',
+        never_addressed=facts.you_at is None, cluster='Unsorted', repo='', repository='', worktree='',
         branch='', hosting='unknown', model=None, ctx_pct=None, cost=None,
         stalled=False, ladder=None, stage=None, cluster_source='unsorted',
         activity_changed_at=None, transcript_offset=facts.offset, last_output_at=None,
@@ -100,7 +135,8 @@ class Collector:
         self._slow_lock = threading.Lock()
         self._slow_input = None
         self._slow = {'ladders': {}, 'memory': {}, 'stale': {}, 'hosts': {},
-                      'environments': [], 'environment_error': None, 'git': {}, 'tmux': {}}
+                      'environments': [], 'environment_error': None, 'git': {}, 'tmux': {},
+                      'repository': {}}
         self._local_input = ([], set(), [])
         self._host_threads = {}
         self._screens = {}
@@ -169,12 +205,25 @@ class Collector:
             started.append(thread)
         return started
 
+    @staticmethod
+    def _repository(slow, host, worktree):
+        """Cached git answer for a local checkout; the path decides only when git could not run."""
+        if host == 'local':
+            cached = slow['repository'].get(worktree, (0, None))[1]
+            if cached:
+                return cached
+            answer = slow['git'].get(worktree)
+            if answer is not None and not answer[1][0]:
+                return None
+        return repository_from_path(worktree)
+
     def refresh_sources(self):
         """Refresh host and checkout caches on the slow thread."""
         with self._slow_lock:
             sessions, paths, configured = self._local_input
             environments = list(self._slow['environments'])
             git = dict(self._slow['git'])
+            repositories = dict(self._slow['repository'])
         names = list(dict.fromkeys(['local'] + environments + configured))
         deadline = time.monotonic() + 5
         threads = self._start_hosts(names, sessions)
@@ -194,9 +243,15 @@ class Collector:
                 break
             if path not in git or now - git[path][0] >= 60:
                 git[path] = (now, _git_metadata(path))
+        for root in sorted({value[0] for _, value in git.values() if value[0]}):
+            now = time.monotonic()
+            if now >= deadline:
+                break
+            if root not in repositories or now - repositories[root][0] >= 60:
+                repositories[root] = (now, repository_name(root))
         tmux = self.tmux_sessions() if sessions else {}
         with self._slow_lock:
-            self._slow.update(git=git, tmux=tmux)
+            self._slow.update(git=git, tmux=tmux, repository=repositories)
 
     def refresh_slow(self):
         """All Orca, screen, tmux and git probes live outside snapshot publication."""
@@ -235,7 +290,7 @@ class Collector:
         self._sources[node_id] = source
         return facts
 
-    def _enrich(self, nodes, hosts, data, resolver, config, now):
+    def _enrich(self, nodes, hosts, data, resolver, config, now, retired=()):
         """Join projections and cheap overlays using the last completed probe pass."""
         roots = sorted({Path(node['worktree']) for node in nodes
                         if node['host'] == 'local' and node['worktree']})
@@ -260,7 +315,8 @@ class Collector:
                                                   short_name=(name if name in initiative_names
                                                               else short_name(full_name)),
                                                   run=None, matrix_host=None,
-                                                  waiting=0, stalled=0, notes=[], fallbacks=[]))
+                                                  waiting=0, stalled=0, notes=[], fallbacks=[],
+                                                  retired_workers=[]))
 
         for p in projections:
             matrix = build_matrix(p, resolver)
@@ -307,6 +363,16 @@ class Collector:
                 if record['run'] not in matrices:
                     record.update(run=run_id, matrix_host=next(
                         (host for host, records in data.items() if run in records['runs']), 'local'))
+        for worker in sorted(retired, key=lambda w: (w['host'], w['title'], w['dispatchId'])):
+            binding = bindings.get(worker['id'])
+            name = cluster_for(
+                worker['id'], run_objective=objectives.get(worker['handle']),
+                repository=self._repository(slow, worker['host'], worker['worktree']),
+                projection_cluster=binding[0].title if binding else None,
+                title=worker['title'], purpose='', worktree=worker['worktree'],
+                branch=worker['branch'], config=config)
+            cluster_record(name)['retired_workers'].append(
+                {key: worker[key] for key in ('title', 'dispatchId', 'state', 'retainedFor', 'host')})
         ladders = set()
         by_node = {node['id']: node for node in nodes}
         activity = {}
@@ -325,8 +391,9 @@ class Collector:
                     binding or pinned or objective):
                 node['cluster'] = 'Unsorted'
             else:
+                node['repository'] = self._repository(slow, node['host'], node['worktree']) or ''
                 node['cluster'] = cluster_for(
-                    node_id, run_objective=objective, projection_cluster=projection_cluster,
+                    node_id, run_objective=objective, repository=node['repository'] or None, projection_cluster=projection_cluster,
                     title=node['title'], purpose=(node['purpose'] if node['kind'] == 'terminal'
                                                  or node['you_at'] is not None else None),
                     worktree=node['worktree'], branch=node['branch'], config=config)
@@ -363,7 +430,10 @@ class Collector:
         for p in projections:
             matrices[p.run]['stalled'] = clusters[p.title]['stalled']
 
-        counts = running_workers({h: r['workers'] for h, r in data.items()},
+        retired_handles = {w['handle'] for w in retired}
+        counts = running_workers({h: [w for w in r['workers']
+                                      if w.get('agentTerminalHandle') not in retired_handles]
+                                  for h, r in data.items()},
                                  {h: r['terminals'] for h, r in data.items()})
         caps = dict(config.caps)
         # Sorted projection-file order makes overlapping host caps deterministic.
@@ -412,7 +482,9 @@ class Collector:
 
     def _poll_screens(self, host, records, workers):
         used = {t['handle'] for t in records['matches'].values()}
+        retired = _retired_workers({host: records}, used)
         candidates = [t for t in records['terminals'] if t['handle'] not in used
+                      and (host, t['handle']) not in retired
                       and (t.get('agentIdentity') or t['handle'] in workers)]
         candidates.sort(key=lambda t: self._screens.get((host, t['handle']), (0, ''))[0])
         for terminal in candidates:
@@ -471,6 +543,7 @@ class Collector:
         nodes, subagent_edges, facts_by_node = [], [], {}
         local_matches = _match_terminals(sessions, data.get('local', {}).get('terminals', []))
         git_by_path = slow['git']
+        retired = _retired_workers(data, {t['handle'] for t in local_matches.values()})
 
         def local_git(path):
             return git_by_path.get(path, (0, ('', '')))[1]
@@ -512,14 +585,29 @@ class Collector:
                 child = _node(child_id, 'local', 'subagent', child_facts)
                 child.update(parent=node_id, title=child_facts.title or agent.agent_id,
                              state='working' if now - agent.mtime < 120 else 'done')
-                for key in ('cluster', 'repo', 'worktree', 'branch', 'hosting'):
+                for key in ('cluster', 'repo', 'repository', 'worktree', 'branch', 'hosting'):
                     child[key] = node[key]
                 nodes.append(child)
                 subagent_edges.append(Edge(node_id, child_id, 1, agent.mtime, 'subagent'))
 
+        retired_nodes = []
         for host, records in data.items():
             for terminal in records['terminals']:
                 handle = terminal['handle']
+                worker = retired.get((host, handle))
+                if worker is not None:
+                    prefix = 'local' if host == 'local' else f'env:{host}'
+                    worktree = terminal.get('worktreePath') or ''
+                    root, branch = local_git(worktree) if host == 'local' else ('', '')
+                    stamp = terminal.get('lastOutputAt')
+                    retired_nodes.append(dict(
+                        id=f'{prefix}:term:{handle}', host=host, handle=handle,
+                        title=terminal.get('title') or '', worktree=root or worktree,
+                        branch=terminal.get('branch') or branch,
+                        dispatchId=worker.get('dispatchId') or worker.get('id') or '',
+                        state=worker['workerState'],
+                        retainedFor=max(0, int(now - stamp)) if stamp and stamp > 0 else None))
+                    continue
                 if (handle not in records['screens'] or (host == 'local' and
                         any(t['handle'] == handle for t in local_matches.values()))):
                     continue
@@ -558,7 +646,7 @@ class Collector:
                 inbox[host].append(dict(message, id=key))
         edges = build_edges(resolver, facts_by_node, inbox, self.first_seen) + subagent_edges
         visible = {node['id'] for node in nodes}
-        additions = self._enrich(nodes, hosts, data, resolver, config, now)
+        additions = self._enrich(nodes, hosts, data, resolver, config, now, retired_nodes)
         with self._slow_lock:
             self._local_input = (list(sessions),
                                  {n['worktree'] for n in nodes if n['host'] == 'local' and n['worktree']}

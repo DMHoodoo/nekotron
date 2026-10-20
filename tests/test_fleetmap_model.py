@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -15,7 +16,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'kitty'))
 from fleetmap.providers.directory import DirectoryProvider
-from fleetmap.model import Collector
+from fleetmap.model import Collector, repository_name
 from fleetmap.clusters import load
 from fleetmap.orca import OrcaClient, OrcaError
 from fleetmap.registry import LocalSession, Subagent
@@ -214,6 +215,64 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertNotEqual(self.node(first)['last_said'], self.node(second)['last_said'])
         self.assertEqual(self.node(second)['last_said'], 'New local text')
 
+    def make_repository(self, name='glow-core'):
+        repo = self.base / name
+        repo.mkdir()
+        env = dict(os.environ, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@t', GIT_COMMITTER_NAME='t',
+                   GIT_COMMITTER_EMAIL='t@t')
+        def git(*args):
+            subprocess.run(['git', '-C', str(repo), *args], check=True, capture_output=True, env=env)
+        git('init', '-q', '-b', 'main')
+        git('commit', '-q', '--allow-empty', '-m', 'init')
+        git('worktree', 'add', '-q', '-b', 'feature', str(self.base / (name + '-wt')))
+        return repo, self.base / (name + '-wt')
+
+    def test_repository_name_from_common_dir(self):
+        repo, wt = self.make_repository()
+        self.assertEqual(repository_name(str(repo)), 'glow-core')
+        self.assertEqual(repository_name(str(wt)), 'glow-core')
+        plain = self.base / 'plain'
+        plain.mkdir()
+        self.assertIsNone(repository_name(str(plain)))
+
+    def test_worktrees_of_one_repository_share_a_cluster_and_keep_branches(self):
+        repo, wt = self.make_repository()
+        self.local[0] = replace(self.local[0], cwd=str(repo))
+        second = replace(self.local[0], session_id='s2', cwd=str(wt))
+        self.local.append(second)
+        snapshot = PrimedCollector(self.orca, config_path=self.config, sessions=lambda: self.local,
+                                   tmux_sessions=lambda: {}).snapshot()
+        first, other = self.node(snapshot, 'local:sid:s1'), self.node(snapshot, 'local:sid:s2')
+        self.assertEqual((first['cluster'], other['cluster']), ('glow-core', 'glow-core'))
+        self.assertEqual((first['repository'], other['repository']), ('glow-core', 'glow-core'))
+        self.assertEqual((first['branch'], other['branch']), ('main', 'feature'))
+
+    def test_local_folder_outside_any_repository_is_unsorted_but_unprimed_uses_path(self):
+        with patch('fleetmap.model._git_metadata', return_value=('', '')):
+            node = self.node(self.collector().snapshot())
+        self.assertEqual(node['cluster'], 'Unsorted')
+        self.assertEqual(node['repository'], '')
+        fresh = Collector(self.orca, config_path=self.config, sessions=lambda: self.local,
+                          tmux_sessions=lambda: {}, providers=[DirectoryProvider(self.base / 'progress')])
+        self.assertEqual(self.node(fresh.snapshot())['repository'], 'project')
+
+    def test_repository_lookup_runs_in_slow_thread_and_is_cached(self):
+        collector = Collector(self.orca, config_path=self.config, sessions=lambda: [],
+                              tmux_sessions=lambda: {}, providers=[DirectoryProvider(self.base / 'progress')])
+        collector._local_input = ([], {'/work/project'}, [])
+        with patch('fleetmap.model._git_metadata', return_value=('/work/project', 'main')), \
+                patch('fleetmap.model.repository_name', return_value='glow-core') as lookup:
+            collector.refresh_sources()
+            collector.refresh_sources()
+            self.assertEqual(lookup.call_count, 1)
+            stamp, value = collector._slow['repository']['/work/project']
+            collector._slow['repository']['/work/project'] = (stamp - 61, value)
+            collector.refresh_sources()
+            self.assertEqual(lookup.call_count, 2)
+        with patch('fleetmap.model.repository_name', side_effect=AssertionError('foreground git')), \
+                patch('fleetmap.model._git_metadata', side_effect=AssertionError('foreground git')):
+            collector.snapshot()
+
     def test_screen_and_git_cache_ttls(self):
         self.local.clear()
         self.orca.put('terminal list', 'terminals', [terminal()])
@@ -280,6 +339,62 @@ class SnapshotAssembler(unittest.TestCase):
                     self.assertEqual(collector._screens[('laptop2', 'term_bad')],
                                      (1.0, 'Last good screen'))
 
+    def retire(self, *states):
+        handles = ['term_r%d' % i for i in range(len(states))]
+        self.orca.put('terminal list', 'terminals',
+                      [terminal()] + [dict(terminal(h), title='Retired ' + h) for h in handles])
+        self.orca.put('orchestration worker-list', 'workers', [
+            {'dispatchId': 'd_' + h, 'runId': 'run_x', 'agentTerminalHandle': h,
+             'workerState': state, 'terminalState': 'retained'}
+            for h, state in zip(handles, states)])
+        return handles
+
+    def test_retired_worker_terminals_are_not_nodes(self):
+        self.retire('released', 'abandoned')
+        snap = self.collector().snapshot()
+        self.assertEqual([n['id'] for n in snap['nodes'] if n['kind'] == 'terminal'], [])
+        retired = [r for c in snap['clusters'].values() for r in c.get('retired_workers', [])]
+        self.assertEqual(sorted((r['title'], r['dispatchId'], r['state']) for r in retired),
+                         [('Retired term_r0', 'd_term_r0', 'released'),
+                          ('Retired term_r1', 'd_term_r1', 'abandoned')])
+        self.assertTrue(all(isinstance(r['retainedFor'], int) for r in retired))
+        self.assertEqual(len({name for name, c in snap['clusters'].items()
+                              if c.get('retired_workers')}), 1)
+
+    def test_retired_worker_without_output_stamp_has_unknown_retention(self):
+        handles = self.retire('released')
+        self.orca.put('terminal list', 'terminals', [
+            terminal(), dict(terminal(handles[0]), title='Retired', lastOutputAt=None)])
+        snap = self.collector().snapshot()
+        retired = [r for c in snap['clusters'].values() for r in c.get('retired_workers', [])]
+        self.assertEqual([r['retainedFor'] for r in retired], [None])
+
+    def test_live_agent_terminal_is_never_retired(self):
+        self.orca.put('orchestration worker-list', 'workers', [
+            {'dispatchId': 'd1', 'agentTerminalHandle': 'term_a',
+             'workerState': 'released', 'terminalState': 'retained'}])
+        snap = self.collector().snapshot()
+        self.assertIn('local:sid:s1', [n['id'] for n in snap['nodes']])
+        self.assertEqual([r for c in snap['clusters'].values()
+                          for r in c.get('retired_workers', [])], [])
+
+    def test_unretained_or_running_workers_stay_nodes(self):
+        self.orca.put('terminal list', 'terminals', [dict(terminal('term_w'), title='W')])
+        self.orca.put('orchestration worker-list', 'workers', [
+            {'dispatchId': 'd1', 'agentTerminalHandle': 'term_w', 'workerState': 'succeeded'}])
+        snap = self.collector().snapshot()
+        self.assertIn('local:term:term_w', [n['id'] for n in snap['nodes']])
+
+    def test_host_worker_count_excludes_retired(self):
+        handles = self.retire('released', 'succeeded', 'failed')
+        self.orca.put('terminal list', 'terminals',
+                      [terminal(), dict(terminal('term_live'), title='Live')] +
+                      [dict(terminal(h), title='Retired ' + h) for h in handles])
+        self.orca.responses[None, ('orchestration', 'worker-list')]['workers'].append(
+            {'dispatchId': 'd_live', 'agentTerminalHandle': 'term_live', 'workerState': 'running'})
+        snap = self.collector().snapshot()
+        self.assertEqual(snap['hosts'][0]['workers'], 1)
+
     def test_projection_joins_remote_chief_and_local_worker_over_pin(self):
         self.config.write_text(json.dumps({'assign': {'s1': 'Pinned'}, 'projects': [
             {'name': 'Pinned', 'slices': [{'name': 'Manual', 'stage': 'goal',
@@ -310,13 +425,17 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertEqual(matrix['packages'][0]['id'], 'P1')
         self.assertEqual(matrix['run_plan']['path'], 'plan.md')
 
-    def test_terminal_without_transcript_keeps_worktree_cluster(self):
-        self.orca.put('terminal list', 'terminals', [dict(terminal('term_worker'),
-            branch='refs/heads/hok/handoff-l2-p06-outcomes')], 'laptop2')
-        node = self.node(self.collector().snapshot(), 'env:laptop2:term:term_worker')
-        self.assertEqual((node['cluster'], node['cluster_source']),
-                         ('handoff-l2-p06-outcomes', 'worktree'))
-        self.assertIsNone(node['you_at'])
+    def test_terminal_without_transcript_on_remote_host_groups_by_path_repository(self):
+        self.orca.put('terminal list', 'terminals', [
+            dict(terminal('term_worker'), worktreePath='/Users/hok/orca/workspaces/glow-core/wt-a',
+                 branch='refs/heads/hok/handoff-l2-p06-outcomes'),
+            dict(terminal('term_other'), worktreePath='/Users/hok/Documents/GlowDevelopment/glow-core/.claude/worktrees/wt-b')],
+            'laptop2')
+        snap = self.collector().snapshot()
+        nodes = [self.node(snap, f'env:laptop2:term:{name}') for name in ('term_worker', 'term_other')]
+        self.assertEqual([(n['cluster'], n['cluster_source']) for n in nodes],
+                         [('glow-core', 'worktree')] * 2)
+        self.assertIsNone(nodes[0]['you_at'])
 
     def test_projected_dispatch_joins_remote_terminal_from_any_hosts_scoped_list(self):
         self.write_projection(projection(chiefTerminal='term_a',
@@ -498,7 +617,7 @@ class SnapshotAssembler(unittest.TestCase):
         node = self.node(snap)
         self.assertEqual(set(node), {
             'id', 'host', 'kind', 'parent', 'title', 'purpose', 'doing', 'last_said',
-            'state', 'you_at', 'it_at', 'never_addressed', 'never_prompted', 'cluster', 'repo',
+            'state', 'you_at', 'it_at', 'never_addressed', 'never_prompted', 'cluster', 'repo', 'repository',
             'worktree', 'branch', 'hosting', 'model', 'ctx_pct', 'cost', 'moves',
             'terminal', 'tmux', 'kitty_window', 'kitty_pid', 'subagents_total', 'subagents_shown',
             'stalled', 'ladder', 'stage', 'cluster_source', 'activity_changed_at',
@@ -553,7 +672,7 @@ class SnapshotAssembler(unittest.TestCase):
         node = self.node(collector.snapshot())
         self.assertEqual(node['you_at'], NOW)
         self.assertFalse(node['never_addressed'])
-        self.assertEqual(node['cluster'], 'review')
+        self.assertEqual(node['cluster'], 'Unsorted')
 
     def test_dispatched_worker_run_objective_applies_before_human_follow_up(self):
         self.orca.put('orchestration worker-list', 'workers',
@@ -806,7 +925,7 @@ class SnapshotAssembler(unittest.TestCase):
         self.orca.put('terminal list', 'terminals', [])
         node = self.node(self.collector().snapshot())
         self.assertEqual((node['repo'], node['worktree'], node['branch'], node['cluster']),
-                         ('project-root', str(repo.resolve()), 'feature/git-branch', 'git-branch'))
+                         ('project-root', str(repo.resolve()), 'feature/git-branch', 'project-root'))
 
     def test_missing_transcript_is_an_unprompted_node(self):
         self.transcript.unlink()
@@ -843,7 +962,7 @@ class SnapshotAssembler(unittest.TestCase):
 
     def test_config_is_reloaded_and_new_transcript_path_resets_facts(self):
         collector = self.collector()
-        self.assertEqual(self.node(collector.snapshot())['cluster'], 'review')
+        self.assertEqual(self.node(collector.snapshot())['cluster'], 'Unsorted')
         self.config.write_text(json.dumps({'assign': {'s1': 'Pinned'}}))
         self.assertEqual(self.node(collector.snapshot())['cluster'], 'Pinned')
         replacement = self.base / 'replacement.jsonl'
