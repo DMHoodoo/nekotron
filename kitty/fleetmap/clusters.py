@@ -164,6 +164,18 @@ def stage_for(node_id: str, config: ClusterConfig) -> str | None:
     return membership[1].get('stage') if membership is not None else None
 
 
+def repository_from_path(path: str) -> str | None:
+    """Name the repository a worktree path belongs to without running git."""
+    parts = [part for part in (path or '').split('/') if part]
+    for index in range(1, len(parts)):
+        if parts[index - 1:index + 1] == ['.claude', 'worktrees'] and index >= 2:
+            return parts[index - 2]
+    for index in range(len(parts) - 2):
+        if parts[index:index + 2] == ['orca', 'workspaces']:
+            return parts[index + 2]
+    return parts[-1] if parts else None
+
+
 def cluster_for(node_id: str, *, run_objective: str | None, title: str,
                 purpose: str | None, worktree: str, branch: str,
                 config: ClusterConfig, projection_cluster: str | None = None,

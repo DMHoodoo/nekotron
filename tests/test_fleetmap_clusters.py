@@ -196,7 +196,17 @@ class InitiativeClusters(unittest.TestCase):
                              for project in cfg.projects for item in project['slices']))
 
     def test_never_prompted_session_is_unsorted_not_branch(self):
-        self.assertEqual(self.cluster(purpose=None, worktree='/w', branch='topic'), 'Unsorted')
+        self.assertEqual(self.cluster(purpose=None, worktree='/w', branch='topic',
+                                      repository='glow-core'), 'Unsorted')
+
+    def test_repository_from_path_handles_claude_worktrees_orca_workspaces_and_plain_repos(self):
+        for path, expected in (
+                ('/Users/hok/Documents/GlowDevelopment/glow-core/.claude/worktrees/handoff-pr3-fix', 'glow-core'),
+                ('/Users/hok/orca/workspaces/nekotron/fleet-map', 'nekotron'),
+                ('/Users/hok/Documents/GlowDevelopment/glow-core', 'glow-core'),
+                ('', None)):
+            with self.subTest(path=path):
+                self.assertEqual(clusters.repository_from_path(path), expected)
 
     def test_never_prompted_session_can_still_be_explicitly_clustered_or_matched(self):
         cfg = ClusterConfig([('Matched', ['needle'])], {'local:sid:s1': 'Pinned'})

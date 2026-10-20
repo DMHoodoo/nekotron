@@ -416,12 +416,17 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertEqual(matrix['packages'][0]['id'], 'P1')
         self.assertEqual(matrix['run_plan']['path'], 'plan.md')
 
-    def test_terminal_without_transcript_on_remote_host_has_no_repository(self):
-        self.orca.put('terminal list', 'terminals', [dict(terminal('term_worker'),
-            branch='refs/heads/hok/handoff-l2-p06-outcomes')], 'laptop2')
-        node = self.node(self.collector().snapshot(), 'env:laptop2:term:term_worker')
-        self.assertEqual((node['cluster'], node['cluster_source']), ('Unsorted', 'unsorted'))
-        self.assertIsNone(node['you_at'])
+    def test_terminal_without_transcript_on_remote_host_groups_by_path_repository(self):
+        self.orca.put('terminal list', 'terminals', [
+            dict(terminal('term_worker'), worktreePath='/Users/hok/orca/workspaces/glow-core/wt-a',
+                 branch='refs/heads/hok/handoff-l2-p06-outcomes'),
+            dict(terminal('term_other'), worktreePath='/Users/hok/Documents/GlowDevelopment/glow-core/.claude/worktrees/wt-b')],
+            'laptop2')
+        snap = self.collector().snapshot()
+        nodes = [self.node(snap, f'env:laptop2:term:{name}') for name in ('term_worker', 'term_other')]
+        self.assertEqual([(n['cluster'], n['cluster_source']) for n in nodes],
+                         [('glow-core', 'worktree')] * 2)
+        self.assertIsNone(nodes[0]['you_at'])
 
     def test_projected_dispatch_joins_remote_terminal_from_any_hosts_scoped_list(self):
         self.write_projection(projection(chiefTerminal='term_a',
@@ -658,7 +663,7 @@ class SnapshotAssembler(unittest.TestCase):
         node = self.node(collector.snapshot())
         self.assertEqual(node['you_at'], NOW)
         self.assertFalse(node['never_addressed'])
-        self.assertEqual(node['cluster'], 'Unsorted')
+        self.assertEqual(node['cluster'], 'project')
 
     def test_dispatched_worker_run_objective_applies_before_human_follow_up(self):
         self.orca.put('orchestration worker-list', 'workers',
@@ -948,7 +953,7 @@ class SnapshotAssembler(unittest.TestCase):
 
     def test_config_is_reloaded_and_new_transcript_path_resets_facts(self):
         collector = self.collector()
-        self.assertEqual(self.node(collector.snapshot())['cluster'], 'Unsorted')
+        self.assertEqual(self.node(collector.snapshot())['cluster'], 'project')
         self.config.write_text(json.dumps({'assign': {'s1': 'Pinned'}}))
         self.assertEqual(self.node(collector.snapshot())['cluster'], 'Pinned')
         replacement = self.base / 'replacement.jsonl'

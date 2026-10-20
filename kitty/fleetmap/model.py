@@ -9,7 +9,7 @@ import threading
 import time
 
 import fleet_tmux
-from .clusters import CONFIG_PATH, cluster_for, load, short_name, stage_for
+from .clusters import CONFIG_PATH, cluster_for, load, repository_from_path, short_name, stage_for
 from .edges import Edge, Resolver, build_edges
 from .ladder import Ladder, never_prompted
 from .matrix import build_matrix, derive_stage
@@ -205,6 +205,12 @@ class Collector:
             started.append(thread)
         return started
 
+    @staticmethod
+    def _repository(slow, host, worktree):
+        """Cached git answer for a local checkout; the path decides when git cannot."""
+        cached = slow['repository'].get(worktree, (0, None))[1] if host == 'local' else None
+        return cached or repository_from_path(worktree)
+
     def refresh_sources(self):
         """Refresh host and checkout caches on the slow thread."""
         with self._slow_lock:
@@ -231,8 +237,11 @@ class Collector:
                 break
             if path not in git or now - git[path][0] >= 60:
                 git[path] = (now, _git_metadata(path))
+        deadline = time.monotonic() + 5
         for root in sorted({value[0] for _, value in git.values() if value[0]}):
             now = time.monotonic()
+            if now >= deadline:
+                break
             if root not in repositories or now - repositories[root][0] >= 60:
                 repositories[root] = (now, repository_name(root))
         tmux = self.tmux_sessions() if sessions else {}
@@ -353,7 +362,7 @@ class Collector:
             binding = bindings.get(worker['id'])
             name = cluster_for(
                 worker['id'], run_objective=objectives.get(worker['handle']),
-                repository=slow['repository'].get(worker['worktree'], (0, None))[1],
+                repository=self._repository(slow, worker['host'], worker['worktree']),
                 projection_cluster=binding[0].title if binding else None,
                 title=worker['title'], purpose='', worktree=worker['worktree'],
                 branch=worker['branch'], config=config)
@@ -377,7 +386,7 @@ class Collector:
                     binding or pinned or objective):
                 node['cluster'] = 'Unsorted'
             else:
-                node['repository'] = slow['repository'].get(node['worktree'], (0, None))[1] or ''
+                node['repository'] = self._repository(slow, node['host'], node['worktree']) or ''
                 node['cluster'] = cluster_for(
                     node_id, run_objective=objective, repository=node['repository'] or None, projection_cluster=projection_cluster,
                     title=node['title'], purpose=(node['purpose'] if node['kind'] == 'terminal'
