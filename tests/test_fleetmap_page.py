@@ -46,6 +46,7 @@ class Element {
   focus() { document.activeElement = this; }
   blur() { if (document.activeElement === this) document.activeElement = null; }
 }
+function applyRail() {}
 const elements = new Map();
 const $ = id => { if (!elements.has(id)) elements.set(id, new Element()); return elements.get(id); };
 const document = {createElement: tag => new Element(tag), createTextNode: text => String(text),
@@ -110,7 +111,8 @@ const info = {run: 'run_test', matrix_host: 'local', waiting: 0, stalled: 0};
 const snapshot = {clusters: {'Review run': info}, runs: {run_test: run}, nodes: [], edges: []};
 const cluster = {id: 'cluster', name: 'Review run', host: 'local', panel: new Element()};
 const expanded = new Set(), nodes = new Map();
-let selectedId = null, selectedContext = null, miniViews = [];
+let selectedId = null, selectedContext = null, miniViews = [], railOpen = false;
+function noteRailToggle() {}
 const selections = [];
 function showContext(context, node) { selections.push({context, node}); }
 """
@@ -153,9 +155,9 @@ console.log(JSON.stringify({text: text(panel), found: Boolean(now), chains: chai
         rule = re.search(r'\.cluster-content\s*\{[^}]*\}',
                          (ROOT / 'kitty/fleetmap/page.html').read_text()).group()
         self.assertRegex(rule, r'overflow-wrap:\s*anywhere')
-        # Heading 32 + run 30 + five-line Now 102 + projection 30 + 20 padding.
-        self.assertGreaterEqual(output['contentHeight'], 214)
-        self.assertGreater(output['workerY'], output['top'] + 214)
+        # Heading 33 + run 24 + five-line Now 96 + projection 24 + 20 panel padding.
+        self.assertGreaterEqual(output['contentHeight'], 197)
+        self.assertGreater(output['workerY'], output['top'] + 197)
 
     def test_node_grid_starts_below_cluster_content(self):
         output = run_page_js(FALLBACK_FIXTURE + """
@@ -175,9 +177,9 @@ const longer = {header: cluster().headerHeight, y: endpoint('worker').y,
   height: Number(cluster().content.attributes.height)};
 console.log(JSON.stringify({empty, three, again, longer, stable}));
 """)
-        self.assertEqual(output['empty']['header'], 125)
-        # Heading 32 + run 30 + three-line Now 66 + projection 30 + 20 padding.
-        self.assertGreaterEqual(output['three']['header'], 178)
+        self.assertEqual(output['empty']['header'], 53)
+        # Heading 33 + run 24 + three-line Now 60 + projection 24 + 20 panel padding.
+        self.assertGreaterEqual(output['three']['header'], 161)
         self.assertGreater(output['three']['y'], output['empty']['y'])
         self.assertEqual(output['three']['y'], output['again']['y'])
         self.assertGreater(output['longer']['header'], output['three']['header'])
@@ -275,8 +277,8 @@ snapshot.clusters.Fallback.short_name = 'Audit';
 render();
 console.log(JSON.stringify({plain, long, short: Number(cluster().content.attributes.height)}));
 """)
-        # The name (51 characters, 433px) takes two lines of the 320px content width.
-        self.assertGreaterEqual(output['long'] - output['short'], 2 * 20)
+        # The name (51 characters, 433px) takes two lines beside the caret.
+        self.assertGreaterEqual(output['long'] - output['short'], 20)
 
     def test_removed_hovered_node_clears_hovered_id(self):
         output = run_page_js(EDGE_FIXTURE + """
@@ -401,7 +403,7 @@ console.log(JSON.stringify({children: heading.children.map(text),
         return self.run_cluster_js(page_functions(
             'selectCluster', 'renderRail', 'lastTouched', 'foldable', 'stateLine', 'renderContext', 'openBroadcast',
             'openOverlay', 'updateBroadcastCount', 'broadcastTargets',
-            'selectNode', 'showContext', 'setText', 'age', 'secondsSince',
+            'selectNode', 'showContext', 'shortIds', 'setText', 'age', 'secondsSince',
             'paintFocus', 'drawEdges') + """
 const clusters = new Map([[cluster.id, cluster]]), nodeViews = new Map();
 let selectedCluster = null, assignmentChoices = '', overlayVersion = 0;
@@ -569,8 +571,19 @@ console.log(JSON.stringify(results));
     def run_cluster_js(self, source):
         return run_js(DOM + page_functions(
             'html', 'button', 'clusterInfo', 'clusterRun', 'clusterItems',
-            'renderCluster', 'renderFallback', 'detailLine', 'stepper',
+            'renderCluster', 'renderFallback', 'shortIds', 'detailLine', 'stepper',
             'matrixTable', 'gateContent', 'segmentBar', 'miniNode') + RUN_CLUSTER + source)
+
+    def test_long_hex_ids_are_shortened_in_run_box_now_line(self):
+        output = self.run_cluster_js("""
+const full = 'Reviewing c5a5627d' + 'a'.repeat(56) + ' now';
+run.now = full;
+renderCluster(cluster);
+const now = byClass(cluster.panel, 'cluster-now')[0];
+console.log(JSON.stringify({text: text(now), title: now.attributes.title, full}));
+""")
+        self.assertEqual(output['text'], 'Reviewing c5a5627d… now')
+        self.assertEqual(output['title'], output['full'])
 
     def test_collapsed_run_cluster_renders_now_line_and_slice_bars(self):
         output = self.run_cluster_js("""
@@ -648,7 +661,7 @@ console.log(JSON.stringify({
 
     def test_fallback_objective_and_identity_render_in_header_and_rail(self):
         source = DOM + page_functions('html', 'button', 'clusterInfo', 'clusterRun',
-                                     'clusterItems', 'renderCluster', 'detailLine',
+                                     'clusterItems', 'renderCluster', 'shortIds', 'detailLine',
                                      'renderFallback', 'renderContext')
         output = run_js(source + """
 const objective = 'Handoff scheduling: wave 1 running; waiting for approval | full objective';
@@ -668,7 +681,7 @@ console.log(JSON.stringify([text(cluster.panel), text($('context-details'))]));
 
     def test_fallback_renders_beside_projected_matrix(self):
         source = DOM + page_functions('html', 'button', 'clusterInfo', 'clusterRun',
-                                     'clusterItems', 'renderCluster', 'detailLine',
+                                     'clusterItems', 'renderCluster', 'shortIds', 'detailLine',
                                      'renderFallback', 'matrixTable', 'miniNode')
         output = run_js(source + """
 const objective = 'Review run: legacy work; waiting';
@@ -696,13 +709,13 @@ console.log(JSON.stringify({collapsed, expanded: text(cluster.panel),
             self.assertIn('projection v1, Chief must re-render', rendered)
 
     def test_layout_preserves_positions_across_membership_thresholds_and_hosts(self):
-        source = DOM + page_functions('ensureRegion', 'ensureCluster', 'clusterInfo',
-                                     'clusterRun', 'nodeText', 'panelContentHeight', 'layoutFleet', 'endpoint',
+        source = DOM + 'function viewportWidth() { return 1600; }\n' + page_functions('ensureRegion', 'ensureCluster', 'clusterInfo',
+                                     'clusterRun', 'nodeText', 'panelContentHeight', 'layoutFleet', 'uiScale', 'viewportWidth', 'endpoint',
                                      'lastTouched', 'foldable', 'isFolded', 'clusterRetired')
         output = run_js(source + """
 const svg = () => new Element();
 const positions = new Map(), regions = new Map(), clusters = new Map(), expanded = new Set(), unfolded = new Set();
-const MIN_REGION = 420, CELL = 70, GAP = 16;
+const BASE_MIN_REGION = 420, BASE_CELL = 70, BASE_GAP = 16, LARGE_SCREEN = 2200, LARGE_RATIO = 14 / 12;
 let layoutSignature = '', layoutModeSignature = '', selectedId = null, searchQuery = '';
 function renderCluster() {}
 const clusterKey = node => JSON.stringify([node.host, node.cluster]);
@@ -805,10 +818,59 @@ renderDecisions();
 
     def test_decision_chip_has_three_lines(self):
         output = self.run_decision_js("""
-console.log(JSON.stringify(chip().children.map(text)));
+console.log(JSON.stringify(chip().children.filter(el => el.tagName === 'span').map(text)));
 """)
         self.assertEqual(output, ['Review run', 'Approve the delivery order for slice 2',
                                   'Class C · E3 · apply-by —'])
+
+    def test_long_hex_ids_are_shortened_in_now_lines(self):
+        output = self.run_decision_js("""
+const full = 'Reviewing c5a5627d' + 'a'.repeat(56) + ' now';
+const container = new Element('div');
+detailLine(container, 'Now', full);
+const line = container.children[0];
+console.log(JSON.stringify({text: text(line), title: line.attributes.title, full}));
+""")
+        self.assertEqual(output['text'], 'Now:  Reviewing c5a5627d… now')
+        self.assertEqual(output['title'], output['full'])
+
+    def test_long_hex_ids_are_shortened_in_rail_fields(self):
+        output = run_page_js("""
+const full = 'Doing c5a5627d' + 'a'.repeat(56) + ' now';
+setText('doing', full); setText('said', 'plain');
+console.log(JSON.stringify({doing: $('doing').textContent, title: $('doing').attributes.title, full,
+  said: $('said').textContent, saidTitle: $('said').attributes.title ?? null}));
+""")
+        self.assertEqual(output['doing'], 'Doing c5a5627d… now')
+        self.assertEqual(output['title'], output['full'])
+        self.assertEqual(output['said'], 'plain')
+        self.assertIsNone(output['saidTitle'])
+
+    def test_decision_strip_label_and_attention_style(self):
+        output = self.run_decision_js("""
+const strip = descendants($('decisions'));
+const label = text($('decisions').children[0]);
+const first = chip();
+const open = {label, cls: first.className, dot: byClass(first, 'attention-dot').length};
+snapshot.decisions = []; renderDecisions();
+console.log(JSON.stringify({open, none: text($('decisions'))}));
+""")
+        self.assertEqual(output['open']['label'], 'Needs you · 1')
+        self.assertIn('attention', output['open']['cls'].split(' '))
+        self.assertEqual(output['open']['dot'], 1)
+        self.assertEqual(output['none'].strip(), 'Nothing needs you')
+
+    def test_large_screen_steps_font_and_node_size(self):
+        def probe(width):
+            return run_page_js(f"""
+var window = {{innerWidth: {width}}};
+const view = makeNode({{id: 'a', title: 'a', state: 'idle', kind: 'claude', host: 'local', cluster: 'T'}}, false);
+console.log(JSON.stringify({{font: baseFontPx(), radius: view.radius}}));
+""")
+        big, normal = probe(2560), probe(1512)
+        self.assertEqual(normal, {'font': 12, 'radius': 17})
+        self.assertEqual(big['font'], 14)
+        self.assertAlmostEqual(big['radius'], 17 * 14 / 12)
 
     def test_clicking_decision_opens_run_and_card(self):
         output = self.run_decision_js("""
@@ -1528,6 +1590,418 @@ console.log(JSON.stringify({query, both, status: statusText()}));
         self.assertEqual(output['query'], {'n1': 0.25, 'n2': 1, 'n3': 1})
         self.assertEqual(output['both'], {'n1': 0.25, 'n2': 0.25, 'n3': 1})
         self.assertTrue(output['status'].endswith('· 2 match'), output['status'])
+
+    ONDEMAND_FIXTURE = EDGE_FIXTURE + """
+$('overlay').open = false;
+const rail = () => ({hidden: $('rail').hidden, main: $('main').className, backdrop: $('rail-backdrop').hidden});
+"""
+
+    def test_rail_hidden_until_selection(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + "console.log(JSON.stringify(rail()));")
+        self.assertTrue(output['hidden'])
+        self.assertNotIn('rail-open', output['main'])
+        self.assertTrue(output['backdrop'])
+
+    def test_selection_opens_rail_and_close_hides_it(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + """
+selectNode('a'); const opened = rail();
+$('rail-close').click(); const closed = rail();
+selectNode('b'); $('overlay').open = true;
+document.dispatch('keydown', {key: 'Escape'}); const dialog = rail();
+$('overlay').open = false;
+$('search').value = 'zz'; searchQuery = 'zz';
+document.dispatch('keydown', {key: 'Escape'}); const searchFirst = rail();
+document.dispatch('keydown', {key: 'Escape'}); const escaped = rail();
+console.log(JSON.stringify({opened, closed, dialog, searchFirst, escaped, selected: selectedId}));
+""")
+        self.assertFalse(output['opened']['hidden'])
+        self.assertIn('rail-open', output['opened']['main'])
+        self.assertTrue(output['closed']['hidden'])
+        self.assertFalse(output['dialog']['hidden'])
+        self.assertFalse(output['searchFirst']['hidden'])
+        self.assertTrue(output['escaped']['hidden'])
+        self.assertIsNone(output['selected'])
+
+    def test_narrow_width_rail_is_overlay(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + """
+var window = {innerWidth: 768};
+selectNode('a'); const narrow = rail();
+$('rail-backdrop').click(); const closed = rail();
+window.innerWidth = 1200; selectNode('a');
+console.log(JSON.stringify({narrow, closed, wide: rail()}));
+""")
+        self.assertIn('rail-overlay', output['narrow']['main'])
+        self.assertFalse(output['narrow']['backdrop'])
+        self.assertTrue(output['closed']['hidden'])
+        self.assertNotIn('rail-overlay', output['wide']['main'])
+        self.assertTrue(output['wide']['backdrop'])
+
+    def test_rail_open_gives_map_a_narrower_column_by_css(self):
+        page = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        self.assertRegex(page, r'main \{[^}]*grid-template-columns: minmax\(0, 1fr\);')
+        self.assertRegex(page, r'main\.rail-open \{[^}]*grid-template-columns: minmax\(0, 1fr\) calc\(320px \* var\(--u\)\);')
+        self.assertRegex(page, r'main\.rail-open\.rail-overlay \{[^}]*grid-template-columns: minmax\(0, 1fr\);')
+
+    def test_selected_node_stays_in_view_after_rail_toggle(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + """
+const calls = [];
+render();
+nodeViews.get('a').group.scrollIntoView = options => calls.push(['a', options.block]);
+selectNode('a'); const beforeResize = calls.length;
+$('map-scroll').clientWidth = 880; onMapResize(); const opened = calls.slice();
+$('rail-close').click();
+$('map-scroll').clientWidth = 1200; onMapResize();
+onMapResize();
+console.log(JSON.stringify({beforeResize, opened, calls}));
+""")
+        self.assertEqual(output['beforeResize'], 0)
+        self.assertEqual(output['opened'], [['a', 'nearest']])
+        self.assertEqual(output['calls'], [['a', 'nearest'], ['a', 'nearest']])
+
+    def test_regions_stack_below_700px(self):
+        output = run_page_js(EDGE_FIXTURE.replace("hosts: [{name: 'local'}]", "hosts: [{name: 'local'}, {name: 'laptop2'}]")
+            .replace("host: 'local', cluster: 'Traffic'}))", "host: id === 'c' ? 'laptop2' : 'local', cluster: 'Traffic'}))")
+            .replace("clientWidth = 1200", "clientWidth = 390") + """
+var window = {innerWidth: 390};
+render();
+const [first, second] = [...regions.values()];
+console.log(JSON.stringify({first: first.geometry, second: second.geometry,
+  firstBounds: first.bounds, secondBounds: second.bounds, mapWidth: $('map').attributes.width}));
+""")
+        self.assertGreaterEqual(output['secondBounds']['y'], output['firstBounds']['y'] + output['firstBounds']['height'])
+        self.assertLessEqual(output['first']['width'], 390)
+        self.assertLessEqual(output['second']['width'], 390)
+        self.assertEqual(output['second']['x'], 0)
+        self.assertLessEqual(output['mapWidth'], 390)
+
+    def test_narrow_css_wraps_panel_text(self):
+        page = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        media = re.search(r'@media \(max-width: 699px\) \{(.*?)\n\}', page, re.DOTALL).group(1)
+        self.assertRegex(media, r'\.cluster-content[^{]*\{[^}]*overflow-wrap: anywhere')
+
+    def test_rail_close_button_stays_visible_while_rail_scrolls(self):
+        page = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        self.assertRegex(page, r'#rail-close \{[^}]*position: sticky')
+
+    def test_escape_in_rail_field_leaves_input_alone(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + """
+selectNode('a');
+document.activeElement = {tagName: 'INPUT'};
+document.dispatch('keydown', {key: 'Escape'}); const inField = rail();
+document.activeElement = {tagName: 'TEXTAREA'};
+document.dispatch('keydown', {key: 'Escape'}); const inArea = rail();
+document.activeElement = null;
+document.dispatch('keydown', {key: 'Escape'});
+console.log(JSON.stringify({inField, inArea, after: rail()}));
+""")
+        self.assertFalse(output['inField']['hidden'])
+        self.assertFalse(output['inArea']['hidden'])
+        self.assertTrue(output['after']['hidden'])
+
+    def test_overlay_rail_moves_focus_in_and_restores_it(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + """
+var window = {innerWidth: 768};
+const opener = new Element('g'); opener.focus();
+selectNode('a'); const inside = document.activeElement === $('rail-close');
+$('rail-close').click(); const restored = document.activeElement === opener;
+console.log(JSON.stringify({inside, restored}));
+""")
+        self.assertTrue(output['inside'])
+        self.assertTrue(output['restored'])
+
+    BOX_FIXTURE = """
+const makeNodes = (cluster, count, prefix = cluster) => Array.from({length: count}, (_, i) =>
+  ({id: prefix + i, title: prefix + i, state: 'working', kind: 'claude', host: 'local', cluster}));
+const box = name => { const c = [...clusters.values()].find(c => c.name === name);
+  return {top: c.geometry.top, height: c.geometry.height, left: c.geometry.left,
+    bottom: c.geometry.top + c.geometry.height}; };
+$('map-scroll').clientWidth = 1200;
+"""
+
+    def test_cluster_height_fits_one_node_row(self):
+        output = run_page_js(self.BOX_FIXTURE + """
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes: makeNodes('Solo', 4)};
+render();
+console.log(JSON.stringify({height: box('Solo').height, header: [...clusters.values()][0].headerHeight}));
+""")
+        # Heading 33 + panel padding 20 + one node row 70 + 20 padding.
+        self.assertLessEqual(output['height'], 33 + 20 + 70 + 20)
+        self.assertLessEqual(output['header'], 53)
+
+    def test_clusters_pack_by_actual_height(self):
+        output = run_page_js(self.BOX_FIXTURE + """
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes:
+  [...makeNodes('A', 16), ...makeNodes('B', 1), ...makeNodes('C', 1), ...makeNodes('D', 1)]};
+render();
+console.log(JSON.stringify({A: box('A'), B: box('B'), C: box('C'), D: box('D')}));
+""")
+        self.assertEqual(output['B']['top'], output['A']['top'])
+        self.assertGreater(output['A']['height'], output['B']['height'] * 2)
+        # D starts beneath the short box, not beneath the tall one.
+        self.assertEqual(output['D']['top'], output['B']['bottom'] + 16)
+        self.assertLess(output['D']['top'], output['A']['bottom'])
+
+    def test_long_name_wraps_beside_caret(self):
+        page = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        heading = re.search(r'\.cluster-heading \{([^}]*)\}', page).group(1)
+        self.assertIn('align-items: flex-start', heading)
+        self.assertNotIn('wrap', heading.replace('nowrap', ''))
+        name = re.search(r'^\.cluster-name \{([^}]*)\}', page, re.MULTILINE).group(1)
+        self.assertIn('min-width: 0', name)
+        self.assertIn('flex: 1 1 0', name)
+        toggle = re.search(r'^\.cluster-heading \.cluster-toggle \{([^}]*)\}', page, re.MULTILINE).group(1)
+        self.assertIn('flex: none', toggle)
+
+    def test_subagent_dots_never_overlap_sibling_nodes(self):
+        output = run_page_js(self.BOX_FIXTURE + """
+const parents = makeNodes('Crew', 6, 'p');
+const dots = parents.slice(0, 4).flatMap(p => [0, 1].map(i =>
+  ({id: p.id + 'sub' + i, title: 'sub', state: 'working', kind: 'subagent', host: 'local',
+    cluster: 'Crew', parent: p.id})));
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes: [...parents, ...dots]};
+render();
+const all = snapshot.nodes.map(n => ({id: n.id, kind: n.kind, parent: n.parent, ...endpoint(n.id)}));
+const outer = n => Math.max(...descendants(nodeViews.get(n.id).group)
+  .filter(el => el.tagName === 'circle' && el.attributes.fill === 'none')
+  .map(el => Number(el.attributes.r) + Number(el.attributes['stroke-width']) / 2));
+const gaps = [];
+for (const a of all) for (const b of all) if (a.id < b.id)
+  gaps.push([a.id, b.id, Math.hypot(a.x - b.x, a.y - b.y) - outer(a) - outer(b)]);
+console.log(JSON.stringify({gaps}));
+""")
+        self.assertTrue(output['gaps'])
+        for a, b, gap in output['gaps']:
+            self.assertGreaterEqual(gap, 4 - 1e-6, (a, b))
+
+    def test_live_like_row_with_one_subagent_has_no_intersecting_outer_circles(self):
+        output = run_page_js(self.BOX_FIXTURE + """
+const parents = makeNodes('Live', 4, 'p');
+const dot = {id: 'dot', title: 'sub', state: 'working', kind: 'subagent', host: 'local',
+  cluster: 'Live', parent: 'p1'};
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes: [...parents, dot]};
+render();
+const outer = id => Math.max(...descendants(nodeViews.get(id).group)
+  .filter(el => el.tagName === 'circle' && el.attributes.fill === 'none')
+  .map(el => Number(el.attributes.r) + Number(el.attributes['stroke-width']) / 2));
+const ids = snapshot.nodes.map(n => n.id), pairs = [];
+for (const a of ids) for (const b of ids) if (a < b) {
+  const p = endpoint(a), q = endpoint(b);
+  pairs.push([a, b, Math.hypot(p.x - q.x, p.y - q.y) - outer(a) - outer(b)]);
+}
+const ring = nodeViews.get('dot'), full = nodeViews.get('p0');
+const rings = view => descendants(view.group).filter(el => el.tagName === 'circle' && el.attributes.fill === 'none');
+console.log(JSON.stringify({pairs, dotOuter: outer('dot'), fullOuter: outer('p0'), rings: rings(ring).length}));
+""")
+        self.assertEqual(output['rings'], 4)
+        self.assertLess(output['dotOuter'], output['fullOuter'] / 1.5)
+        for a, b, gap in output['pairs']:
+            self.assertGreaterEqual(gap, 4 - 1e-6, (a, b))
+
+    def test_box_height_scales_with_ui_scale(self):
+        def probe(width):
+            return run_page_js(f"""
+var window = {{innerWidth: {width}}};
+const panel = new Element('div');
+for (const [name, cls] of [['Heading', 'cluster-heading'], ['Now: short line', 'cluster-now'], ['Another', 'cluster-summary'], ['slice', 'slice-row']]) {{
+  const child = new Element('div'); child.className = cls; child.textContent = name;
+  if (cls === 'cluster-heading') child.children = [new Element('span'), (() => {{ const n = new Element('span'); n.textContent = 'Name'; return n; }})()];
+  panel.append(child);
+}}
+console.log(JSON.stringify(panelContentHeight(panel, 600)));
+""")
+        normal, big = probe(1512), probe(2560)
+        self.assertGreater(normal, 0)
+        self.assertAlmostEqual(big, normal * 14 / 12, delta=1)
+
+    def test_inline_svg_text_and_rail_scale_at_large_screens(self):
+        page = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        self.assertIn('calc(320px * var(--u))', re.search(r'main\.rail-open \{([^}]*)\}', page).group(1))
+        self.assertIn('var(--u)', re.search(r'\.region-metrics \{([^}]*)\}', page).group(1))
+        def probe(width):
+            return run_page_js(f"""
+var window = {{innerWidth: {width}}};
+""" + self.BOX_FIXTURE + """
+snapshot = {hosts: [{name: 'local', reachable: false}], clusters: {}, runs: {}, edges: [], nodes: makeNodes('A', 1)};
+render();
+const region = [...regions.values()][0];
+console.log(JSON.stringify({badge: region.badge.attributes.transform, metrics: region.metrics.attributes.class,
+  fontAttr: region.metrics.attributes['font-size'] ?? null}));
+""")
+        big, normal = probe(2560), probe(1512)
+        self.assertIn('scale(1)', normal['badge'])
+        self.assertIn('scale(1.1666', big['badge'])
+        self.assertEqual(big['metrics'], 'region-metrics')
+        self.assertIsNone(big['fontAttr'])
+
+    def test_subagent_dot_never_covers_a_label(self):
+        output = run_page_js(self.BOX_FIXTURE + """
+const parents = makeNodes('Live', 4, 'p');
+const dot = {id: 'dot', title: 'sub', state: 'working', kind: 'subagent', host: 'local',
+  cluster: 'Live', parent: 'p1'};
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes: [...parents, dot]};
+render();
+const outer = Math.max(...descendants(nodeViews.get('dot').group)
+  .filter(el => el.tagName === 'circle' && el.attributes.fill === 'none')
+  .map(el => Number(el.attributes.r) + Number(el.attributes['stroke-width']) / 2));
+const d = endpoint('dot'), gaps = parents.map(n => {
+  const p = endpoint(n.id);
+  const nx = Math.max(p.x - 35, Math.min(d.x, p.x + 35)), ny = Math.max(p.y + 26, Math.min(d.y, p.y + 42));
+  return Math.hypot(d.x - nx, d.y - ny) - outer;
+});
+console.log(JSON.stringify({gaps, moved: d.x !== endpoint('p1').x || d.y !== endpoint('p1').y}));
+""")
+        self.assertTrue(output['moved'])
+        for gap in output['gaps']:
+            self.assertGreaterEqual(gap, 0)
+
+    def test_chips_stay_inside_their_box(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+const retired = ['a', 'b'].map(n => ({title: 'Worker ' + n, dispatchId: 'd' + n,
+  state: 'released', retainedFor: 600, host: 'local'}));
+snapshot = {generated_at: Date.now() / 1000, hosts: [{name: 'local'}],
+  clusters: {Past: {name: 'Past', full_name: 'Past', short_name: 'Past', retired_workers: retired}},
+  runs: {}, nodes: [], edges: []};
+render();
+const c = cluster(), chip = unique(byClass(c.grid, 'retired-chip')).find(g => g.style.display !== 'none');
+const m = /translate\\(([-\\d.]+)/.exec(chip.attributes.transform);
+console.log(JSON.stringify({retiredLeft: 10 + Number(m[1]) - 48, retiredRight: 10 + Number(m[1]) + 48,
+  width: c.geometry.width, half: 26, fold: chipX(c, {x: 35}, 26) }));
+""")
+        self.assertGreaterEqual(output['retiredLeft'], 10)
+        self.assertLessEqual(output['retiredRight'], output['width'] - 10)
+        self.assertGreaterEqual(10 + output['fold'] - 26, 10)
+
+    def test_subagent_rings_keep_a_full_nodes_proportions(self):
+        output = run_page_js(self.BOX_FIXTURE + """
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes: [
+  ...makeNodes('Prop', 1, 'p'),
+  {id: 'dot', title: 'sub', state: 'working', kind: 'subagent', host: 'local', cluster: 'Prop', parent: 'p0'}]};
+render();
+const radii = id => descendants(nodeViews.get(id).group).filter(el => el.tagName === 'circle')
+  .map(el => Number(el.attributes.r));
+console.log(JSON.stringify({full: radii('p0'), dot: radii('dot')}));
+""")
+        self.assertEqual(len(output['full']), len(output['dot']))
+        scale = 6 / 11
+        for big, small in zip(output['full'], output['dot']):
+            self.assertAlmostEqual(small, big * scale, places=6)
+
+    def test_subagent_dot_clears_the_scaled_label_band(self):
+        output = run_page_js("var window = {innerWidth: 2560};\n" + self.BOX_FIXTURE + """
+const parents = makeNodes('Live', 4, 'p');
+const dot = {id: 'dot', title: 'sub', state: 'working', kind: 'subagent', host: 'local',
+  cluster: 'Live', parent: 'p1'};
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes: [...parents, dot]};
+render();
+const s = 14 / 12, outer = Math.max(...descendants(nodeViews.get('dot').group)
+  .filter(el => el.tagName === 'circle' && el.attributes.fill === 'none')
+  .map(el => Number(el.attributes.r) + Number(el.attributes['stroke-width']) / 2));
+const d = endpoint('dot'), gaps = parents.map(n => {
+  const p = endpoint(n.id);
+  const nx = Math.max(p.x - 35 * s, Math.min(d.x, p.x + 35 * s)), ny = Math.max(p.y + 26 * s, Math.min(d.y, p.y + 42 * s));
+  return Math.hypot(d.x - nx, d.y - ny) - outer;
+});
+console.log(JSON.stringify({gaps}));
+""")
+        for gap in output['gaps']:
+            self.assertGreaterEqual(gap, 0)
+
+    def test_retired_chip_reserves_the_slot_it_shifts_into(self):
+        output = run_page_js(self.FOLD_FIXTURE + """
+const retired = [{title: 'Worker a', dispatchId: 'da', state: 'released', retainedFor: 600, host: 'local'}];
+const info = {name: 'Box', full_name: 'Box', short_name: 'Box', retired_workers: retired};
+snapshot = {generated_at: Date.now() / 1000, hosts: [{name: 'local'}], clusters: {Box: info},
+  runs: {}, nodes: [], edges: []};
+render();
+snapshot.nodes = [mk('a', 'working', 0), mk('b', 'working', 0), mk('c', 'working', 0)];
+render();
+const c = cluster(), chip = [...positions.entries()].find(([id]) => id.startsWith('retired:'))[1];
+const shifted = chipX(c, chip, 48);
+const rows = [...positions.entries()].filter(([id]) => !id.startsWith('retired:') && !id.startsWith('fold:'))
+  .map(([, p]) => p).filter(p => p.y === chip.y);
+console.log(JSON.stringify({left: shifted - 48, right: shifted + 48, nodes: rows.map(p => p.x)}));
+""")
+        self.assertTrue(output['nodes'] is not None)
+        for x in output['nodes']:
+            self.assertTrue(x - 22 >= output['right'] or x + 22 <= output['left'], output)
+
+    def test_closing_overlay_rail_falls_back_to_search_when_return_target_is_gone(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + """
+var window = {innerWidth: 768};
+selectNode('a');
+const stale = new Element('button'); stale.isConnected = false;
+railReturnFocus = stale;
+closeRail();
+console.log(JSON.stringify({search: document.activeElement === $('search'), stale: document.activeElement === stale}));
+""")
+        self.assertTrue(output['search'])
+        self.assertFalse(output['stale'])
+
+    def test_scale_rebuild_keeps_focus_on_the_same_node(self):
+        output = run_page_js("var window = {innerWidth: 1512};\n" + self.BOX_FIXTURE + """
+snapshot = {hosts: [{name: 'local'}], clusters: {}, runs: {}, edges: [], nodes: makeNodes('Live', 3, 'p')};
+render();
+const before = nodeViews.get('p1').group;
+before.focus(); railReturnFocus = before;
+window.innerWidth = 2560;
+render();
+const after = nodeViews.get('p1').group;
+console.log(JSON.stringify({rebuilt: after !== before, focused: document.activeElement === after,
+  returns: railReturnFocus === after}));
+""")
+        self.assertTrue(output['rebuilt'])
+        self.assertTrue(output['focused'])
+        self.assertTrue(output['returns'])
+
+    def test_overlay_rail_traps_focus(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + """
+var window = {innerWidth: 768};
+selectNode('a');
+const first = new Element('button'), last = new Element('button'), outside = new Element('button');
+$('rail').querySelectorAll = () => [first, last];
+$('rail').contains = el => el === first || el === last;
+const press = (active, shiftKey) => { active.focus();
+  const event = {key: 'Tab', shiftKey, prevented: false, preventDefault() { this.prevented = true; }};
+  document.dispatch('keydown', event); return [document.activeElement === first ? 'first' :
+    document.activeElement === last ? 'last' : 'other', event.prevented]; };
+console.log(JSON.stringify({
+  role: $('rail').attributes.role, modal: $('rail').attributes['aria-modal'],
+  forward: press(last, false), backward: press(first, true), escaped: press(outside, false),
+  middle: press(first, false)}));
+""")
+        self.assertEqual(output['role'], 'dialog')
+        self.assertEqual(output['modal'], 'true')
+        self.assertEqual(output['forward'], ['first', True])
+        self.assertEqual(output['backward'], ['last', True])
+        self.assertEqual(output['escaped'], ['first', True])
+        self.assertEqual(output['middle'][1], False)
+
+    def test_resize_relayout_waits_for_the_next_animation_frame(self):
+        output = run_page_js(self.ONDEMAND_FIXTURE + """
+const frames = []; var requestAnimationFrame = callback => frames.push(callback);
+let renders = 0; const inner = onMapResize;
+scheduleMapResize(); scheduleMapResize();
+const queued = frames.length; frames.shift()();
+console.log(JSON.stringify({queued, after: frames.length}));
+""")
+        self.assertEqual(output['queued'], 1)
+        page = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        self.assertIn('new ResizeObserver(scheduleMapResize)', page)
+
+    def test_narrow_header_wraps_search_onto_second_line(self):
+        page = (ROOT / 'kitty/fleetmap/page.html').read_text()
+        header = re.search(r'<header>(.*?)</header>', page, re.DOTALL).group(1)
+        first, second = header.split('<div class="header-tools">')
+        self.assertIn('<h1>', first)
+        self.assertIn('id="status"', first)
+        self.assertIn('id="search"', second)
+        self.assertIn('id="legend-toggle"', second)
+        media = re.search(r'@media \(max-width: 699px\) \{(.*?)\n\}', page, re.DOTALL).group(1)
+        self.assertRegex(media, r'\.header-main \{[^}]*flex: 1 1 100%')
+        self.assertRegex(media, r'header \{[^}]*flex-wrap: wrap')
+        self.assertRegex(page, r'body \{[^}]*grid-template-columns: minmax\(0, 1fr\)')
+        self.assertRegex(media, r'\.header-main > \*[^{]*\{[^}]*min-width: 0')
+        self.assertRegex(media, r'#status \{[^}]*flex: 1 1 100%')
 
 
 if __name__ == "__main__":

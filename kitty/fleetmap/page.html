@@ -7,25 +7,43 @@
 <link rel="icon" href="data:,">
 <title>Fleet map</title>
 <style>
-:root { color-scheme: dark; font: 14px/1.5 system-ui, sans-serif; background: #10121a; color: #e4e7f0; }
+:root { --u: 1; color-scheme: dark; font: calc(14px * var(--u))/1.5 system-ui, sans-serif; background: #10121a; color: #e4e7f0; }
 * { box-sizing: border-box; }
-body { margin: 0; height: 100vh; display: grid; grid-template-rows: 58px auto minmax(0, 1fr) auto; }
-header input#search { margin-left: auto; background: #1b1f2c; border: 1px solid #303548; border-radius: 6px; color: inherit; font: inherit; font-size: 12px; padding: 4px 8px; width: 180px; }
+body { margin: 0; height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 58px auto minmax(0, 1fr) auto; }
+header input#search { margin-left: auto; background: #1b1f2c; border: 1px solid #303548; border-radius: 6px; color: inherit; font: inherit; font-size: calc(12px * var(--u)); padding: 4px 8px; width: 180px; }
 header { display: flex; align-items: center; gap: 20px; padding: 0 22px; border-bottom: 1px solid #303548; }
-h1 { font-size: 18px; margin: 0; font-weight: 650; }
-#status { color: #a0a8be; font-size: 12px; }
+h1 { font-size: calc(18px * var(--u)); margin: 0; font-weight: 650; }
+#status { color: #a0a8be; font-size: calc(12px * var(--u)); }
 #status button { background: none; border: 0; padding: 0 2px; color: inherit; font: inherit; cursor: pointer; text-decoration: underline dotted; }
 #status button[aria-pressed=true] { color: #fff; text-decoration: underline; }
-main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; min-height: 0; }
+main { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; position: relative; }
+main.rail-open { grid-template-columns: minmax(0, 1fr) calc(320px * var(--u)); }
+main.rail-open.rail-overlay { grid-template-columns: minmax(0, 1fr); }
+#rail-backdrop { position: fixed; inset: 0; background: #05070b99; z-index: 9; }
+#rail-close { position: sticky; top: 8px; float: right; margin: -26px -10px 0 0; z-index: 1; padding: 2px 9px; line-height: 1.2; }
+main.rail-overlay #rail { position: fixed; top: 0; right: 0; bottom: 0; width: 90%; z-index: 10; box-shadow: -8px 0 24px #000a; }
+.header-main, .header-tools { display: flex; align-items: center; gap: 20px; min-width: 0; }
+.header-tools { margin-left: auto; }
+@media (max-width: 699px) {
+  body { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+  header { flex-wrap: wrap; gap: 6px 20px; padding: 8px 14px; }
+  .header-main { flex: 1 1 100%; flex-wrap: wrap; }
+  .header-main > *, .header-tools > * { min-width: 0; }
+  #status { flex: 1 1 100%; overflow-wrap: anywhere; }
+  .header-tools { flex: 1 1 100%; margin-left: 0; }
+  header input#search { margin-left: 0; flex: 1 1 auto; width: auto; min-width: 0; }
+  #map-scroll, #rail { overflow-x: hidden; }
+  .cluster-content, #rail { overflow-wrap: anywhere; word-break: break-word; }
+}
 #map-scroll { overflow: auto; position: relative; }
 #map { display: block; min-width: 100%; min-height: 100%; }
-#rail { overflow: auto; padding: 20px; border-left: 1px solid #303548; background: #161924; }
-h2 { font-size: 17px; line-height: 1.4; margin: 0 0 10px; overflow-wrap: anywhere; }
+#rail { position: relative; overflow: auto; padding: 20px; padding-top: 34px; border-left: 1px solid #303548; background: #161924; }
+h2 { font-size: calc(17px * var(--u)); line-height: 1.4; margin: 0 0 10px; overflow-wrap: anywhere; }
 p { margin: 8px 0; }
 .muted, dt { color: #a0a8be; }
-#node-kind { font-size: 12px; color: #a0a8be; }
+#node-kind { font-size: calc(12px * var(--u)); color: #a0a8be; }
 dl { margin: 20px 0; }
-dt { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; margin-top: 15px; }
+dt { font-size: calc(11px * var(--u)); font-weight: 650; text-transform: uppercase; letter-spacing: .06em; margin-top: 15px; }
 dd { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 #partners, #moves { padding-left: 18px; margin: 6px 0; }
 #partners li, #moves li { margin-bottom: 6px; }
@@ -40,10 +58,10 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .error { background: #59252b; color: #ffd5d9; border: 1px solid #b75a67; border-radius: 5px; padding: 8px; margin-top: 10px; overflow-wrap: anywhere; }
 [hidden] { display: none !important; }
 form { margin-top: 18px; }
-label { display: block; margin: 8px 0 5px; color: #bfc6d9; font-size: 12px; }
+label { display: block; margin: 8px 0 5px; color: #bfc6d9; font-size: calc(12px * var(--u)); }
 input, select { width: 100%; min-width: 0; }
 form button { margin-top: 8px; }
-footer { padding: 10px 22px; border-top: 1px solid #303548; background: #161924; max-height: 27vh; overflow: auto; font-size: 11px; color: #b3bcd0; }
+footer { padding: 10px 22px; border-top: 1px solid #303548; background: #161924; max-height: 27vh; overflow: auto; font-size: calc(11px * var(--u)); color: #b3bcd0; }
 footer strong { color: #e4e7f0; }
 #legend-lines { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 3px 22px; margin-top: 5px; }
 #legend-lines p { margin: 0; }
@@ -52,32 +70,35 @@ footer strong { color: #e4e7f0; }
 dialog { width: min(820px, 90vw); max-height: 85vh; border: 1px solid #555f7a; border-radius: 12px; padding: 22px; background: #191e2b; color: #e4e7f0; }
 dialog::backdrop { background: #05070bd9; }
 .dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
-pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, monospace; background: #0e1119; padding: 16px; max-height: 60vh; overflow: auto; }
-.region-label { fill: #e4e7f0; font-size: 15px; font-weight: 650; }
-.cluster-label { fill: #bfc9e0; font-size: 12px; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font: calc(12px * var(--u))/1.5 ui-monospace, monospace; background: #0e1119; padding: 16px; max-height: 60vh; overflow: auto; }
+.region-label { fill: #e4e7f0; font-size: calc(15px * var(--u)); font-weight: 650; }
+.cluster-label { fill: #bfc9e0; font-size: calc(12px * var(--u)); }
 .fold-chip { cursor: pointer; }
 .fold-chip rect { fill: #232838; stroke: #4a5272; }
-.fold-chip text { fill: #bfc6d9; font-size: 11px; }
+.fold-chip text { fill: #bfc6d9; font-size: calc(11px * var(--u)); }
+.region-metrics { font-size: calc(12px * var(--u)); }
 .retired-chip { cursor: pointer; }
 .retired-chip rect { fill: #232838; stroke: #4a5272; stroke-dasharray: 3 2; }
-.retired-chip text { fill: #bfc6d9; font-size: 11px; }
-.node-label { fill: #bfc6d9; font-size: 10px; pointer-events: none; }
-.edge-badge { fill: #e4e7f0; stroke: #161924; stroke-width: 4px; paint-order: stroke; font-size: 10px; font-weight: 650; pointer-events: none; }
+.retired-chip text { fill: #bfc6d9; font-size: calc(11px * var(--u)); }
+.node-label { fill: #bfc6d9; font-size: calc(10px * var(--u)); pointer-events: none; }
+.edge-badge { fill: #e4e7f0; stroke: #161924; stroke-width: 4px; paint-order: stroke; font-size: calc(10px * var(--u)); font-weight: 650; pointer-events: none; }
 .node { cursor: pointer; outline: none; }
 .node .selection { stroke: transparent; }
 .node[aria-pressed="true"] .selection, .node:focus-visible .selection { stroke: #fff; }
 .attention { filter: drop-shadow(0 0 6px #f0803c); }
 #decisions { padding: 8px 22px; display: flex; gap: 8px; overflow: auto; max-height: 130px; border-bottom: 1px solid #303548; }
-#decisions button { min-width: 260px; text-align: left; font-size: 12px; }
+#decisions button { min-width: 260px; text-align: left; font-size: calc(12px * var(--u)); }
 #decisions button span { display: block; }
 #decisions .decision-title { font-weight: 600; }
 #decisions .decision-meta { color: #a0a8be; }
 .decision-card { border: 1px solid #303548; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
-.cluster-content { font-size: 12px; padding: 10px; overflow: auto; overflow-wrap: anywhere; height: 100%; box-sizing: border-box; }
-.cluster-content p { margin: 6px 0; }
-.cluster-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.cluster-heading button { font-size: 12px; padding: 3px 6px; }
-.cluster-heading .cluster-toggle, .cluster-name { font-weight: 650; font-size: 14px; }
+.cluster-content { font-size: calc(12px * var(--u)); padding: calc(10px * var(--u)); overflow: auto; overflow-wrap: anywhere; height: 100%; box-sizing: border-box; }
+.cluster-content p { margin: calc(6px * var(--u)) 0; }
+.cluster-heading { display: flex; align-items: flex-start; gap: calc(10px * var(--u)); }
+.cluster-heading button { font-size: calc(12px * var(--u)); padding: 3px 6px; }
+.cluster-heading .cluster-toggle, .cluster-heading .cluster-name { font-weight: 650; font-size: calc(14px * var(--u)); }
+.cluster-heading .cluster-toggle { flex: none; }
+.cluster-name { flex: 1 1 0; min-width: 0; padding-top: 3px; }
 .cluster-name { cursor: pointer; }
 .cluster-name:hover { text-decoration: underline; }
 .cluster-name:focus-visible { outline: 2px solid #9dbdff; outline-offset: 2px; }
@@ -86,11 +107,11 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 ui-monospac
 .stepper i { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; border: 1px solid #77839e; }
 .stepper i.reached { background: #4f8ef7; }
 .stepper i.current { outline: 2px solid #d2e1ff; outline-offset: 2px; }
-.cluster-summary { margin: 6px 0; color: #bfc6d9; }
-.slice-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; margin-top: 6px; }
+.cluster-summary { margin: calc(6px * var(--u)) 0; color: #bfc6d9; }
+.slice-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; margin-top: calc(6px * var(--u)); }
 .slice-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slice-row .segments { grid-column: 1 / -1; }
-table { border-collapse: collapse; font-size: 11px; margin-top: 12px; width: 100%; }
+table { border-collapse: collapse; font-size: calc(11px * var(--u)); margin-top: 12px; width: 100%; }
 .matrix { min-width: 1130px; table-layout: fixed; }
 th, td { text-align: left; border: 1px solid #374058; padding: 8px; vertical-align: top; overflow-wrap: anywhere; }
 th { color: #bfc9e0; }
@@ -98,27 +119,34 @@ th { color: #bfc9e0; }
 .matrix th:nth-child(5) { width: 180px; }
 .matrix th:nth-child(6) { width: 150px; }
 .matrix th:last-child { width: 165px; }
-.chip { display: block; margin: 3px 0; padding: 2px 4px; border: 1px solid #555f7a; border-radius: 4px; font-size: 10px; }
+.chip { display: block; margin: 3px 0; padding: 2px 4px; border: 1px solid #555f7a; border-radius: 4px; font-size: calc(10px * var(--u)); }
 .pass, .accepted, .merged { color: #4cc38a; }
 .revise, .stale { color: #ffba71; }
 .pending { color: #a0a8be; }
 .stale { display: block; margin-top: 4px; }
-.segments { display: flex; gap: 2px; height: 26px; margin: 5px 0; }
-.segments button { min-width: 0; border: 0; white-space: nowrap; padding: 0; border-radius: 2px; font-size: 9px; color: #fff; overflow: hidden; }
+.segments { display: flex; gap: 2px; height: calc(26px * var(--u)); margin: calc(5px * var(--u)) 0; }
+.segments button { min-width: 0; border: 0; white-space: nowrap; padding: 0; border-radius: 2px; font-size: calc(9px * var(--u)); color: #fff; overflow: hidden; }
 .live-node { display: inline-flex; flex-direction: column; align-items: center; width: 66px; vertical-align: top; }
-.live-node span { font-size: 10px; text-align: center; overflow-wrap: anywhere; }
+.live-node span { font-size: calc(10px * var(--u)); text-align: center; overflow-wrap: anywhere; }
 input[type=checkbox] { width: auto; }
 #overlay-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 #context-details { white-space: pre-wrap; overflow-wrap: anywhere; }
 #context-rail { margin-bottom: 20px; }
+#decisions { align-items: center; }
+#decisions strong.needs-you { color: #f0803c; }
+#decisions.empty { padding: 4px 22px; max-height: none; }
+#decisions button.decision-chip { border-color: #f0803c; }
+#decisions .attention-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #f0803c; box-shadow: 0 0 6px #f0803c; }
 </style>
 </head>
 <body>
-<header><h1>Fleet map</h1><span id="status" role="status">Connecting…</span><input id="search" type="search" placeholder="Find a session" aria-label="Find a session" autocomplete="off"><button id="legend-toggle" type="button" aria-label="Toggle legend" aria-controls="legend" aria-expanded="false">?</button></header>
+<header><div class="header-main"><h1>Fleet map</h1><span id="status" role="status">Connecting…</span></div><div class="header-tools"><input id="search" type="search" placeholder="Find a session" aria-label="Find a session" autocomplete="off"><button id="legend-toggle" type="button" aria-label="Toggle legend" aria-controls="legend" aria-expanded="false">?</button></div></header>
 <nav id="decisions" aria-label="Decision strip"></nav>
-<main>
+<main id="main">
   <div id="map-scroll"><svg id="map" xmlns="http://www.w3.org/2000/svg" aria-label="Agent sessions grouped by host and cluster"><defs><pattern id="stalled-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#f3d18a" stroke-width="2"/></pattern></defs><g id="regions"></g><g id="edges" pointer-events="none"></g><g id="clusters"></g></svg></div>
-  <aside id="rail" aria-label="Session details">
+  <div id="rail-backdrop" hidden></div>
+  <aside id="rail" aria-label="Session details" hidden>
+      <button id="rail-close" type="button" aria-label="Close details">×</button>
       <div id="decision-slot"></div>
       <div id="action-error" class="error" role="alert" hidden></div>
       <p id="action-status" class="muted" role="status"></p>
@@ -212,7 +240,27 @@ const positions = new Map(); // Keyed by node id; ordinary polls retain the layo
 const regions = new Map();
 const clusters = new Map();
 const nodeViews = new Map();
-const MIN_REGION = 420, CELL = 70, GAP = 16;
+const BASE_MIN_REGION = 420, BASE_CELL = 70, BASE_GAP = 16;
+const LARGE_SCREEN = 2200, LARGE_RATIO = 14 / 12;
+function uiScale() { return viewportWidth() >= LARGE_SCREEN ? LARGE_RATIO : 1; }
+function baseFontPx() { return 12 * uiScale(); }
+let appliedScale = 1, refocusNode = null, returnNode = null;
+function applyScale() {
+  const scale = uiScale();
+  if (typeof document !== 'undefined' && document.documentElement?.style?.setProperty)
+    document.documentElement.style.setProperty('--u', String(scale));
+  if (scale === appliedScale) return;
+  appliedScale = scale;
+  const active = typeof document !== 'undefined' ? document.activeElement : null;
+  for (const [id, view] of nodeViews) {
+    if (active && view.group === active) refocusNode = id;
+    if (railReturnFocus && view.group === railReturnFocus) returnNode = id;
+    view.group.remove?.();
+  }
+  nodeViews.clear();
+  layoutModeSignature = '';
+}
+
 let layoutSignature = '', layoutModeSignature = '';
 let regionOrder = [];
 let snapshot = {hosts: [], nodes: [], edges: []};
@@ -245,7 +293,17 @@ function svg(tag, attributes = {}, text) {
   if (text !== undefined) element.textContent = text;
   return element;
 }
-function setText(id, value) { $(id).textContent = value === null || value === undefined || value === '' ? 'Unknown' : value; }
+// A hex token of 32 or more characters shows as its first 8 plus an ellipsis; the full text stays in the title.
+function shortIds(value) {
+  const full = String(value);
+  return {full, shown: full.replace(/[0-9a-fA-F]{32,}/g, token => token.slice(0, 8) + '…')};
+}
+function setText(id, value) {
+  const element = $(id), empty = value === null || value === undefined || value === '';
+  const {full, shown} = shortIds(empty ? 'Unknown' : value);
+  element.textContent = shown;
+  if (shown !== full) element.setAttribute('title', full); else element.removeAttribute?.('title');
+}
 function secondsSince(epoch, now = Date.now() / 1000) { return epoch == null ? null : Math.max(0, now - epoch); }
 function age(epoch, now = Date.now() / 1000) {
   const seconds = secondsSince(epoch, now);
@@ -287,7 +345,7 @@ function ensureRegion(host) {
   const group = svg('g');
   const background = svg('rect', {y: 10, rx: 12, fill: '#141824'});
   const label = svg('text', {y: 38, class: 'region-label'});
-  const metrics = svg('text', {y: 62, fill: '#a0a8be', 'font-size': 12});
+  const metrics = svg('text', {y: 62, fill: '#a0a8be', class: 'region-metrics'});
   const badge = svg('g');
   badge.append(svg('rect', {y: 22, width: 99, height: 22, rx: 5, fill: '#702e38'}), svg('text', {x: 10, y: 37, fill: '#ffd2d7', 'font-size': 11}, 'unreachable'));
   group.append(background, label, metrics, badge);
@@ -325,22 +383,23 @@ function nodeText(node) {
 }
 // Estimated from the rendered lines so layout needs no browser measurement and stays deterministic.
 function panelContentHeight(panel, width) {
-  const columns = Math.max(8, Math.floor((width - 20) / 6.6));
+  const u = uiScale(), pad = 10 * u, margin = 6 * u, line = 18 * u;
+  const columns = Math.max(8, Math.floor((width - 2 * pad) / (6.6 * u)));
   let total = 0;
   for (const child of panel.children || []) {
     const className = String(child.className || '');
     if (className.includes('cluster-heading')) {
-      // The 14px bold name wraps onto its own lines when it cannot sit beside the 26px toggle.
-      const name = nodeText((child.children || [])[1] || ''), available = width - 20;
-      const nameWidth = name.length * 8.5;
-      total += nameWidth + 10 + 26 <= available ? 32 : 32 + Math.ceil(nameWidth / available) * 20;
+      // The 14px bold name wraps beside the 26px toggle, never beneath it.
+      const name = nodeText((child.children || [])[1] || ''), available = width - 2 * pad - 26 * u - 10 * u;
+      total += Math.max(32 * u, Math.ceil(name.length * 8.5 * u / available) * 21 * u + 12 * u);
       continue;
     }
     // A slice row is one ellipsized line, a 6px margin and the 26px segment bar with 5px margins.
-    if (className.includes('slice-row')) { total += 18 + 6 + 36; continue; }
-    total += Math.max(1, Math.ceil(nodeText(child).length / columns)) * 18 + 12;
+    if (className.includes('slice-row')) { total += line + margin + 36 * u; continue; }
+    total += Math.max(1, Math.ceil(nodeText(child).length / columns)) * line + margin;
   }
-  return total ? total + 32 : 0;
+  // Adjacent margins collapse to 6 px; the panel's own 10 px padding top and bottom is counted once.
+  return total ? total + 2 * pad : 0;
 }
 function lastTouched(node) {
   const stamps = [node.you_at, node.it_at].filter(stamp => stamp != null);
@@ -363,12 +422,14 @@ function isFolded(node) {
     !(searchQuery && nodeMatches(node, searchQuery));
 }
 function layoutFleet(hosts) {
+  const scale = uiScale(), MIN_REGION = BASE_MIN_REGION * scale, CELL = BASE_CELL * scale, GAP = BASE_GAP * scale;
   const ordered = [...snapshot.nodes].sort((a, b) => a.id.localeCompare(b.id));
   const viewport = $('map-scroll').clientWidth;
-  const mode = JSON.stringify([viewport, [...expanded].sort()]);
+  const phone = viewportWidth() < 700;
+  const mode = JSON.stringify([viewport, phone, scale, [...expanded].sort()]);
   const repack = mode !== layoutModeSignature;
   layoutModeSignature = mode;
-  let width = Math.max(viewport, hosts.length * MIN_REGION);
+  let width = Math.max(viewport, phone ? 0 : hosts.length * MIN_REGION);
   const signature = JSON.stringify([width, hosts.map(host => host.name), [...expanded], [...unfolded],
     ordered.filter(isFolded).map(node => node.id),
     ordered.map(node => [node.id, clusterKey(node), node.kind, node.parent]),
@@ -399,24 +460,26 @@ function layoutFleet(hosts) {
     for (const region of regions.values()) delete region.geometry;
   }
   const retiredKeys = new Set();
-  const initialRegionWidth = width / Math.max(1, hosts.length);
-  let regionX = 0, height = 100;
+  const initialRegionWidth = phone ? viewport : width / Math.max(1, hosts.length);
+  let regionX = 0, regionY = 0, height = 100;
   for (const host of hosts) {
     const region = ensureRegion(host);
-    if (!region.geometry) {
+    if (phone) region.geometry = {x: 0, width: viewport};
+    else if (!region.geometry) {
       regionX = Math.max(regionX, ...[...regions.values()].map(r => r.geometry ? r.geometry.x + r.geometry.width : 0));
       region.geometry = {x: regionX, width: repack ? initialRegionWidth : MIN_REGION};
     }
     regionX = region.geometry.x;
+    region.group.setAttribute('transform', `translate(0 ${regionY})`);
     const regionWidth = region.geometry.width, available = regionWidth - 36;
     region.background.setAttribute('x', regionX + 8);
     region.background.setAttribute('width', regionWidth - 16);
     region.label.setAttribute('x', regionX + 24);
     region.metrics.setAttribute('x', regionX + 24);
-    region.badge.setAttribute('transform', `translate(${regionX + regionWidth - 124} 0)`);
+    region.badge.setAttribute('transform', `translate(${regionX + regionWidth - 124 * scale} 0) scale(${scale})`);
     const groups = [...members.entries()].filter(([id]) => JSON.parse(id)[0] === host.name)
       .sort(([a], [b]) => a.localeCompare(b));
-    let x = 0, y = 82, rowHeight = 0;
+    let x = 0, y = 82;
     for (const [id, items] of groups) {
       const cluster = ensureCluster({host: host.name, cluster: JSON.parse(id)[1]});
       const run = clusterRun(cluster), open = expanded.has(id);
@@ -426,14 +489,21 @@ function layoutFleet(hosts) {
       const info = clusterInfo(cluster);
       if (items.length || (info.run && info.matrix_host === host.name) || clusterRetired(cluster).length) renderCluster(cluster);
       const contentHeight = open ? 0 : panelContentHeight(cluster.panel, clusterWidth);
-      const baseHeader = saved?.baseHeader ?? (125 + (run?.rows.length || 0) * 60);
-      const headerHeight = Math.max(baseHeader, contentHeight);
+      const headerHeight = contentHeight;
       if (saved) { x = saved.left; y = saved.baseTop; }
-      else if (!repack) {
-        x = 0;
-        y = Math.max(82, ...[...clusters.values()].filter(c => c.host === host.name && c.geometry)
-          .map(c => c.geometry.top + c.geometry.height + GAP));
-      } else if (x && x + clusterWidth > available) { x = 0; y += rowHeight + GAP; rowHeight = 0; }
+      else {
+        // Skyline packing: the box goes where its own width fits highest, whatever the neighbors' heights.
+        const placedBoxes = [...clusters.values()].filter(c => c.id !== id && c.host === host.name && c.geometry)
+          .map(c => c.geometry);
+        let best = null;
+        for (const candidate of [0, ...placedBoxes.map(box => box.left + box.width + GAP)]) {
+          if (candidate && candidate + clusterWidth > available) continue;
+          const top = Math.max(82, ...placedBoxes.filter(box => candidate < box.left + box.width && box.left < candidate + clusterWidth)
+            .map(box => box.top + box.height + GAP));
+          if (!best || top < best.y || (top === best.y && candidate < best.x)) best = {x: candidate, y: top};
+        }
+        ({x, y} = best);
+      }
       const columns = Math.max(1, Math.floor((baseWidth - 20) / CELL));
       // Slots belong to node IDs, so expansion never rearranges untouched grids.
       const chipId = 'fold:' + id, foldedNodes = items.filter(isFolded);
@@ -457,6 +527,17 @@ function layoutFleet(hosts) {
       if (foldedNodes.length && !preserved.has(chipId) && heldSlots.length) {
         slots.set(chipId, slots.get(heldSlots[0][0].id)); slots.delete(heldSlots[0][0].id);
       }
+      // A retired chip is 96 px wide; at the first or last column it shifts inward over the neighboring slot.
+      const chipNeighbor = slot => {
+        const column = slot % columns;
+        return columns < 2 ? null : column === 0 ? slot + 1 : column === columns - 1 ? slot - 1 : null;
+      };
+      if (preserved.has(retiredId)) {
+        const neighbor = chipNeighbor(slots.get(retiredId));
+        if (neighbor !== null && sorted.some(node => node.id !== retiredId && slots.get(node.id) === neighbor)) {
+          preserved.delete(retiredId); slots.delete(retiredId);
+        }
+      }
       for (const node of sorted) {
         let slot = slots.get(node.id);
         if (preserved.has(node.id)) continue;
@@ -472,7 +553,10 @@ function layoutFleet(hosts) {
                 py + 40 > box.top && py - 30 < box.top + box.height;
             });
           };
-          while ([...slots.values()].includes(slot) || blocked(slot)) slot++;
+          const reserved = preserved.has(retiredId) ? chipNeighbor(slots.get(retiredId)) : null;
+          const takenByChip = candidate => node.id === retiredId && chipNeighbor(candidate) !== null &&
+            [...slots.values()].includes(chipNeighbor(candidate));
+          while ([...slots.values()].includes(slot) || slot === reserved || takenByChip(slot) || blocked(slot)) slot++;
           slots.set(node.id, slot);
         }
         positions.set(node.id, {cluster: id, slot, columns,
@@ -483,24 +567,33 @@ function layoutFleet(hosts) {
         if (node.kind !== 'subagent' || preserved.has(node.id)) continue;
         const parent = positions.get(node.parent), point = positions.get(node.id);
         if (!parent || parent.cluster !== id) continue;
+        // Outer selection rings: 22 px for a node, 22 * SUBAGENT_SCALE for a dot; keep a 4 px gap.
+        const stroke = 1.5, dotRadius = 22 * scale * SUBAGENT_SCALE, reach = 22 * scale + dotRadius + 4 + stroke;
         for (let direction = 0; direction < 8; direction++) {
           const angle = direction * Math.PI / 4;
-          const candidate = {x: parent.x + 20 * Math.cos(angle), y: parent.y + 20 * Math.sin(angle)};
+          const candidate = {x: parent.x + reach * Math.cos(angle), y: parent.y + reach * Math.sin(angle)};
           if (candidate.x < 20 || candidate.x > baseWidth - 40 || candidate.y < 20) continue;
+          // Labels sit centered 26-42 px (times the scale step) under each drawn node; a dot must not land on one.
           if (sorted.some(other => {
-            if (other.id === node.id || other.id === node.parent) return false;
+            if (other.kind === 'chip' || other.kind === 'subagent') return false;
+            const at = positions.get(other.id), nearX = Math.max(at.x - CELL / 2, Math.min(candidate.x, at.x + CELL / 2)),
+              nearY = Math.max(at.y + 26 * scale, Math.min(candidate.y, at.y + 42 * scale));
+            return Math.hypot(candidate.x - nearX, candidate.y - nearY) < dotRadius;
+          })) continue;
+          if (sorted.some(other => {
+            if (other.id === node.id) return false;
             const occupied = positions.get(other.id);
-            return Math.hypot(occupied.x - candidate.x, occupied.y - candidate.y) < 40;
+            return Math.hypot(occupied.x - candidate.x, occupied.y - candidate.y) <
+              (other.kind === 'subagent' ? dotRadius : 22) + dotRadius + 4 + stroke - 1e-6;
           })) continue;
           Object.assign(point, candidate); break;
         }
       }
       const bodyHeight = open ? (run ? 75 + run.rows.reduce((sum, row) => sum + Math.max(150, Math.ceil(row.live.length / 2) * 76 + 20), 0) : 85 + items.length * 78)
-        : Math.max(50, ...sorted.map(node => positions.get(node.id).y + 42));
-      const floorHeight = Math.max(saved?.floorHeight || 0, baseHeader + bodyHeight + 20);
-      const clusterHeight = Math.max(floorHeight, headerHeight + bodyHeight + 20);
-      cluster.geometry = {left: x, top: y, baseTop: y, width: clusterWidth, baseWidth, baseHeader,
-        headerHeight, floorHeight, height: clusterHeight};
+        : sorted.length ? Math.max(...sorted.map(node => positions.get(node.id).y + 42 * scale)) : 0;
+      const clusterHeight = headerHeight + bodyHeight + (bodyHeight ? 20 * scale : 0);
+      cluster.geometry = {left: x, top: y, baseTop: y, width: clusterWidth, baseWidth,
+        headerHeight, height: clusterHeight};
       Object.assign(cluster, {x: regionX + 28 + x, headerHeight});
       cluster.background.setAttribute('width', clusterWidth);
       cluster.background.setAttribute('height', clusterHeight);
@@ -508,7 +601,6 @@ function layoutFleet(hosts) {
       cluster.content.setAttribute('height', open ? clusterHeight : headerHeight);
       cluster.grid.setAttribute('transform', `translate(10 ${headerHeight})`);
       cluster.grid.style.display = open ? 'none' : '';
-      x += clusterWidth + GAP; rowHeight = Math.max(rowHeight, clusterHeight);
     }
     // A cluster whose content grew pushes the clusters below it down; shrinking restores them.
     const placed = [];
@@ -521,14 +613,16 @@ function layoutFleet(hosts) {
         if (above.baseTop < box.baseTop && box.left < above.left + above.width && above.left < box.left + box.width)
           top = Math.max(top, above.top + above.height + GAP);
       box.top = top;
-      cluster.y = top + box.headerHeight;
-      cluster.group.setAttribute('transform', `translate(${regionX + 18 + box.left} ${top})`);
+      cluster.y = regionY + top + box.headerHeight;
+      cluster.group.setAttribute('transform', `translate(${regionX + 18 + box.left} ${regionY + top})`);
       placed.push(box);
     }
     const bottom = Math.max(82, ...[...clusters.values()].filter(c => c.host === host.name && c.geometry)
       .map(c => c.geometry.top + c.geometry.height));
     region.background.setAttribute('height', bottom + 16);
-    height = Math.max(height, bottom + 26);
+    height = Math.max(height, regionY + bottom + 26);
+    region.bounds = {y: regionY, height: bottom + 26};
+    if (phone) regionY += bottom + 26;
     regionX += regionWidth;
     width = Math.max(width, regionX);
   }
@@ -541,25 +635,28 @@ function layoutFleet(hosts) {
   $('map').setAttribute('width', width);
   $('map').setAttribute('height', height);
 }
+const SUBAGENT_SCALE = 6 / 11;
 function makeNode(node, register = true) {
   const small = node.kind === 'subagent';
+  // A subagent draws every ring at the same proportion to its 6 px core as a full node's 11 px core.
+  const s = uiScale(), k = (small ? SUBAGENT_SCALE : 1) * s;
   const group = svg('g', {class: 'node', role: 'button', tabindex: 0});
   const title = svg('title');
-  const hit = svg('circle', {r: small ? 8 : 24, fill: 'transparent'});
-  const selection = svg('circle', {r: small ? 9 : 22, fill: 'none', 'stroke-width': 1, class: 'selection'});
+  const hit = svg('circle', {r: 24 * k, fill: 'transparent'});
+  const selection = svg('circle', {r: 22 * k, fill: 'none', 'stroke-width': 1, class: 'selection'});
   const gradient = svg('radialGradient', {id: `age-${++gradientId}`});
   const center = svg('stop', {offset: '0%'}), rim = svg('stop', {offset: '100%'});
   gradient.append(center, rim);
   const defs = svg('defs');
   defs.append(gradient);
-  const pulse = svg('circle', {r: 11, fill: 'none', 'stroke-width': 1.5, opacity: .6});
-  pulse.append(svg('animate', {attributeName: 'r', values: '11;16', dur: '1.6s', repeatCount: 'indefinite'}), svg('animate', {attributeName: 'opacity', values: '.6;0', dur: '1.6s', repeatCount: 'indefinite'}));
-  const body = svg('circle', {r: small ? 6 : 11, fill: `url(#${gradient.id})`});
-  const hatch = svg('circle', {r: small ? 6 : 11, fill: 'url(#stalled-hatch)', 'pointer-events': 'none'});
-  const ringBackground = svg('circle', {r: 17, fill: 'none', stroke: 'rgba(127,127,127,.25)', 'stroke-width': 3});
-  const ring = svg('circle', {r: 17, fill: 'none', 'stroke-width': 3, transform: 'rotate(-90)'});
-  const label = svg('text', {y: 36, 'text-anchor': 'middle', class: 'node-label'});
-  const badge = svg('text', {x: small ? 10 : 16, y: small ? -9 : -13, 'text-anchor': 'middle', class: 'edge-badge'});
+  const pulse = svg('circle', {r: 11 * k, fill: 'none', 'stroke-width': 1.5 * k, opacity: .6});
+  pulse.append(svg('animate', {attributeName: 'r', values: `${11 * k};${16 * k}`, dur: '1.6s', repeatCount: 'indefinite'}), svg('animate', {attributeName: 'opacity', values: '.6;0', dur: '1.6s', repeatCount: 'indefinite'}));
+  const body = svg('circle', {r: (small ? 6 : 11) * s, fill: `url(#${gradient.id})`});
+  const hatch = svg('circle', {r: (small ? 6 : 11) * s, fill: 'url(#stalled-hatch)', 'pointer-events': 'none'});
+  const ringBackground = svg('circle', {r: 17 * k, fill: 'none', stroke: 'rgba(127,127,127,.25)', 'stroke-width': 3 * k});
+  const ring = svg('circle', {r: 17 * k, fill: 'none', 'stroke-width': 3 * k, transform: 'rotate(-90)'});
+  const label = svg('text', {y: 36 * s, 'text-anchor': 'middle', class: 'node-label'});
+  const badge = svg('text', {x: (small ? 10 : 16) * s, y: (small ? -9 : -13) * s, 'text-anchor': 'middle', class: 'edge-badge'});
   // Decorative rings can cross a short parent attachment, but must not steal clicks.
   for (const decoration of [selection, ringBackground, ring, pulse]) decoration.setAttribute('pointer-events', 'none');
   group.append(defs, title, hit, selection, ringBackground, ring, pulse, body, hatch, label, badge);
@@ -572,7 +669,7 @@ function makeNode(node, register = true) {
   group.addEventListener('mouseleave', () => {
     if (hoveredId === node.id) { hoveredId = null; paintFocus(); }
   });
-  const view = {group, title, center, rim, pulse, body, hatch, ring, label, badge};
+  const view = {radius: 17 * k, group, title, center, rim, pulse, body, hatch, ring, label, badge};
   if (register) nodeViews.set(node.id, view);
   return view;
 }
@@ -583,6 +680,13 @@ function updateNode(node) {
   view.group.style.display = '';
   view.group.setAttribute('transform', `translate(${position.x} ${position.y})`);
   paintNode(node, view);
+  if (refocusNode === node.id) { refocusNode = null; view.group.focus?.(); }
+  if (returnNode === node.id) { returnNode = null; railReturnFocus = view.group; }
+}
+// Keeps a chip's rectangle inside its box: at least the 10 px panel padding from each edge.
+function chipX(cluster, position, half) {
+  const grid = cluster.geometry ? cluster.geometry.width - 20 : Infinity;
+  return Math.min(Math.max(position.x, half), Math.max(half, grid - half));
 }
 function paintFoldChips() {
   for (const chip of foldChips.values()) chip.style.display = 'none';
@@ -602,7 +706,7 @@ function paintFoldChips() {
     }
     chip.children[1].textContent = `${count} idle`;
     chip.setAttribute('aria-label', `${count} idle sessions folded; show them`);
-    chip.setAttribute('transform', `translate(${position.x} ${position.y})`);
+    chip.setAttribute('transform', `translate(${chipX(cluster, position, 26)} ${position.y})`);
     if (chip.parentNode !== cluster.grid) cluster.grid.append(chip);
     chip.style.display = '';
     chip.style.opacity = clusterItems(cluster).filter(isFolded).every(nodeDimmed) ? .25 : 1;
@@ -626,7 +730,7 @@ function paintRetiredChips() {
     }
     chip.children[1].textContent = `${list.length} retired worker${list.length === 1 ? '' : 's'}`;
     chip.setAttribute('aria-label', `${list.length} retired worker${list.length === 1 ? '' : 's'}; list them`);
-    chip.setAttribute('transform', `translate(${position.x} ${position.y})`);
+    chip.setAttribute('transform', `translate(${chipX(cluster, position, 48)} ${position.y})`);
     if (chip.parentNode !== cluster.grid) cluster.grid.append(chip);
     chip.style.display = '';
     chip.style.opacity = list.map(retiredPseudo).every(nodeDimmed) ? .25 : 1;
@@ -663,8 +767,22 @@ function setSearchQuery(value) {
   render();
   renderStatus();
 }
+$('rail-close').addEventListener('click', closeRail);
+$('rail-backdrop').addEventListener('click', closeRail);
 $('search').addEventListener('input', event => setSearchQuery(event.target.value));
+const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+function trapRailFocus(event) {
+  const items = [...$('rail').querySelectorAll(FOCUSABLE)]
+    .filter(item => !item.disabled && !(item.closest && item.closest('[hidden]')) &&
+      !(item.getClientRects && item.getClientRects().length === 0));
+  if (!items.length) { event.preventDefault(); $('rail-close').focus(); return; }
+  const first = items[0], last = items[items.length - 1], active = document.activeElement;
+  const inside = $('rail').contains(active);
+  if (event.shiftKey && (active === first || !inside)) { event.preventDefault(); last.focus(); }
+  else if (!event.shiftKey && (active === last || !inside)) { event.preventDefault(); first.focus(); }
+}
 document.addEventListener('keydown', event => {
+  if (event.key === 'Tab' && railOpen && viewportWidth() < 1000 && !$('overlay').open) trapRailFocus(event);
   const active = document.activeElement, tag = String(active?.tagName || '').toLowerCase();
   if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey &&
       !['input', 'textarea', 'select'].includes(tag) && !active?.isContentEditable) {
@@ -674,6 +792,9 @@ document.addEventListener('keydown', event => {
     $('search').value = '';
     setSearchQuery('');
     if (active === $('search')) $('search').blur();
+  } else if (event.key === 'Escape' && !$('overlay').open && railOpen &&
+      !['input', 'textarea', 'select'].includes(tag) && !active?.isContentEditable) {
+    closeRail();
   }
 });
 function setStateFilter(state) {
@@ -763,7 +884,7 @@ function paintNode(node, view) {
   view.pulse.style.display = node.state === 'working' ? '' : 'none';
   view.pulse.setAttribute('stroke', color);
   const youHours = (secondsSince(node.you_at) || 0) / 3600;
-  const circumference = 2 * Math.PI * 17;
+  const circumference = 2 * Math.PI * view.radius;
   view.ring.setAttribute('stroke', youHours > 24 && !node.never_addressed ? '#9aa0b4' : '#ffffff');
   let dash = `${circumference * Math.min(1, youHours / 24)} ${circumference}`;
   if (youHours > 24) dash = 'none';
@@ -798,7 +919,50 @@ function paintFocus() {
     if (nodes.has(id)) paintNode(nodes.get(id), view);
   drawEdges();
 }
+let railOpen = false;
+function viewportWidth() { return typeof window !== 'undefined' && window.innerWidth ? window.innerWidth : 1200; }
+function applyRail() {
+  const overlay = viewportWidth() < 1000;
+  $('rail').hidden = !railOpen;
+  $('rail').setAttribute('role', overlay ? 'dialog' : 'complementary');
+  $('rail').setAttribute('aria-modal', String(overlay));
+  $('rail-backdrop').hidden = !(railOpen && overlay);
+  $('main').className = (railOpen ? 'rail-open' : '') + (overlay ? ' rail-overlay' : '');
+  if (railOpen === railWasOpen) return;
+  railWasOpen = railOpen;
+  if (railOpen && overlay) {
+    railReturnFocus = document.activeElement || null;
+    $('rail-close').focus();
+  } else if (!railOpen && railReturnFocus) {
+    const target = railReturnFocus; railReturnFocus = null;
+    const gone = target.isConnected === false;
+    const next = gone ? $('search') : target;
+    if (next?.focus) next.focus();
+  }
+}
+let revealTarget = null, railWasOpen = false, railReturnFocus = null;
+function noteRailToggle(target) { if (viewportWidth() >= 1000) revealTarget = target; }
+function revealSelection() {
+  const target = revealTarget; revealTarget = null;
+  const element = target?.node ? nodeViews.get(target.node)?.group : target?.cluster ? clusters.get(target.cluster)?.group : null;
+  if (element?.scrollIntoView) element.scrollIntoView({block: 'nearest', inline: 'nearest'});
+}
+function onMapResize() { render(); revealSelection(); }
+let resizeFrame = false;
+function scheduleMapResize() {
+  if (resizeFrame) return;
+  resizeFrame = true;
+  requestAnimationFrame(() => { resizeFrame = false; onMapResize(); });
+}
+function openRail() { railOpen = true; applyRail(); }
+function closeRail() {
+  if (railOpen) noteRailToggle(selectedId ? {node: selectedId} : selectedCluster ? {cluster: selectedCluster} : null);
+  railOpen = false; selectedId = null; selectedCluster = null; selectedContext = null;
+  render(); paintFocus(); renderRail();
+}
 function render() {
+  applyScale();
+  applyRail();
   nodes = new Map(snapshot.nodes.map(node => [node.id, node]));
   if (!nodes.has(hoveredId)) hoveredId = null;
   for (const region of regions.values()) region.group.style.display = 'none';
@@ -854,7 +1018,8 @@ function render() {
 }
 function selectNode(id) {
   if (!nodes.has(id)) return;
-  selectedId = id;
+  if (!railOpen) noteRailToggle({node: id});
+  selectedId = id; railOpen = true;
   selectedCluster = null;
   selectedContext = null;
   assignmentChoices = '';
@@ -866,7 +1031,8 @@ function selectNode(id) {
 }
 function selectCluster(id) {
   if (!clusters.has(id)) return;
-  selectedCluster = id;
+  if (!railOpen) noteRailToggle({cluster: id});
+  selectedCluster = id; railOpen = true;
   selectedId = null;
   selectedContext = null;
   assignmentChoices = '';
@@ -880,6 +1046,7 @@ function openRunPlan(runId) {
   return runAction(async () => { await request('/api/open-plan', {run: runId}); });
 }
 function renderRail() {
+  applyRail();
   $('decision-slot').replaceChildren();
   const cluster = clusters.get(selectedCluster);
   if (cluster) {
@@ -1093,7 +1260,8 @@ function miniNode(id) {
   miniViews.push([id, view]); return wrapper;
 }
 function showContext(context, nodeId = null) {
-  selectedCluster = null; selectedContext = context; selectedId = nodeId; assignmentChoices = '';
+  if (!railOpen && nodeId) noteRailToggle({node: nodeId});
+  railOpen = true; selectedCluster = null; selectedContext = context; selectedId = nodeId; assignmentChoices = '';
   $('rail').scrollTop = 0; renderRail();
   paintFocus();
 }
@@ -1101,7 +1269,7 @@ function openRun(runId, context = {run: runId}) {
   const run = snapshot.runs?.[runId]; if (!run) return;
   const info = snapshot.clusters?.[run.title]; if (!info) return;
   const id = JSON.stringify([info.matrix_host, run.title]);
-  selectedCluster = null;
+  railOpen = true; selectedCluster = null;
   expanded.add(id); selectedContext = context; selectedId = run.chief_node;
   render(); clusters.get(id)?.group.scrollIntoView({block: 'nearest', inline: 'nearest'});
   $('rail').scrollTop = 0;
@@ -1110,14 +1278,15 @@ function renderDecisions() {
   const signature = JSON.stringify(snapshot.decisions || []);
   if (decisionSignature === signature) return;
   decisionSignature = signature;
-  const strip = $('decisions'); strip.replaceChildren(html('strong', 'Decisions'));
-  for (const item of snapshot.decisions || []) {
-    const chip = button('', () => showDecision(item), 'decision-chip');
-    chip.append(html('span', item.title, 'decision-title'), html('span', item.text, 'decision-text'),
+  const strip = $('decisions'), open = snapshot.decisions || [];
+  strip.className = open.length ? '' : 'empty';
+  strip.replaceChildren(open.length ? html('strong', `Needs you · ${open.length}`, 'needs-you') : html('span', 'Nothing needs you', 'muted'));
+  for (const item of open) {
+    const chip = button('', () => showDecision(item), 'decision-chip attention');
+    chip.append(html('i', undefined, 'attention-dot'), html('span', item.title, 'decision-title'), html('span', item.text, 'decision-text'),
       html('span', `Class ${item.class} · ${item.id} · apply-by ${item.applyAt || '—'}`, 'decision-meta'));
     strip.append(chip);
   }
-  if (!snapshot.decisions?.length) strip.append(html('span', 'No open decisions', 'muted'));
 }
 function showDecision(item) {
   openRun(item.run, {run: item.run, decision: item.id});
@@ -1178,7 +1347,10 @@ function renderCluster(cluster) {
     panel.append(html('p', `waiting on you: ${info.waiting || 0} · ${info.stalled || 0} stalled`, 'cluster-summary'));
   renderFallback(panel, info);
   if (run) {
-    panel.append(html('p', run.now, 'cluster-now'));
+    const now = html('p', undefined, 'cluster-now'), {full, shown} = shortIds(run.now ?? '');
+    now.textContent = shown;
+    if (shown !== full) now.setAttribute('title', full);
+    panel.append(now);
     if (!open || elsewhere) {
       for (const row of run.rows) {
         const line = html('div', undefined, 'slice-row'), cell = row.cells.implementing;
@@ -1279,7 +1451,10 @@ function ladderTable(cluster) {
   table.append(body); return table;
 }
 function detailLine(container, label, value) {
-  const line = html('p'); line.append(html('strong', `${label}: `), document.createTextNode(value == null || value === '' ? '—' : String(value))); container.append(line);
+  const {full, shown} = shortIds(value == null || value === '' ? '—' : value);
+  const line = html('p'); line.append(html('strong', `${label}: `), document.createTextNode(shown));
+  if (shown !== full) line.setAttribute('title', full);
+  container.append(line);
 }
 function renderFallback(container, info) {
   for (const fallback of info?.fallbacks || []) {
@@ -1434,7 +1609,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') refresh();
   else setStatusMessage('Paused while hidden');
 });
-new ResizeObserver(() => render()).observe($('map-scroll'));
+new ResizeObserver(scheduleMapResize).observe($('map-scroll'));
 startPolling();
 refresh();
 </script>

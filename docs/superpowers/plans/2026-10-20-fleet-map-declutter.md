@@ -189,3 +189,29 @@ Branch `fleet-map-declutter-2` from master `ece5aa4`. Same global constraints an
 
 - [ ] Failing tests: `test_repository_name_from_common_dir` (two worktrees of one temp repository both yield the repository's directory name; a plain directory yields None), `test_unclaimed_nodes_cluster_by_repository_not_branch` (nodes on branches `main` and `feature` in two worktrees of one repository share the cluster named after it), `test_run_and_pin_claims_still_win`, `test_no_repository_goes_to_unsorted`, and a model test that the lookup runs in the slow thread and is cached (the fast thread never calls git).
 - [ ] Run; FAIL. Implement per Decision 35. Both suites. Commit `feat(declutter2): boxes named by repository`.
+
+## Third round (2026-10-20 14:55 PDT): Decisions 36 to 41
+
+Branch `fleet-map-declutter-3` from master. Same global constraints. One commit per task prefixed `feat(declutter3):`. Page tests assert the DOM through the Node harness; where layout matters, assert computed positions from `layoutFleet`, and use a `matchMedia`/`innerWidth` stub for width-dependent behavior.
+
+### Task 37: Rail on demand and narrow-width header
+
+**Files:** `kitty/fleetmap/page.html`; `tests/test_fleetmap_page.py`.
+
+- [ ] Failing tests: `test_rail_hidden_until_selection` (no selection: rail hidden, map width equals the viewport minus margins), `test_selection_opens_rail_and_close_hides_it` (node click opens; the close button and Escape with an empty search close; Escape inside an open dialog does not), `test_narrow_width_rail_is_overlay` (innerWidth 768: opening the rail adds an overlay class and a dimmed backdrop, the map keeps its full width), `test_narrow_header_wraps_search_onto_second_line` (innerWidth 390: the search box and `?` are in the second header row).
+- [ ] Implement per Decision 36. Both suites one at a time. Commit `feat(declutter3): rail opens on demand; overlay below 1000 px`.
+
+### Task 38: Boxes fit their contents, heading on one line
+
+**Files:** `kitty/fleetmap/page.html`; `tests/test_fleetmap_page.py`.
+
+- [ ] Failing tests: `test_cluster_height_fits_one_node_row` (a box with no panel content and four nodes is at most heading + one node row + padding tall), `test_clusters_pack_by_actual_height` (a short box and a tall box in one region: the next box starts below the short one, not below a fixed slot), `test_long_name_wraps_beside_caret` (the caret and the name's first line share a top coordinate), plus the existing position stability tests passing.
+- [ ] Also fix: a subagent dot must never overlap a neighboring node (it is drawn on top of `Random PF` in the live glow-core box); add `test_subagent_dots_never_overlap_sibling_nodes`.
+- [ ] Implement per Decisions 37 and 38. Both suites. Commit `feat(declutter3): boxes fit their contents; caret and name on one line`.
+
+### Task 39: Short ids, decision chip, large screens
+
+**Files:** `kitty/fleetmap/page.html`; `tests/test_fleetmap_page.py`.
+
+- [ ] Failing tests: `test_long_hex_ids_are_shortened_in_now_lines` (a Now line containing a 64-hex id renders `c5a5627d…` and its title attribute holds the full text), `test_decision_strip_label_and_attention_style` (`Needs you · 1`, the chip has the attention class and a dot; with none, `Nothing needs you`), `test_large_screen_steps_font_and_node_size` (innerWidth 2560: base font 14 px and node radius scaled by 14/12; innerWidth 1512: unchanged).
+- [ ] Implement per Decisions 39 to 41. Both suites. Commit `feat(declutter3): short ids, a decision strip that stands out, larger type on big screens`.
