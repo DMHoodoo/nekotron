@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Progress source discovery and selection through the provider interfaces."""
 from dataclasses import asdict
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import os
@@ -235,7 +236,7 @@ class RunPlanStatus(unittest.TestCase):
         path = self.plan(block(self.data))
         provider = EngineeringOsProvider(extra_roots=[])
         with patch('fleetmap.providers.engineering_os._plan_git',
-                   return_value=(str(self.root), 'abc1234', 5.0)) as git:
+                   return_value=(str(self.root), 'abc1234', 5.0, 'h', 'h')) as git:
             provider.refresh([self.root])
             provider.refresh([self.root])
             self.assertEqual(git.call_count, 1)
@@ -251,6 +252,47 @@ class RunPlanStatus(unittest.TestCase):
         provider.load([self.root])
         self.assertEqual(provider.rejected_runs,
                          {str(two): 'dir_run', str(invalid): 'from_block'})
+
+    def test_plan_changed_is_amber_only_when_a_commit_skips_the_block(self):
+        path = self.plan('# Plan\n\n' + block(dict(self.data, updatedAt='2026-10-21T10:00:00Z')))
+        self.assertIs(self.load()[0][0].plan_changed, False)
+        path.write_text(path.read_text() + '\nMore prose.\n')
+        self.git('commit', '-q', '-am', 'prose only')
+        self.assertIs(self.load()[0][0].plan_changed, True)
+        path.write_text('# Plan\n\nMore.\n\n' + block(dict(self.data, updatedAt='2026-10-21T11:00:00Z')))
+        self.git('commit', '-q', '-am', 'block and prose together')
+        self.assertIs(self.load()[0][0].plan_changed, False)
+
+    def test_file_source_amber_uses_a_fifteen_minute_allowance(self):
+        plan = self.plan('# Plan\n')
+        committed = float(self.git('log', '-1', '--format=%ct'))
+        results = []
+        for lag in (600, 1200):
+            updated = datetime.fromtimestamp(committed - lag, timezone.utc).isoformat()
+            status = self.root / 'engineering-os/r1/run-status.json'
+            status.write_text(json.dumps(dict(
+                self.data, updatedAt=updated,
+                runPlan=dict(self.data['runPlan'], path='engineering-os/r1/run-plan.md',
+                             worktree=str(self.root)))))
+            good, bad = self.load()
+            self.assertEqual(bad, {})
+            results.append(good[0].plan_changed)
+        self.assertEqual(results, [False, True])
+        self.assertEqual(good[0].plan_commit_at, committed)
+        self.assertTrue(plan.exists())
+
+    def test_git_cache_notices_a_commit_that_leaves_mtime_unchanged(self):
+        path = self.plan(block(self.data), commit=False)
+        os.utime(path, (1000, 1000))
+        provider = EngineeringOsProvider(extra_roots=[])
+        provider.refresh([self.root])
+        self.assertEqual(provider.load([self.root])[0][0].runPlan['commit'], '')
+        self.git('add', '.')
+        self.git('commit', '-q', '-m', 'plan')
+        os.utime(path, (1000, 1000))
+        provider.refresh([self.root])
+        self.assertEqual(provider.load([self.root])[0][0].runPlan['commit'],
+                         self.git('log', '-1', '--format=%h'))
 
 
 if __name__ == '__main__':

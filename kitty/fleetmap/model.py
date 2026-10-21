@@ -88,6 +88,19 @@ def repository_name(worktree_root):
     return common.parent.name or None
 
 
+def _worktrees(repository_root, limit=64):
+    """Every worktree path of a repository; slow thread only."""
+    try:
+        out = subprocess.run(['git', '-C', repository_root, 'worktree', 'list', '--porcelain'],
+                             capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if out.returncode:
+        return []
+    found = [line[len('worktree '):] for line in out.stdout.splitlines() if line.startswith('worktree ')]
+    return found[:limit]
+
+
 def _node(node_id, host, kind, facts=None):
     facts = facts or TranscriptFacts.empty()
     return dict(
@@ -116,6 +129,9 @@ def _run_objectives(data):
     return objectives
 
 
+LAST_GOOD_TTL = 24 * 3600
+
+
 class Collector:
     def __init__(self, orca: OrcaClient | None = None, config_path=CONFIG_PATH,
                  sessions=list_local_sessions, tmux_sessions=fleet_tmux.sessions,
@@ -137,7 +153,8 @@ class Collector:
         self._slow_input = None
         self._slow = {'ladders': {}, 'memory': {}, 'stale': {}, 'hosts': {},
                       'environments': [], 'environment_error': None, 'git': {}, 'tmux': {},
-                      'repository': {}}
+                      'repository': {}, 'worktrees': {}, 'roots': []}
+        self._absent = {}
         self._local_input = ([], set(), [])
         self._host_threads = {}
         self._screens = {}
@@ -225,6 +242,7 @@ class Collector:
             environments = list(self._slow['environments'])
             git = dict(self._slow['git'])
             repositories = dict(self._slow['repository'])
+            listings = dict(self._slow['worktrees'])
         names = list(dict.fromkeys(['local'] + environments + configured))
         deadline = time.monotonic() + 5
         threads = self._start_hosts(names, sessions)
@@ -250,16 +268,29 @@ class Collector:
                 break
             if root not in repositories or now - repositories[root][0] >= 60:
                 repositories[root] = (now, repository_name(root))
+        for root in sorted({value[0] for _, value in git.values() if value[0]}):
+            now = time.monotonic()
+            if now >= deadline:
+                break
+            if root not in listings or now - listings[root][0] >= 60:
+                listings[root] = (now, _worktrees(root))
+        roots = set(paths)
+        for _, found in listings.values():
+            roots.update(found)
+        roots.update(p.runPlan.get('worktree') for p in list(self._last_good.values())
+                     if p.runPlan.get('worktree'))
+        roots = [Path(path) for path in sorted(roots)]
         for provider in self.providers:
             refresh = getattr(provider, 'refresh', None)
             if refresh is not None and time.monotonic() < deadline + 5:
                 try:
-                    refresh([Path(path) for path in paths])
+                    refresh(roots)
                 except (OSError, ValueError):
                     pass
         tmux = self.tmux_sessions() if sessions else {}
         with self._slow_lock:
-            self._slow.update(git=git, tmux=tmux, repository=repositories)
+            self._slow.update(git=git, tmux=tmux, repository=repositories,
+                              worktrees=listings, roots=roots)
 
     def refresh_slow(self):
         """All Orca, screen, tmux and git probes live outside snapshot publication."""
@@ -300,8 +331,10 @@ class Collector:
 
     def _enrich(self, nodes, hosts, data, resolver, config, now, retired=()):
         """Join projections and cheap overlays using the last completed probe pass."""
+        with self._slow_lock:
+            known_roots = list(self._slow['roots'])
         roots = sorted({Path(node['worktree']) for node in nodes
-                        if node['host'] == 'local' and node['worktree']})
+                        if node['host'] == 'local' and node['worktree']} | set(known_roots))
         projections, rejected = load_from_providers(self.providers, roots)
         rejected.update({f'config:providers:{index}': note
                          for index, note in enumerate(config.notes)})
@@ -323,6 +356,13 @@ class Collector:
         for p in projections:
             self._last_good[p.run] = p
         loaded = {p.run for p in projections}
+        present = loaded | set(orca_runs) | set(hints.values())
+        for run in list(self._last_good):
+            if run in present:
+                self._absent.pop(run, None)
+            elif now - self._absent.setdefault(run, now) >= LAST_GOOD_TTL:
+                del self._last_good[run]
+                del self._absent[run]
         projections = projections + [self._last_good[run] for run in reasons
                                      if run not in loaded and run in self._last_good]
         projections = [p for p in projections if p.run in orca_runs]
@@ -351,7 +391,7 @@ class Collector:
             matrix.update(run_plan=dict(p.runPlan), packages=p.packages,
                           status_card=dict(p.statusCard),
                           status_at=status_at if status_at != float('-inf') else None,
-                          plan_commit_at=p.plan_commit_at)
+                          plan_commit_at=p.plan_commit_at, plan_changed=p.plan_changed)
             matrices[p.run] = matrix
             stages = {row['id']: row['stage'] for row in matrix['rows']}
             for package in p.packages:

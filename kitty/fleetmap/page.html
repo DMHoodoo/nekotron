@@ -1329,6 +1329,14 @@ function stepper(row) {
   });
   return line;
 }
+function paintStatusLine(line, now = Date.now() / 1000) {
+  line.textContent = `status updated ${age(line.statusAt, now)}${line.planChanged ? ' · plan changed since' : ''}`;
+  line.className = line.planChanged ? 'cluster-status amber' : 'cluster-status';
+}
+function paintStatusAges() {
+  const now = Date.now() / 1000;
+  for (const cluster of clusters.values()) if (cluster.statusLine) paintStatusLine(cluster.statusLine, now);
+}
 function renderCluster(cluster) {
   const panel = cluster.panel, info = clusterInfo(cluster), run = clusterRun(cluster);
   const open = expanded.has(cluster.id), elsewhere = run && info.matrix_host !== cluster.host;
@@ -1366,10 +1374,13 @@ function renderCluster(cluster) {
     now.textContent = shown;
     if (shown !== full) now.setAttribute('title', full);
     panel.append(now);
+    cluster.statusLine = null;
     if (run.status_at != null) {
-      const changed = run.plan_commit_at != null && run.plan_commit_at > run.status_at;
-      panel.append(html('p', `status updated ${age(run.status_at)}${changed ? ' · plan changed since' : ''}`,
-        changed ? 'cluster-status amber' : 'cluster-status'));
+      const line = html('p', undefined, 'cluster-status');
+      line.statusAt = run.status_at; line.planChanged = run.plan_changed === true;
+      paintStatusLine(line);
+      cluster.statusLine = line;
+      panel.append(line);
     }
     if (!open || elsewhere) {
       for (const row of run.rows) {
@@ -1617,6 +1628,7 @@ async function refresh() {
     const nextSeconds = Number(snapshot.poll_seconds);
     if (Number.isFinite(nextSeconds) && nextSeconds > 0 && nextSeconds !== pollSeconds) { pollSeconds = nextSeconds; startPolling(); }
     render();
+    paintStatusAges();
     renderStatus();
     $('status').style.color = '';
   } catch (error) {

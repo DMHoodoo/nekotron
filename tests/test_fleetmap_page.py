@@ -570,7 +570,7 @@ console.log(JSON.stringify(results));
 
     def run_cluster_js(self, source):
         return run_js(DOM + page_functions(
-            'html', 'button', 'clusterInfo', 'clusterRun', 'clusterItems', 'age', 'secondsSince',
+            'html', 'button', 'clusterInfo', 'clusterRun', 'clusterItems', 'age', 'secondsSince', 'paintStatusLine', 'paintStatusAges',
             'renderCluster', 'renderFallback', 'shortIds', 'detailLine', 'stepper',
             'matrixTable', 'gateContent', 'segmentBar', 'miniNode') + RUN_CLUSTER + source)
 
@@ -616,7 +616,7 @@ console.log(JSON.stringify({panel: text(cluster.panel),
 
     def test_run_box_shows_status_age(self):
         output = self.run_cluster_js("""
-run.status_at = Date.now() / 1000 - 7200; run.plan_commit_at = run.status_at - 60;
+run.status_at = Date.now() / 1000 - 7200; run.plan_changed = false;
 renderCluster(cluster);
 const line = byClass(cluster.panel, 'cluster-status')[0];
 console.log(JSON.stringify({text: text(line), amber: line.className.includes('amber')}));
@@ -625,12 +625,30 @@ console.log(JSON.stringify({text: text(line), amber: line.className.includes('am
 
     def test_run_box_amber_when_plan_changed_since(self):
         output = self.run_cluster_js("""
-run.status_at = Date.now() / 1000 - 7200; run.plan_commit_at = run.status_at + 60;
+run.status_at = Date.now() / 1000 - 7200; run.plan_changed = true;
 renderCluster(cluster);
 const line = byClass(cluster.panel, 'cluster-status')[0];
 console.log(JSON.stringify({text: text(line), amber: line.className.includes('amber')}));
 """)
         self.assertEqual(output, {'text': 'status updated 2h · plan changed since', 'amber': True})
+
+    def test_status_age_updates_on_poll_without_rerendering_the_cluster(self):
+        output = self.run_cluster_js("""
+const clusters = new Map([['c', cluster]]);
+const realNow = Date.now;
+Date.now = () => 1000000 * 1000;
+run.status_at = 1000000 - 120; run.plan_changed = false;
+renderCluster(cluster);
+const line = cluster.statusLine, first = text(line);
+const children = cluster.panel.children;
+Date.now = () => (1000000 + 7200) * 1000;
+renderCluster(cluster);
+paintStatusAges();
+console.log(JSON.stringify({first, second: text(line), same: cluster.panel.children === children,
+  kept: cluster.statusLine === line}));
+""")
+        self.assertEqual(output, {'first': 'status updated 2m', 'second': 'status updated 2h',
+                                  'same': True, 'kept': True})
 
     def test_rejected_status_line_is_shown(self):
         output = self.run_cluster_js("""

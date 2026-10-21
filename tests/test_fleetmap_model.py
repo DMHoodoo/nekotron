@@ -16,6 +16,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'kitty'))
 from fleetmap.providers.directory import DirectoryProvider
+from fleetmap.providers.engineering_os import EngineeringOsProvider
 from fleetmap.model import Collector, repository_name
 from fleetmap.clusters import load
 from fleetmap.orca import OrcaClient, OrcaError
@@ -165,8 +166,9 @@ class SnapshotAssembler(unittest.TestCase):
         (directory / 'run-plan.md').write_text('# Run plan\n')
         fixture = ROOT / 'tests/fixtures/fleetmap/run_v2.json'
         path = directory / 'run-status.json'
-        shutil.copyfile(fixture, path)
         record = json.loads(fixture.read_text())
+        record['runPlan']['worktree'] = '/nonexistent/worktree'
+        path.write_text(json.dumps(record))
         self.local[0] = replace(self.local[0], cwd=str(root))
         local_terminal = dict(terminal(record['chiefTerminal']), worktreePath=str(root),
                               leafId='term_a')
@@ -500,6 +502,84 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertEqual(second['clusters']['Review run']['status_rejected'], reason)
         self.assertEqual(second['unattributed_rejections'],
                          [{'path': 'stray.json', 'reason': 'unreadable'}])
+
+    def git_repo(self):
+        env = dict(os.environ, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@example.invalid',
+                   GIT_COMMITTER_NAME='t', GIT_COMMITTER_EMAIL='t@example.invalid',
+                   GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_SYSTEM='/dev/null')
+        repo = self.base / 'repo'
+        repo.mkdir()
+        def git(*args, cwd=repo):
+            subprocess.run(['git', '-C', str(cwd), *args], check=True, capture_output=True, env=env)
+        git('init', '-q', '-b', 'main')
+        git('commit', '-q', '--allow-empty', '-m', 'init')
+        return repo, git
+
+    def plan_text(self, **changes):
+        data = json.loads(json.dumps(asdict(projection(chiefTerminal='term_a'))))
+        data.pop('path'); data.pop('mtime')
+        data.update(changes)
+        return '# Plan\n\n```json run-status\n' + json.dumps(data) + '\n```\n'
+
+    def test_plan_in_a_sibling_worktree_without_a_session_is_found(self):
+        repo, git = self.git_repo()
+        sibling = self.base / 'sibling'
+        git('worktree', 'add', '-q', str(sibling), '-b', 'other')
+        plan = sibling / 'engineering-os/r1/run-plan.md'
+        plan.parent.mkdir(parents=True)
+        plan.write_text(self.plan_text())
+        self.orca.put('orchestration run-list', 'runs', [{'id': 'run_test', 'objective': 'Objective',
+                                                          'coordinator_handle': 'term_a'}])
+        provider = EngineeringOsProvider(extra_roots=[])
+        collector = Collector(self.orca, config_path=self.config, sessions=lambda: [],
+                              tmux_sessions=lambda: {}, providers=[provider])
+        collector._local_input = ([], {str(repo)}, [])
+        collector.refresh_sources()
+        self.assertIn(Path(sibling.resolve()), [p.resolve() for p in collector._slow['roots']])
+        good, bad = provider.load(collector._slow['roots'])
+        self.assertEqual((bad, [p.run for p in good]), ({}, ['run_test']))
+        self.assertEqual(good[0].runPlan['worktree'], str(sibling.resolve()))
+        self.assertIn('run_test', collector.snapshot()['runs'])
+
+    def test_rejected_run_plan_naming_an_orca_run_keeps_cluster_and_shows_reason(self):
+        repo = self.base / 'plans'
+        plan = repo / 'engineering-os/r1/run-plan.md'
+        plan.parent.mkdir(parents=True)
+        plan.write_text(self.plan_text())
+        self.orca.put('orchestration run-list', 'runs', [{'id': 'run_test', 'objective': 'Objective',
+                                                          'coordinator_handle': 'term_a'}])
+        def collector():
+            return PrimedCollector(self.orca, config_path=self.config, sessions=lambda: [],
+                             tmux_sessions=lambda: {},
+                             providers=[EngineeringOsProvider(extra_roots=[repo])])
+        kept = collector()
+        first = kept.snapshot()
+        self.assertIsNone(first['clusters']['Review run']['status_rejected'])
+        plan.write_text(self.plan_text(packages=None))
+        second = kept.snapshot()
+        self.assertEqual(second['clusters']['Review run']['status_rejected'], 'packages: expected array')
+        self.assertEqual(second['runs']['run_test']['title'], first['runs']['run_test']['title'])
+        self.assertEqual(second['unattributed_rejections'], [])
+        fresh = collector().snapshot()
+        record = next(c for c in fresh['clusters'].values() if c['run'] == 'run_test')
+        self.assertEqual(record['status_rejected'], 'packages: expected array')
+        self.assertNotIn('run_test', fresh['runs'])
+
+    def test_last_good_projection_is_pruned_after_a_day_absent_everywhere(self):
+        self.write_projection(projection(chiefTerminal='term_a'))
+        collector = self.collector()
+        collector.snapshot()
+        self.assertIn('run_test', collector._last_good)
+        (self.base / 'progress/run_test.json').unlink()
+        self.orca.put('orchestration run-list', 'runs', [])
+        collector.snapshot()
+        self.assertIn('run_test', collector._last_good)
+        self.clock.return_value = NOW + 24 * 3600 - 1
+        collector.snapshot()
+        self.assertIn('run_test', collector._last_good)
+        self.clock.return_value = NOW + 24 * 3600 + 1
+        collector.snapshot()
+        self.assertNotIn('run_test', collector._last_good)
 
     def test_slow_refresh_gives_providers_the_local_roots(self):
         class Recording:

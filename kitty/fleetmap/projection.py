@@ -42,6 +42,7 @@ class Projection:
     caps: dict[str, int] = field(default_factory=dict)
     # Not a field: set by the plan reader and absent from serialized records.
     plan_commit_at = None
+    plan_changed = None
 
 
 def validate(data: dict) -> list[str]:
