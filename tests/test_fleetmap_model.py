@@ -486,6 +486,34 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertEqual(snap['clusters']['Handoff scheduling']['fallbacks'], [
             {'run': 'run_test', 'now': objective, 'note': 'projection v1, Chief must re-render'}])
 
+    def test_rejected_known_run_keeps_last_good_projection_and_reason(self):
+        self.write_projection(projection(chiefTerminal='term_a'))
+        collector = self.collector()
+        first = collector.snapshot()
+        self.assertIn('run_test', first['runs'])
+        self.assertIsNone(first['clusters']['Review run']['status_rejected'])
+        (self.base / 'progress/run_test.json').write_text('{"schemaVersion": 1}')
+        (self.base / 'progress/stray.json').write_text('{')
+        second = collector.snapshot()
+        reason = 'schemaVersion 1, Chief must re-render'
+        self.assertEqual(second['runs']['run_test']['title'], first['runs']['run_test']['title'])
+        self.assertEqual(second['clusters']['Review run']['status_rejected'], reason)
+        self.assertEqual(second['unattributed_rejections'],
+                         [{'path': 'stray.json', 'reason': 'unreadable'}])
+
+    def test_slow_refresh_gives_providers_the_local_roots(self):
+        class Recording:
+            name = 'recording'
+            seen = []
+            def refresh(self, roots): self.seen.append(roots)
+            def load(self, roots): return [], {}
+        provider = Recording()
+        collector = Collector(self.orca, config_path=self.config, sessions=lambda: [],
+                              tmux_sessions=lambda: {}, providers=[provider])
+        collector._local_input = ([], {'/work/project'}, [])
+        collector.refresh_sources()
+        self.assertEqual(provider.seen, [[Path('/work/project')]])
+
     def test_fallback_run_preserves_matching_projected_cluster_binding(self):
         self.write_projection(projection())
         self.orca.put('terminal list', 'terminals', [terminal('term_chief')], 'laptop2')
@@ -610,7 +638,8 @@ class SnapshotAssembler(unittest.TestCase):
     def test_snapshot_contract_and_transcript_fields(self):
         snap = self.collector().snapshot()
         self.assertEqual(set(snap), {'generated_at', 'hosts', 'nodes', 'edges', 'runs', 'clusters',
-                                     'decisions', 'rejected_projections'})
+                                     'decisions', 'rejected_projections',
+                                     'unattributed_rejections'})
         self.assertEqual(snap['generated_at'], NOW)
         self.assertEqual(snap['hosts'][0], dict(name='local', label='This Mac', reachable=True,
             memory={'free_pct': None, 'swap_gb': None}, workers=0, cap=None, amber=False))

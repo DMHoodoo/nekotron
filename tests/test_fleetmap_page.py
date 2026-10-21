@@ -401,7 +401,7 @@ console.log(JSON.stringify({children: heading.children.map(text),
 
     def run_selection_js(self, source):
         return self.run_cluster_js(page_functions(
-            'selectCluster', 'renderRail', 'lastTouched', 'foldable', 'stateLine', 'renderContext', 'openBroadcast',
+            'selectCluster', 'renderRail', 'renderRejectedStatus', 'lastTouched', 'foldable', 'stateLine', 'renderContext', 'openBroadcast',
             'openOverlay', 'updateBroadcastCount', 'broadcastTargets',
             'selectNode', 'showContext', 'shortIds', 'setText', 'age', 'secondsSince',
             'paintFocus', 'drawEdges') + """
@@ -570,7 +570,7 @@ console.log(JSON.stringify(results));
 
     def run_cluster_js(self, source):
         return run_js(DOM + page_functions(
-            'html', 'button', 'clusterInfo', 'clusterRun', 'clusterItems',
+            'html', 'button', 'clusterInfo', 'clusterRun', 'clusterItems', 'age', 'secondsSince',
             'renderCluster', 'renderFallback', 'shortIds', 'detailLine', 'stepper',
             'matrixTable', 'gateContent', 'segmentBar', 'miniNode') + RUN_CLUSTER + source)
 
@@ -613,6 +613,54 @@ console.log(JSON.stringify({panel: text(cluster.panel),
         self.assertEqual(output['selections'], [
             {'context': {'run': 'run_test', 'package': f'{index}-M'}, 'node': 'worker'}
             for index in range(1, 4)])
+
+    def test_run_box_shows_status_age(self):
+        output = self.run_cluster_js("""
+run.status_at = Date.now() / 1000 - 7200; run.plan_commit_at = run.status_at - 60;
+renderCluster(cluster);
+const line = byClass(cluster.panel, 'cluster-status')[0];
+console.log(JSON.stringify({text: text(line), amber: line.className.includes('amber')}));
+""")
+        self.assertEqual(output, {'text': 'status updated 2h', 'amber': False})
+
+    def test_run_box_amber_when_plan_changed_since(self):
+        output = self.run_cluster_js("""
+run.status_at = Date.now() / 1000 - 7200; run.plan_commit_at = run.status_at + 60;
+renderCluster(cluster);
+const line = byClass(cluster.panel, 'cluster-status')[0];
+console.log(JSON.stringify({text: text(line), amber: line.className.includes('amber')}));
+""")
+        self.assertEqual(output, {'text': 'status updated 2h · plan changed since', 'amber': True})
+
+    def test_rejected_status_line_is_shown(self):
+        output = self.run_cluster_js("""
+const results = [];
+info.status_rejected = 'packages: expected array'; renderCluster(cluster);
+results.push(byClass(cluster.panel, 'status-rejected').map(text));
+info.run = null; info.status_rejected = 'unreadable'; renderCluster(cluster);
+results.push(byClass(cluster.panel, 'status-rejected').map(text));
+info.status_rejected = null; renderCluster(cluster);
+results.push(byClass(cluster.panel, 'status-rejected').map(text));
+console.log(JSON.stringify(results));
+""")
+        self.assertEqual(output, [['status rejected: packages: expected array'],
+                                  ['status rejected: unreadable'], []])
+
+    def test_unattributed_rejections_listed_in_rail(self):
+        output = run_page_js("""
+snapshot = {hosts: [], clusters: {}, runs: {}, nodes: [], edges: [], unattributed_rejections: [
+  {path: '/w/a/run-plan.md', reason: 'found 2'}, {path: 'stray.json', reason: 'unreadable'}]};
+renderRail();
+const shown = [$('rejected-status').hidden, text($('rejected-status'))];
+snapshot.unattributed_rejections = []; renderRail();
+console.log(JSON.stringify([shown, $('rejected-status').hidden]));
+""")
+        shown, hidden = output
+        self.assertFalse(shown[0])
+        self.assertIn('Rejected status files', shown[1])
+        self.assertIn('/w/a/run-plan.md', shown[1])
+        self.assertIn('unreadable', shown[1])
+        self.assertTrue(hidden)
 
     def test_collapsed_counts_line_only_when_nonzero(self):
         output = self.run_cluster_js("""

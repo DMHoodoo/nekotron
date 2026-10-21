@@ -108,6 +108,9 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font: calc(12px * var(--u)
 .stepper i.reached { background: #4f8ef7; }
 .stepper i.current { outline: 2px solid #d2e1ff; outline-offset: 2px; }
 .cluster-summary { margin: calc(6px * var(--u)) 0; color: #bfc6d9; }
+.cluster-status { margin: calc(4px * var(--u)) 0; color: #8f98b3; }
+.cluster-status.amber { color: #ffba71; }
+.status-rejected { margin: calc(4px * var(--u)) 0; color: #ff8a8a; }
 .slice-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; margin-top: calc(6px * var(--u)); }
 .slice-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .slice-row .segments { grid-column: 1 / -1; }
@@ -151,6 +154,7 @@ input[type=checkbox] { width: auto; }
       <div id="action-error" class="error" role="alert" hidden></div>
       <p id="action-status" class="muted" role="status"></p>
     <div id="empty"><h2>Your fleet, at a glance</h2><p class="muted">Select a session to see its purpose, recent work, and terminal actions.</p></div>
+    <section id="rejected-status" hidden></section>
     <section id="details" hidden>
       <h2 id="node-title"></h2><p id="state-line"></p>
       <dl>
@@ -1045,6 +1049,14 @@ function selectCluster(id) {
 function openRunPlan(runId) {
   return runAction(async () => { await request('/api/open-plan', {run: runId}); });
 }
+function renderRejectedStatus(visible) {
+  const list = snapshot.unattributed_rejections || [], section = $('rejected-status');
+  section.replaceChildren();
+  section.hidden = !(visible && list.length);
+  if (section.hidden) return;
+  section.append(html('h3', 'Rejected status files'));
+  for (const item of list) detailLine(section, item.path, item.reason);
+}
 function renderRail() {
   applyRail();
   $('decision-slot').replaceChildren();
@@ -1052,6 +1064,7 @@ function renderRail() {
   if (cluster) {
     const info = clusterInfo(cluster), run = clusterRun(cluster);
     $('empty').hidden = true;
+    renderRejectedStatus(false);
     $('details').hidden = true;
     $('node-rest').hidden = true;
     $('context-rail').hidden = false;
@@ -1068,6 +1081,7 @@ function renderRail() {
   renderContext();
   const node = nodes.get(selectedId);
   $('empty').hidden = Boolean(node) || Boolean(selectedContext);
+  renderRejectedStatus(!node && !selectedContext);
   $('details').hidden = !node;
   $('node-rest').hidden = !node;
   if (!node) {
@@ -1346,11 +1360,17 @@ function renderCluster(cluster) {
   if (info.waiting || info.stalled)
     panel.append(html('p', `waiting on you: ${info.waiting || 0} · ${info.stalled || 0} stalled`, 'cluster-summary'));
   renderFallback(panel, info);
+  if (info.status_rejected) panel.append(html('p', `status rejected: ${info.status_rejected}`, 'status-rejected'));
   if (run) {
     const now = html('p', undefined, 'cluster-now'), {full, shown} = shortIds(run.now ?? '');
     now.textContent = shown;
     if (shown !== full) now.setAttribute('title', full);
     panel.append(now);
+    if (run.status_at != null) {
+      const changed = run.plan_commit_at != null && run.plan_commit_at > run.status_at;
+      panel.append(html('p', `status updated ${age(run.status_at)}${changed ? ' · plan changed since' : ''}`,
+        changed ? 'cluster-status amber' : 'cluster-status'));
+    }
     if (!open || elsewhere) {
       for (const row of run.rows) {
         const line = html('div', undefined, 'slice-row'), cell = row.cells.implementing;
