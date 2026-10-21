@@ -2,12 +2,16 @@ from __future__ import annotations
 
 """Progress source discovery and selection through the provider interfaces."""
 from dataclasses import asdict
+from datetime import datetime, timezone
 import json
 from pathlib import Path
+import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'kitty'))
@@ -136,6 +140,201 @@ class ProgressProviders(unittest.TestCase):
             providers = providers_from_config({'providers': {'future': {}, 'engineering_os': {}}})
         self.assertEqual([p.name for p in providers], ['engineering_os'])
         self.assertIn('unknown provider: future', captured.output[0])
+
+
+def block(data, fence='```json run-status'):
+    return fence + '\n' + json.dumps(data) + '\n```\n'
+
+
+class RunPlanStatus(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='fleetmap-plans-')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve() / 'repo'
+        self.root.mkdir()
+        self.data = json.loads(FIXTURE.read_text())
+        self.env = dict(os.environ, GIT_AUTHOR_NAME='t', GIT_AUTHOR_EMAIL='t@example.invalid',
+                        GIT_COMMITTER_NAME='t', GIT_COMMITTER_EMAIL='t@example.invalid',
+                        GIT_CONFIG_GLOBAL='/dev/null', GIT_CONFIG_SYSTEM='/dev/null')
+        self.git('init', '-q', '-b', 'main')
+
+    def git(self, *args):
+        return subprocess.run(['git', '-C', str(self.root), *args], check=True,
+                              capture_output=True, text=True, env=self.env).stdout.strip()
+
+    def plan(self, text, relative='engineering-os/r1/run-plan.md', commit=True):
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        if commit:
+            self.git('add', '.')
+            self.git('commit', '-q', '-m', 'plan')
+        return path
+
+    def load(self):
+        provider = EngineeringOsProvider(extra_roots=[])
+        provider.refresh([self.root])
+        return provider.load([self.root])
+
+    def test_provider_reads_run_status_block_from_run_plan(self):
+        path = self.plan('# Plan\n\n' + block(self.data))
+        good, bad = self.load()
+        self.assertEqual(bad, {})
+        self.assertEqual(len(good), 1)
+        self.assertEqual(good[0].run, self.data['run'])
+        self.assertEqual(good[0].path, str(path))
+        self.assertEqual(good[0].runPlan['commit'], self.git('log', '-1', '--format=%h'))
+        self.assertEqual(good[0].runPlan['path'], 'engineering-os/r1/run-plan.md')
+        self.assertEqual(good[0].runPlan['worktree'], str(self.root))
+        self.assertEqual(good[0].plan_commit_at, float(self.git('log', '-1', '--format=%ct')))
+
+    def test_plan_without_block_is_ignored(self):
+        self.plan('# Plan\n\nNo status here.\n')
+        self.assertEqual(self.load(), ([], {}))
+
+    def test_plan_with_two_blocks_or_bad_json_is_rejected_with_reason(self):
+        two = self.plan(block(self.data) + block(self.data), 'engineering-os/two/run-plan.md')
+        bad = self.plan('```json run-status\n{\n```\n', 'engineering-os/bad/run-plan.md')
+        invalid = self.plan(block(dict(self.data, packages=None)), 'engineering-os/inv/run-plan.md')
+        good, rejected = self.load()
+        self.assertEqual(good, [])
+        self.assertIn('found 2', rejected[str(two)])
+        self.assertTrue(rejected[str(bad)].startswith('json run-status'))
+        self.assertEqual(rejected[str(invalid)], 'packages: expected array')
+
+    def test_nested_example_fences_do_not_count(self):
+        self.plan('````markdown\n' + block(self.data) + '````\n\n' + block(self.data))
+        good, bad = self.load()
+        self.assertEqual((len(good), bad), (1, {}))
+
+    def test_block_and_file_for_same_run_newer_wins(self):
+        plan = self.plan(block(dict(self.data, updatedAt='2026-10-21T10:00:00Z')))
+        stale = self.root / 'engineering-os/r1/run-status.json'
+        stale.write_text(json.dumps(dict(self.data, updatedAt='2026-10-20T10:00:00Z')))
+        provider = EngineeringOsProvider(extra_roots=[])
+        provider.refresh([self.root])
+        good, bad = load_from_providers([provider], [self.root])
+        self.assertEqual([p.path for p in good], [str(plan)])
+        self.assertEqual(bad['engineering_os:' + str(stale)], 'superseded')
+        stale.write_text(json.dumps(dict(self.data, updatedAt='2026-10-22T10:00:00Z')))
+        good, bad = load_from_providers([provider], [self.root])
+        self.assertEqual([p.path for p in good], [str(stale)])
+
+    def test_fast_thread_never_calls_git_for_plans(self):
+        self.plan(block(self.data))
+        provider = EngineeringOsProvider(extra_roots=[])
+        with patch('fleetmap.providers.engineering_os._plan_git',
+                   side_effect=AssertionError('foreground git')), \
+                patch('subprocess.run', side_effect=AssertionError('foreground git')):
+            good, bad = provider.load([self.root])
+        self.assertEqual((len(good), bad), (1, {}))
+        self.assertEqual(good[0].runPlan['commit'], '')
+        provider.refresh([self.root])
+        self.assertNotEqual(provider.load([self.root])[0][0].runPlan['commit'], '')
+
+    def test_plan_git_answers_are_cached_by_path_and_mtime(self):
+        path = self.plan(block(self.data))
+        provider = EngineeringOsProvider(extra_roots=[])
+        with patch('fleetmap.providers.engineering_os._plan_git',
+                   return_value=(str(self.root), 'abc1234', 5.0, 'h', 'h')) as git:
+            provider.refresh([self.root])
+            provider.refresh([self.root])
+            self.assertEqual(git.call_count, 1)
+            os.utime(path, (1, 1))
+            provider.refresh([self.root])
+            self.assertEqual(git.call_count, 2)
+
+    def test_rejected_plan_names_its_run_from_block_or_directory(self):
+        two = self.plan(block(self.data) + block(self.data), 'engineering-os/dir_run/run-plan.md')
+        invalid = self.plan(block(dict(self.data, run='from_block', packages=None)),
+                            'engineering-os/other_dir/run-plan.md')
+        provider = EngineeringOsProvider(extra_roots=[])
+        provider.load([self.root])
+        self.assertEqual(provider.rejected_runs,
+                         {str(two): 'dir_run', str(invalid): 'from_block'})
+
+    def test_plan_changed_is_amber_only_when_a_commit_skips_the_block(self):
+        path = self.plan('# Plan\n\n' + block(dict(self.data, updatedAt='2026-10-21T10:00:00Z')))
+        self.assertIs(self.load()[0][0].plan_changed, False)
+        path.write_text(path.read_text() + '\nMore prose.\n')
+        self.git('commit', '-q', '-am', 'prose only')
+        self.assertIs(self.load()[0][0].plan_changed, True)
+        path.write_text('# Plan\n\nMore.\n\n' + block(dict(self.data, updatedAt='2026-10-21T11:00:00Z')))
+        self.git('commit', '-q', '-am', 'block and prose together')
+        self.assertIs(self.load()[0][0].plan_changed, False)
+
+    def test_file_source_amber_uses_a_fifteen_minute_allowance(self):
+        plan = self.plan('# Plan\n')
+        committed = float(self.git('log', '-1', '--format=%ct'))
+        results = []
+        for lag in (600, 1200):
+            updated = datetime.fromtimestamp(committed - lag, timezone.utc).isoformat()
+            status = self.root / 'engineering-os/r1/run-status.json'
+            status.write_text(json.dumps(dict(
+                self.data, updatedAt=updated,
+                runPlan=dict(self.data['runPlan'], path='engineering-os/r1/run-plan.md',
+                             worktree=str(self.root)))))
+            good, bad = self.load()
+            self.assertEqual(bad, {})
+            results.append(good[0].plan_changed)
+        self.assertEqual(results, [False, True])
+        self.assertEqual(good[0].plan_commit_at, committed)
+        self.assertTrue(plan.exists())
+
+    def test_fast_path_stats_cached_plans_without_glob_or_reads(self):
+        import time
+        text = block(self.data)
+        for index in range(120):
+            self.plan(text, relative='engineering-os/r%d/run-plan.md' % index, commit=False)
+        provider = EngineeringOsProvider(extra_roots=[])
+        provider.refresh([self.root])
+        good, bad = provider.load([self.root])
+        self.assertEqual((len(good), bad), (120, {}))
+        real_open = Path.open
+        opened = []
+
+        def spy_open(path, *args, **kwargs):
+            opened.append(str(path))
+            return real_open(path, *args, **kwargs)
+
+        with patch.object(Path, 'glob', side_effect=AssertionError('glob on fast path')), \
+                patch.object(Path, 'open', spy_open), \
+                patch.object(Path, 'read_text', side_effect=AssertionError('read on fast path')), \
+                patch('builtins.open', side_effect=AssertionError('open on fast path')):
+            started = time.perf_counter()
+            again, bad = provider.load([self.root])
+            elapsed = time.perf_counter() - started
+        self.assertEqual((opened, bad, len(again)), ([], {}, len(good)))
+        self.assertLess(elapsed, 0.020)
+
+    def test_fast_path_reparses_only_the_plan_whose_mtime_changed(self):
+        first = self.plan(block(self.data), relative='engineering-os/a/run-plan.md', commit=False)
+        self.plan(block(dict(self.data, run='run_other', title='Other')),
+                  relative='engineering-os/b/run-plan.md', commit=False)
+        provider = EngineeringOsProvider(extra_roots=[])
+        provider.refresh([self.root])
+        provider.load([self.root])
+        first.write_text(block(dict(self.data, title='Renamed')))
+        os.utime(first, (first.stat().st_mtime + 5,) * 2)
+        with patch('fleetmap.providers.engineering_os.status_block',
+                   wraps=__import__('fleetmap.providers.engineering_os',
+                                    fromlist=['status_block']).status_block) as parse:
+            good, _ = provider.load([self.root])
+        self.assertEqual(parse.call_count, 1)
+        self.assertIn('Renamed', [p.title for p in good])
+
+    def test_git_cache_notices_a_commit_that_leaves_mtime_unchanged(self):
+        path = self.plan(block(self.data), commit=False)
+        os.utime(path, (1000, 1000))
+        provider = EngineeringOsProvider(extra_roots=[])
+        provider.refresh([self.root])
+        self.assertEqual(provider.load([self.root])[0][0].runPlan['commit'], '')
+        self.git('add', '.')
+        self.git('commit', '-q', '-m', 'plan')
+        os.utime(path, (1000, 1000))
+        provider.refresh([self.root])
+        self.assertEqual(provider.load([self.root])[0][0].runPlan['commit'],
+                         self.git('log', '-1', '--format=%h'))
 
 
 if __name__ == '__main__':

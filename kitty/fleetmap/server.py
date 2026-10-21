@@ -204,7 +204,8 @@ class FleetMapServer:
         self._serving = False
         self._http = None
         self._snapshot = {'generated_at': None, 'hosts': [], 'nodes': [], 'edges': [],
-                          'runs': {}, 'clusters': {}, 'decisions': [], 'rejected_projections': {}}
+                          'runs': {}, 'clusters': {}, 'decisions': [], 'rejected_projections': {},
+                          'unattributed_rejections': []}
         self._snapshot_ready = threading.Event()
 
     def confirm(self, node):

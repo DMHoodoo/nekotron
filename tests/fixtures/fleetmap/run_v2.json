@@ -1,12 +1,12 @@
 {
   "schemaVersion": 2,
-  "run": "run_4d94eb181d65",
+  "run": "run_fixture00000001",
   "title": "Handoff scheduling",
   "updatedAt": "2026-10-20T00:25:43Z",
   "runPlan": {
     "path": "engineering-os/20261015-handoff-scheduling/run-plan.md",
     "commit": "c88827630c",
-    "worktree": "/Users/hassankhan/Documents/GlowDevelopment/glow-core/.claude/worktrees/handoff-scheduling"
+    "worktree": "/nonexistent/fixture/worktree"
   },
   "pr": {
     "repo": "TuleInc/glow-core",

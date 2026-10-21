@@ -215,3 +215,14 @@ Branch `fleet-map-declutter-3` from master. Same global constraints. One commit 
 
 - [ ] Failing tests: `test_long_hex_ids_are_shortened_in_now_lines` (a Now line containing a 64-hex id renders `c5a5627d…` and its title attribute holds the full text), `test_decision_strip_label_and_attention_style` (`Needs you · 1`, the chip has the attention class and a dot; with none, `Nothing needs you`), `test_large_screen_steps_font_and_node_size` (innerWidth 2560: base font 14 px and node radius scaled by 14/12; innerWidth 1512: unchanged).
 - [ ] Implement per Decisions 39 to 41. Both suites. Commit `feat(declutter3): short ids, a decision strip that stands out, larger type on big screens`.
+
+## Status from the run plan (2026-10-21): Decisions 42 to 44
+
+Branch `fleet-map-status-from-plan` from master. Same global constraints; commits prefixed `feat(status):`.
+
+### Task 40: Read the run-status block, show freshness and rejections
+
+**Files:** `kitty/fleetmap/providers/engineering_os.py`, `kitty/fleetmap/projection.py` (a vendored `status_block(text)` parser identical in behavior to the lab's: ignores fences nested in other fences, exactly one block), `kitty/fleetmap/model.py` (slow-thread git call for the plan's last commit hash and time, cached by plan path and mtime; last-good projection per run kept in memory), `kitty/fleetmap/page.html`; tests in `tests/test_fleetmap_providers.py`, `tests/test_fleetmap_model.py`, `tests/test_fleetmap_page.py`.
+
+- [ ] Failing tests: `test_provider_reads_run_status_block_from_run_plan` (temp git repo with `engineering-os/r1/run-plan.md` holding one valid block, committed: the projection is returned with runPlan.commit equal to the plan's last commit), `test_plan_without_block_is_ignored`, `test_plan_with_two_blocks_or_bad_json_is_rejected_with_reason`, `test_nested_example_fences_do_not_count`, `test_block_and_file_for_same_run_newer_wins`, `test_fast_thread_never_calls_git_for_plans`; model: `test_rejected_known_run_keeps_last_good_projection_and_reason`; page: `test_run_box_shows_status_age`, `test_run_box_amber_when_plan_changed_since`, `test_rejected_status_line_is_shown`, `test_unattributed_rejections_listed_in_rail`.
+- [ ] Implement per Decisions 42 to 44. Run the page module, then the full suite alone gated on its exit status. Commit `feat(status): read run status from the run plan; show freshness and rejections`.

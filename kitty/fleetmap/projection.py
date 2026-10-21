@@ -2,6 +2,8 @@ from __future__ import annotations
 
 """Consume Engineering OS schema v2 records without inferring plan progress."""
 from dataclasses import dataclass, field
+import json
+import re
 REQUIRED_FIELDS = (
     'schemaVersion', 'run', 'title', 'updatedAt', 'runPlan', 'pr', 'acceptance',
     'chiefTerminal', 'now', 'statusCard', 'decisions', 'gates', 'mergeGate',
@@ -38,6 +40,9 @@ class Projection:
     path: str
     mtime: float
     caps: dict[str, int] = field(default_factory=dict)
+    # Not a field: set by the plan reader and absent from serialized records.
+    plan_commit_at = None
+    plan_changed = None
 
 
 def validate(data: dict) -> list[str]:
@@ -194,3 +199,39 @@ def parse_projection(data, mtime) -> Projection:
         raise ValueError(violations[0])
     fields = {name: data[name] for name in REQUIRED_FIELDS}
     return Projection(**fields, caps=data.get('caps', {}), path='', mtime=mtime)
+
+
+class NoStatusBlock(ValueError):
+    """A plan holding no run-status block at all, which is not an error."""
+
+
+def status_block(text):
+    """Ignore examples nested inside other Markdown fences."""
+    fence = None
+    blocks = []
+    current = None
+    for line in text.splitlines():
+        match = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+        if fence is None:
+            if match:
+                marker, info = match.groups()
+                fence = marker
+                if marker == "```" and info.strip() == "json run-status":
+                    current = []
+                    blocks.append(current)
+        elif (match and match[1][0] == fence[0] and len(match[1]) >= len(fence)
+              and not match[2].strip()):
+            fence = None
+            current = None
+        elif current is not None:
+            current.append(line)
+    if len(blocks) == 0:
+        raise NoStatusBlock("run-plan: expected exactly one ```json run-status block; found 0")
+    if len(blocks) != 1:
+        raise ValueError("run-plan: expected exactly one ```json run-status block; found %d" % len(blocks))
+    if current is not None:
+        raise ValueError("run-plan: unclosed ```json run-status block")
+    try:
+        return json.loads("\n".join(blocks[0]))
+    except ValueError as error:
+        raise ValueError("json run-status: %s" % error) from error
