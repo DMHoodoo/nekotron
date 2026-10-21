@@ -281,6 +281,48 @@ class RunPlanStatus(unittest.TestCase):
         self.assertEqual(good[0].plan_commit_at, committed)
         self.assertTrue(plan.exists())
 
+    def test_fast_path_stats_cached_plans_without_glob_or_reads(self):
+        import time
+        text = block(self.data)
+        for index in range(120):
+            self.plan(text, relative='engineering-os/r%d/run-plan.md' % index, commit=False)
+        provider = EngineeringOsProvider(extra_roots=[])
+        provider.refresh([self.root])
+        good, bad = provider.load([self.root])
+        self.assertEqual((len(good), bad), (120, {}))
+        real_open = Path.open
+        opened = []
+
+        def spy_open(path, *args, **kwargs):
+            opened.append(str(path))
+            return real_open(path, *args, **kwargs)
+
+        with patch.object(Path, 'glob', side_effect=AssertionError('glob on fast path')), \
+                patch.object(Path, 'open', spy_open), \
+                patch.object(Path, 'read_text', side_effect=AssertionError('read on fast path')), \
+                patch('builtins.open', side_effect=AssertionError('open on fast path')):
+            started = time.perf_counter()
+            again, bad = provider.load([self.root])
+            elapsed = time.perf_counter() - started
+        self.assertEqual((opened, bad, len(again)), ([], {}, len(good)))
+        self.assertLess(elapsed, 0.020)
+
+    def test_fast_path_reparses_only_the_plan_whose_mtime_changed(self):
+        first = self.plan(block(self.data), relative='engineering-os/a/run-plan.md', commit=False)
+        self.plan(block(dict(self.data, run='run_other', title='Other')),
+                  relative='engineering-os/b/run-plan.md', commit=False)
+        provider = EngineeringOsProvider(extra_roots=[])
+        provider.refresh([self.root])
+        provider.load([self.root])
+        first.write_text(block(dict(self.data, title='Renamed')))
+        os.utime(first, (first.stat().st_mtime + 5,) * 2)
+        with patch('fleetmap.providers.engineering_os.status_block',
+                   wraps=__import__('fleetmap.providers.engineering_os',
+                                    fromlist=['status_block']).status_block) as parse:
+            good, _ = provider.load([self.root])
+        self.assertEqual(parse.call_count, 1)
+        self.assertIn('Renamed', [p.title for p in good])
+
     def test_git_cache_notices_a_commit_that_leaves_mtime_unchanged(self):
         path = self.plan(block(self.data), commit=False)
         os.utime(path, (1000, 1000))

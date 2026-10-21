@@ -38,7 +38,7 @@ class ProjectionReader(unittest.TestCase):
     def test_parse_projection_validates_and_preserves_record_without_io(self):
         parsed = parse_projection(self.data, 42.0)
         self.assertEqual((parsed.run, parsed.mtime, parsed.path),
-                         ('run_4d94eb181d65', 42.0, ''))
+                         ('run_fixture00000001', 42.0, ''))
         with self.assertRaisesRegex(ValueError, 'packages: expected array'):
             parse_projection(dict(self.data, packages=None), 42.0)
 
@@ -48,7 +48,7 @@ class ProjectionReader(unittest.TestCase):
         self.assertEqual(len(good), 1)
         projection = good[0]
         self.assertIsInstance(projection, Projection)
-        self.assertEqual(projection.run, 'run_4d94eb181d65')
+        self.assertEqual(projection.run, 'run_fixture00000001')
         self.assertEqual(projection.title, 'Handoff scheduling')
         self.assertEqual(projection.slices[0]['stage'], 'implementing')
         self.assertEqual(projection.packages[0]['dispatchId'], 'ctx_39129d9df0a8')

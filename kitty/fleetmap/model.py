@@ -88,7 +88,7 @@ def repository_name(worktree_root):
     return common.parent.name or None
 
 
-def _worktrees(repository_root, limit=64):
+def _worktrees(repository_root):
     """Every worktree path of a repository; slow thread only."""
     try:
         out = subprocess.run(['git', '-C', repository_root, 'worktree', 'list', '--porcelain'],
@@ -98,7 +98,7 @@ def _worktrees(repository_root, limit=64):
     if out.returncode:
         return []
     found = [line[len('worktree '):] for line in out.stdout.splitlines() if line.startswith('worktree ')]
-    return found[:limit]
+    return found
 
 
 def _node(node_id, host, kind, facts=None):

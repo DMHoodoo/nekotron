@@ -167,7 +167,6 @@ class SnapshotAssembler(unittest.TestCase):
         fixture = ROOT / 'tests/fixtures/fleetmap/run_v2.json'
         path = directory / 'run-status.json'
         record = json.loads(fixture.read_text())
-        record['runPlan']['worktree'] = '/nonexistent/worktree'
         path.write_text(json.dumps(record))
         self.local[0] = replace(self.local[0], cwd=str(root))
         local_terminal = dict(terminal(record['chiefTerminal']), worktreePath=str(root),
@@ -540,6 +539,15 @@ class SnapshotAssembler(unittest.TestCase):
         self.assertEqual((bad, [p.run for p in good]), ({}, ['run_test']))
         self.assertEqual(good[0].runPlan['worktree'], str(sibling.resolve()))
         self.assertIn('run_test', collector.snapshot()['runs'])
+
+    def test_every_worktree_of_a_repository_is_listed_without_a_cap(self):
+        from fleetmap import model
+        listing = ''.join('worktree /w/wt-%03d\nHEAD abc\n\n' % index for index in range(120))
+        done = subprocess.CompletedProcess([], 0, stdout=listing, stderr='')
+        with patch.object(model.subprocess, 'run', return_value=done):
+            found = model._worktrees('/w/main')
+        self.assertEqual(len(found), 120)
+        self.assertEqual(found[-1], '/w/wt-119')
 
     def test_rejected_run_plan_naming_an_orca_run_keeps_cluster_and_shows_reason(self):
         repo = self.base / 'plans'

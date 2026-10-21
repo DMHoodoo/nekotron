@@ -104,6 +104,8 @@ class EngineeringOsProvider:
         self.extra_roots = [Path(root).expanduser() for root in extra_roots]
         self._git = {}
         self._file_commits = {}
+        self._found = None
+        self._parsed = {}
         self.rejected_runs = {}
 
     def _discover(self, roots, globs):
@@ -140,14 +142,17 @@ class EngineeringOsProvider:
     def refresh(self, roots: list[Path]) -> None:
         """Slow thread: the only place that runs git for plans."""
         fresh, files = {}, {}
-        for _, path in self._discover(roots, PLAN_GLOBS):
+        plans = list(self._discover(roots, PLAN_GLOBS))
+        statuses = list(self._discover(roots, GLOBS))
+        for _, path in plans:
             self._git_for(path, fresh)
-        for _, path in self._discover(roots, GLOBS):
+        for _, path in statuses:
             plan = self._file_plan(path)
             result = plan and self._git_for(plan, fresh)
             if result and result[2] is not None:
                 files[str(path)] = result[2]
         self._git, self._file_commits = fresh, files
+        self._found = (statuses, plans)
 
     @staticmethod
     def _file_plan(path):
@@ -187,31 +192,66 @@ class EngineeringOsProvider:
             projection.plan_changed = plan_hash != status_hash
         return projection, data
 
+    def _cached(self, path, key, parse):
+        """Parse result for a file, re-run only when its mtime or git answer changed."""
+        try:
+            stamp = (path.stat().st_mtime, key)
+        except OSError:
+            self._parsed.pop(str(path), None)
+            return 'none', None
+        entry = self._parsed.get(str(path))
+        if entry and entry[0] == stamp:
+            return entry[1]
+        result = parse()
+        self._parsed[str(path)] = (stamp, result)
+        return result
+
+    def _load_status(self, path):
+        try:
+            projection = _read_projection(path)
+            commit_at = self._file_commits.get(str(path))
+            if commit_at is not None:
+                projection.plan_commit_at = commit_at
+                updated = _updated_at(projection)
+                if updated != float('-inf'):
+                    projection.plan_changed = commit_at - updated > STATUS_ALLOWANCE
+            return 'ok', projection
+        except ValueError as error:
+            return 'bad', (str(error), self._run_hint(path, lambda text: json.loads(text)))
+
+    def _load_plan(self, boundary, path):
+        try:
+            return 'ok', self._read_plan(path, boundary)[0]
+        except NoStatusBlock:
+            return 'none', None
+        except ValueError as error:
+            return 'bad', (str(error), self._run_hint(path, status_block))
+
     def load(self, roots: list[Path]) -> tuple[list[Projection], dict[str, str]]:
+        """Fast path: stats the paths the slow thread found; globs only before the first refresh."""
+        found = self._found
+        if found is None:
+            found = (list(self._discover(roots, GLOBS)), list(self._discover(roots, PLAN_GLOBS)))
+        statuses, plans = found
         good, bad, hints = [], {}, {}
-        for boundary, path in self._discover(roots, GLOBS):
-            try:
-                projection = _read_projection(path)
-                commit_at = self._file_commits.get(str(path))
-                if commit_at is not None:
-                    projection.plan_commit_at = commit_at
-                    updated = _updated_at(projection)
-                    if updated != float('-inf'):
-                        projection.plan_changed = commit_at - updated > STATUS_ALLOWANCE
-                good.append(projection)
-            except ValueError as error:
-                bad[str(path)] = str(error)
-                hints[str(path)] = self._run_hint(path, lambda text: json.loads(text))
-        for boundary, path in self._discover(roots, PLAN_GLOBS):
-            try:
-                good.append(self._read_plan(path, boundary)[0])
-            except NoStatusBlock:
-                continue
-            except ValueError as error:
-                bad[str(path)] = str(error)
-                hints[str(path)] = self._run_hint(path, status_block)
+        for boundary, path in statuses:
+            state, value = self._cached(path, self._file_commits.get(str(path)),
+                                        lambda: self._load_status(path))
+            self._collect(path, state, value, good, bad, hints)
+        for boundary, path in plans:
+            entry = self._git.get(str(path))
+            state, value = self._cached(path, entry and entry[2],
+                                        lambda: self._load_plan(boundary, path))
+            self._collect(path, state, value, good, bad, hints)
         self.rejected_runs = {key: run for key, run in hints.items() if run}
         return good, bad
+
+    @staticmethod
+    def _collect(path, state, value, good, bad, hints):
+        if state == 'ok':
+            good.append(value)
+        elif state == 'bad':
+            bad[str(path)], hints[str(path)] = value
 
     @staticmethod
     def _run_hint(path, parse):
