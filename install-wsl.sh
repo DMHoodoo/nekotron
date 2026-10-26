@@ -28,11 +28,16 @@ step "kitty"   # Ubuntu's package is far older than the 0.48 nekotron needs
 if [ ! -x ~/.local/kitty.app/bin/kitty ]; then
     curl -fsSL https://sw.kovidgoyal.net/kitty/installer.sh | sh /dev/stdin launch=n
 fi
-mkdir -p ~/.local/bin ~/.local/share/applications
+mkdir -p ~/.local/bin
 ln -sf ~/.local/kitty.app/bin/kitty ~/.local/kitty.app/bin/kitten ~/.local/bin/
-# A .desktop entry lets WSLg list kitty in the Windows Start menu.
-sed "s|Exec=kitty|Exec=$HOME/.local/kitty.app/bin/kitty|; s|Icon=kitty|Icon=$HOME/.local/kitty.app/share/icons/hicolor/256x256/apps/kitty.png|" \
-    ~/.local/kitty.app/share/applications/kitty.desktop > ~/.local/share/applications/kitty.desktop
+# WSLg builds Windows Start menu entries only from /usr/share/applications
+# (not ~/.local/share/applications), so the .desktop entry goes there.
+desktop=$(sed "s|Exec=kitty|Exec=$HOME/.local/kitty.app/bin/kitty|; s|Icon=kitty|Icon=$HOME/.local/kitty.app/share/icons/hicolor/256x256/apps/kitty.png|" \
+    ~/.local/kitty.app/share/applications/kitty.desktop)
+if [ "$desktop" != "$(cat /usr/share/applications/kitty.desktop 2>/dev/null)" ]; then
+    printf '%s\n' "$desktop" | sudo tee /usr/share/applications/kitty.desktop >/dev/null ||
+        echo "skipped Start menu entry (launch with: wsl -- ~/.local/bin/kitty)"
+fi
 ~/.local/bin/kitty --version
 
 step "Claude Code"
@@ -65,6 +70,6 @@ elif ! grep -q kitty-tab-status ~/.claude/settings.json; then
 fi
 
 step "done"
-echo "Start kitty from the Start menu (may need 'wsl --shutdown' once to appear)"
+echo "Start kitty from the Start menu: 'kitty (Ubuntu)' (appears once WSLg rescans)"
 echo "or from PowerShell:  wsl -- ~/.local/bin/kitty"
 echo "Then run 'claude' in kitty to log in."
