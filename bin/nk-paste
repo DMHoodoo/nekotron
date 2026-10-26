@@ -1,0 +1,13 @@
+#!/bin/bash
+# nk-paste WINDOW_ID — paste the clipboard into a kitty window via wl-paste.
+# Under WSLg kitty's own Wayland paste comes back empty even though the
+# clipboard is synced. Non-text (images) falls through as ctrl+v so Claude
+# Code's image paste still works.
+wid="$1"
+KITTEN="$(command -v kitten || echo "$HOME/.local/bin/kitten")"
+if wl-paste -l 2>/dev/null | grep -qE '^text/|STRING'; then
+    wl-paste -n 2>/dev/null | tr -d '\r' |
+        "$KITTEN" @ send-text --match "id:$wid" --bracketed-paste auto --stdin
+else
+    "$KITTEN" @ send-key --match "id:$wid" ctrl+v
+fi

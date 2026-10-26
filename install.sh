@@ -36,12 +36,19 @@ mkdir -p ~/.claude/sounds ~/.config/crush ~/.config/nekotron/swiftbar
 ln -sf "$R"/swiftbar/nekotron.5s.py ~/.config/nekotron/swiftbar/nekotron.5s.py
 ln -sf "$R"/sounds/meow.wav ~/.claude/sounds/meow.wav          # attention meow
 [ -e ~/.config/crush/crush.json ] || ln -sf "$R"/crush/crush.json ~/.config/crush/crush.json
-# The first launch has no snapshot yet; never overwrite an existing workspace.
 # Off macOS, cmd+ is the Win key (mostly reserved by Windows): mirror every
 # cmd+ map as ctrl+alt+ in a file nekotron.conf globincludes.
 if [ "$(uname -s)" != Darwin ]; then
     sed -n 's/^map cmd+/map ctrl+alt+/p' "$R/kitty/nekotron.conf" > ~/.config/kitty/nekotron-keys-linux.conf
+    # WSLg: kitty's Wayland paste comes back empty; paste via wl-paste instead,
+    # and on Ctrl+V too since that is the Windows habit.
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        for k in ctrl+shift+v ctrl+v; do
+            printf 'map %s launch --type=background ${HOME}/bin/nk-paste @active-kitty-window-id\n' "$k"
+        done >> ~/.config/kitty/nekotron-keys-linux.conf
+    fi
 fi
+# The first launch has no snapshot yet; never overwrite an existing workspace.
 [ -e ~/.config/kitty/claude-restore.session ] || printf 'launch zsh -l\n' > ~/.config/kitty/claude-restore.session
 echo "symlinks done. Manual steps (once):"
 echo "  1. kitty.conf:  include $R/kitty/nekotron.conf"
