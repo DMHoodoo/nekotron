@@ -205,6 +205,62 @@ Requires kitty ≥ 0.48 (`brew install --cask kitty`).
 State lives in /tmp/claude-kitty-status/ (ephemeral) and
 ~/.claude/{session,cost}-ledger.tsv (persistent, not in repo).
 
+## Windows (WSL2) and Linux
+
+Nekotron runs on Windows inside WSL2: kitty, zsh, tmux and Claude Code all
+live in Ubuntu, and WSLg shows kitty as a normal Windows window. Claude Code
+must run **inside WSL in kitty** (not in PowerShell) so the hooks can reach
+kitty. Tested on Windows 11, Ubuntu 22.04, kitty 0.49.
+
+```sh
+# Ubuntu, once (Ubuntu's kitty package is too old, so use the official build)
+sudo apt update && sudo apt install -y zsh tmux jq pulseaudio-utils libnotify-bin \
+    wl-clipboard wslu libxkbcommon-x11-0 libxcb-xkb1 libfontconfig1 libgl1 \
+    libegl1 libgl1-mesa-dri fonts-noto-color-emoji
+curl -fsSL https://sw.kovidgoyal.net/kitty/installer.sh | sh /dev/stdin launch=n
+mkdir -p ~/.local/bin && ln -sf ~/.local/kitty.app/bin/kitty ~/.local/kitty.app/bin/kitten ~/.local/bin/
+curl -fsSL https://claude.ai/install.sh | bash
+
+# clone to the path the scripts expect, then install as usual
+git clone https://github.com/DMHoodoo/nekotron ~/Documents/GlowDevelopment/nekotron
+cd ~/Documents/GlowDevelopment/nekotron && ./install.sh
+```
+
+Then do the three manual steps `install.sh` prints. On a fresh WSL:
+
+- `~/.config/kitty/kitty.conf`: `shell /usr/bin/zsh -l` (no `chsh` needed) and
+  the `include` line
+- `~/.zshrc`: `export PATH="$HOME/.local/bin:$PATH"` and the `source` line
+- `~/.claude/settings.json`: copy `claude/settings-wiring.json` if you have none
+
+Launch with `wsl -d Ubuntu -- ~/.local/bin/kitty` and run `claude` to log in
+(WSL keeps its own Claude login, settings and memory).
+
+**What differs from macOS**
+
+- **Keys:** `⌘` is the Win key on Linux, and Windows reserves most of those
+  chords, so `install.sh` mirrors every `cmd+` map as `ctrl+alt+`
+  (fleet board `Ctrl+Alt+Shift+F`, attention `Ctrl+Alt+Shift+A`,
+  cheatsheet `Ctrl+Alt+Shift+K`). The cheatsheet lists the mirrored keys.
+- **Paste:** under WSLg kitty's own paste comes back empty, so `Ctrl+V` and
+  `Ctrl+Shift+V` go through `bin/nk-paste` (wl-paste). Images fall through
+  as `Ctrl+V` for Claude Code's image paste.
+- **Notifications** are native Windows toasts (`bin/nk-notify`). WSL can't
+  tell which window is in front, so they also fire when kitty is focused.
+- **Sound** plays through WSLg's PulseAudio (`bin/nk-play`); links and files
+  open in Windows via `wslview` (`bin/nk-open`).
+- **Not available:** SwiftBar menu bar, `nekobar`, SMD (macOS apps).
+
+**Known limits**
+
+- Window resizing is laggy. That's WSLg itself (it streams Linux windows to
+  Windows over RDP), not kitty: every WSLg app does it. Snap or maximize once.
+- kitty logs harmless D-Bus warnings if `/etc/machine-id` is empty; fix with
+  `sudo sh -c 'dbus-uuidgen > /etc/machine-id'`.
+- Don't set `linux_display_server x11` to chase the lag: it doesn't help and
+  WSLg then draws a white title bar instead of kitty's dark one.
+- The fleet-map page tests need a Linux `node`; the rest of the suite runs as is.
+
 ## Optional integrations
 
 Everything below is opt-in; each tool degrades cleanly when absent.
