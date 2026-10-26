@@ -212,6 +212,19 @@ live in Ubuntu, and WSLg shows kitty as a normal Windows window. Claude Code
 must run **inside WSL in kitty** (not in PowerShell) so the hooks can reach
 kitty. Tested on Windows 11, Ubuntu 22.04, kitty 0.49.
 
+One command, in the Ubuntu app (asks for your sudo password once):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/DMHoodoo/nekotron/master/install-wsl.sh | bash
+```
+
+`install-wsl.sh` installs the packages, kitty (plus a Start menu entry) and
+Claude Code, clones to the path below, runs `install.sh` and does its manual
+steps. It is safe to re-run: it skips what is present and only appends the
+lines it needs, never overwriting an existing `~/.claude/settings.json`.
+
+What it does, if you would rather do it by hand:
+
 ```sh
 # Ubuntu, once (Ubuntu's kitty package is too old, so use the official build)
 sudo apt update && sudo apt install -y zsh tmux jq pulseaudio-utils libnotify-bin \
