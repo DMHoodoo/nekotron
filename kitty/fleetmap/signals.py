@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import time
 
@@ -130,10 +131,24 @@ def _memory(vm_stat: str, memsize: str, swapusage: str) -> dict:
             'swap_gb': float(swap[1]) * 1024 ** ('BKMGTP'.index(swap[2]) - 3)}
 
 
+def _linux_memory(meminfo: str) -> dict:
+    fields = {k: int(v.split()[0]) for k, v in
+              (ln.split(':', 1) for ln in meminfo.splitlines() if ':' in ln)}
+    try:
+        total, avail = fields['MemTotal'], fields['MemAvailable']
+        swap_kb = fields['SwapTotal'] - fields['SwapFree']
+    except KeyError:
+        raise ValueError('Incomplete meminfo') from None
+    if total <= 0 or avail > total:
+        raise ValueError('Invalid meminfo')
+    return {'free_pct': avail * 100.0 / total, 'swap_gb': swap_kb / 1024 ** 2}
+
+
 class MemoryProbe:
-    def __init__(self, ssh: str = 'ssh', ttl: float = 15.0):
+    def __init__(self, ssh: str = 'ssh', ttl: float = 15.0, meminfo: str = '/proc/meminfo'):
         self.ssh = ssh
         self.ttl = ttl
+        self.meminfo = meminfo
         self._cache: dict[tuple, tuple[float, dict]] = {}
 
     def probe(self, host: str, ssh_target: str | None) -> dict:
@@ -151,6 +166,11 @@ class MemoryProbe:
         if cached is not None and time.monotonic() - cached[0] < self.ttl:
             return cached[1]
         try:
+            if host == 'local' and not shutil.which('vm_stat'):
+                # Linux / WSL: MemAvailable already counts reclaimable cache.
+                value = _linux_memory(Path(self.meminfo).read_text())
+                self._cache[key] = (time.monotonic(), value)
+                return value
             if host == 'local':
                 values = (_run(['vm_stat']), _run(['sysctl', 'hw.memsize']),
                           _run(['sysctl', 'vm.swapusage']))

@@ -65,7 +65,7 @@ wid="$KITTY_WINDOW_ID"
 if [ -n "$TMUX" ]; then
     key=""
     map="$dir/.map-${PPID}"    # PPID = the claude process that spawned this hook
-    now=$(date +%s); mt=$(stat -f %m "$map" 2>/dev/null || echo 0)
+    now=$(date +%s); mt=$(stat -c %Y "$map" 2>/dev/null || stat -f %m "$map" 2>/dev/null || echo 0)
     if [ $((now - mt)) -lt 300 ]; then
         key="$(cat "$map" 2>/dev/null)"
     else
@@ -108,10 +108,11 @@ fi
 # user has dropped a sound file at ~/.claude/sounds/meow.*. Never blocks.
 if [ "$state" = attention ]; then
     (
-        lsappinfo info -only name "$(lsappinfo front)" 2>/dev/null | grep -qi kitty || \
-            osascript -e 'display notification "A Claude session needs your input" with title "ᓚᘏᗢ Nekotron" sound name "Purr"' 2>/dev/null
+        # (frontmost check is macOS-only; elsewhere always notify)
+        { command -v lsappinfo >/dev/null && lsappinfo info -only name "$(lsappinfo front)" 2>/dev/null | grep -qi kitty; } || \
+            "$HOME/bin/nk-notify" "ᓚᘏᗢ Nekotron" "A Claude session needs your input"
         m=$(ls ~/.claude/sounds/meow.* 2>/dev/null | head -1)
-        [ -n "$m" ] && afplay "$m" 2>/dev/null
+        [ -n "$m" ] && "$HOME/bin/nk-play" "$m"
     ) &
 fi
 

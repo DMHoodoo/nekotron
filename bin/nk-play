@@ -1,0 +1,13 @@
+#!/bin/bash
+# nk-play FILE|purr — play a sound on macOS (afplay) or Linux/WSLg (PulseAudio).
+# "purr" is the macOS system Purr; elsewhere it falls back to the meow.
+f="$1"
+if [ "$f" = purr ]; then
+    f=/System/Library/Sounds/Purr.aiff
+    [ -e "$f" ] || f=$(ls ~/.claude/sounds/meow.* 2>/dev/null | head -1)
+fi
+[ -n "$f" ] && [ -e "$f" ] || exit 0
+for p in afplay paplay pw-play aplay; do
+    command -v "$p" >/dev/null && exec "$p" "$f" 2>/dev/null
+done
+exit 0

@@ -1,7 +1,7 @@
 {
   "statusLine": {
     "type": "command",
-    "command": "/Users/hassankhan/.claude/hooks/claude-statusline.sh"
+    "command": "$HOME/.claude/hooks/claude-statusline.sh"
   },
   "hooks": {
     "PreToolUse": [
@@ -10,7 +10,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/hassankhan/.claude/hooks/jest-guardrail.sh"
+            "command": "$HOME/.claude/hooks/jest-guardrail.sh"
           }
         ]
       }
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/hassankhan/.claude/hooks/kitty-tab-status.sh done",
+            "command": "$HOME/.claude/hooks/kitty-tab-status.sh done",
             "async": true
           },
           {
@@ -36,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/hassankhan/.claude/hooks/kitty-tab-status.sh attention",
+            "command": "$HOME/.claude/hooks/kitty-tab-status.sh attention",
             "async": true
           }
         ]
@@ -47,7 +47,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/hassankhan/.claude/hooks/kitty-tab-status.sh working",
+            "command": "$HOME/.claude/hooks/kitty-tab-status.sh working",
             "async": true
           }
         ]
@@ -58,7 +58,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/hassankhan/.claude/hooks/kitty-tab-status.sh working",
+            "command": "$HOME/.claude/hooks/kitty-tab-status.sh working",
             "async": true
           }
         ]
@@ -69,12 +69,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/hassankhan/.claude/hooks/kitty-tab-status.sh reset",
+            "command": "$HOME/.claude/hooks/kitty-tab-status.sh reset",
             "async": true
           },
           {
             "type": "command",
-            "command": "/Users/hassankhan/.claude/hooks/session-ledger.sh",
+            "command": "$HOME/.claude/hooks/session-ledger.sh",
             "async": true
           }
         ]
@@ -85,7 +85,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/hassankhan/.claude/hooks/kitty-tab-status.sh reset",
+            "command": "$HOME/.claude/hooks/kitty-tab-status.sh reset",
             "async": true
           }
         ]

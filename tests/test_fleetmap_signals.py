@@ -254,6 +254,18 @@ class FleetSignals(unittest.TestCase):
         self.assertEqual(self.probe.probe('laptop2', None), {'free_pct': None, 'swap_gb': None})
         self.assertEqual(self.calls(), [])
 
+    def test_memory_falls_back_to_proc_meminfo_without_vm_stat(self):
+        meminfo = self.base / 'meminfo'
+        meminfo.write_text('MemTotal: 16000000 kB\nMemFree: 1000000 kB\n'
+                           'MemAvailable: 4000000 kB\nSwapTotal: 2097152 kB\n'
+                           'SwapFree: 1048576 kB\n')
+        probe = MemoryProbe(ttl=0, meminfo=str(meminfo))
+        with patch.dict(os.environ, {'PATH': str(self.base / 'empty')}):
+            self.assertEqual(probe.probe('local', None), {'free_pct': 25.0, 'swap_gb': 1.0})
+        meminfo.write_text('MemTotal: 16000000 kB\n')
+        with patch.dict(os.environ, {'PATH': str(self.base / 'empty')}):
+            self.assertEqual(probe.probe('local', None), {'free_pct': None, 'swap_gb': None})
+
     def test_invalid_memory_is_blank(self):
         for command, output in (('vm_stat', ''), ('sysctl hw.memsize', '0'),
                                 ('sysctl vm.swapusage', 'used = nonsense')):

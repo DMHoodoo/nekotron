@@ -32,6 +32,7 @@ KITTEN = (_LOCAL_KITTEN if os.access(_LOCAL_KITTEN, os.X_OK)
           else shutil.which("kitten") or _LOCAL_KITTEN)
 TMUX = shutil.which("tmux") or "/opt/homebrew/bin/tmux"
 MEMP = shutil.which("memory_pressure") or "/usr/sbin/memory_pressure"
+PURR = [os.path.expanduser("~/bin/nk-play"), "purr"]  # Purr on macOS, meow elsewhere
 STATE_DIR = "/tmp/claude-kitty-status"
 PROJECTS = os.path.expanduser("~/.claude/projects")
 SESSIONS = os.path.expanduser("~/.claude/sessions")
@@ -1498,9 +1499,14 @@ def select_card(card, sock):
 def vitals():
     v = {}
     try:
-        out = subprocess.run([MEMP, "-Q"], capture_output=True, text=True, timeout=3).stdout
-        m = re.search(r"(\d+)%", out)
-        v["mem"] = int(m.group(1)) if m else None
+        if os.path.exists("/proc/meminfo"):  # Linux / WSL
+            with open("/proc/meminfo") as f:
+                mi = dict(ln.split(":", 1) for ln in f if ":" in ln)
+            v["mem"] = int(mi["MemAvailable"].split()[0]) * 100 // int(mi["MemTotal"].split()[0])
+        else:
+            out = subprocess.run([MEMP, "-Q"], capture_output=True, text=True, timeout=3).stdout
+            m = re.search(r"(\d+)%", out)
+            v["mem"] = int(m.group(1)) if m else None
     except Exception:
         v["mem"] = None
     try:
@@ -2153,7 +2159,7 @@ def main():
                                   and _hit["yard"][0] <= my_ <= _hit["yard"][1]):
                                 globals()["_pet_until"] = frame + 30  # click the yard = pet
                                 try:
-                                    subprocess.Popen(["/usr/bin/afplay", "/System/Library/Sounds/Purr.aiff"],
+                                    subprocess.Popen(PURR,
                                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                                 except Exception:
                                     pass
@@ -2252,7 +2258,7 @@ def main():
                         elif ch == "c":
                             globals()["_pet_until"] = frame + 30
                             try:
-                                subprocess.Popen(["/usr/bin/afplay", "/System/Library/Sounds/Purr.aiff"],
+                                subprocess.Popen(PURR,
                                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                             except Exception:
                                 pass

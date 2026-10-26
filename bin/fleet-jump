@@ -8,7 +8,7 @@ for s in $(ls -t /tmp/kitty-ctl-* 2>/dev/null); do
     kill -0 "${s##*-}" 2>/dev/null && sock="$s" && break
 done
 [ -n "$sock" ] || exit 0
-/usr/bin/open -a kitty        # bring kitty frontmost first
+[ "$(uname -s)" = Darwin ] && /usr/bin/open -a kitty   # bring kitty frontmost first
 case "$1" in
     board) "$KITTEN" @ --to "unix:$sock" launch --type=overlay "$HOME/.config/kitty/fleet-board.py" ;;
     new)   "$KITTEN" @ --to "unix:$sock" launch --type=tab --cwd "$HOME" zsh -l -i -c 'claude; exec zsh' ;;

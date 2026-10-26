@@ -1,0 +1,22 @@
+#!/bin/bash
+# nk-notify TITLE MESSAGE — desktop notification on macOS, WSL or Linux.
+# Fire-and-forget; callers background it. Silent when nothing can notify.
+t="$1"; m="$2"
+if [ "$(uname -s)" = Darwin ]; then
+    osascript -e "display notification \"$m\" with title \"$t\" sound name \"Purr\"" 2>/dev/null
+elif grep -qi microsoft /proc/version 2>/dev/null && command -v powershell.exe >/dev/null; then
+    # WSLg has no notification daemon, so raise a native Windows toast.
+    NK_T="$t" NK_M="$m" WSLENV="NK_T/u:NK_M/u${WSLENV:+:$WSLENV}" \
+        powershell.exe -NoProfile -NonInteractive -Command '
+        [Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime] > $null
+        $x = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+        $n = $x.GetElementsByTagName("text")
+        $n.Item(0).AppendChild($x.CreateTextNode($env:NK_T)) > $null
+        $n.Item(1).AppendChild($x.CreateTextNode($env:NK_M)) > $null
+        $app = "{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe"
+        [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($app).Show([Windows.UI.Notifications.ToastNotification]::new($x))
+        ' >/dev/null 2>&1
+elif command -v notify-send >/dev/null; then
+    notify-send "$t" "$m" 2>/dev/null
+fi
+exit 0

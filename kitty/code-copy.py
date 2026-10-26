@@ -172,7 +172,9 @@ def main():
         ch = sys.stdin.read(1) if r else ""
         if ch.isdigit() and 0 < int(ch) <= len(blocks):
             lang, code = blocks[int(ch) - 1]
-            subprocess.run(["/usr/bin/pbcopy"], input=code.encode())
+            # pbcopy on macOS; elsewhere kitty sets the clipboard via OSC 52
+            copier = ["/usr/bin/pbcopy"] if os.path.exists("/usr/bin/pbcopy") else [KITTEN, "clipboard"]
+            subprocess.run(copier, input=code.encode())
             n = len(code.splitlines())
             sys.stdout.write(f"\033[{len(rows) + 2};1H  {GREEN}✓ copied {n} line"
                              f"{'s' if n != 1 else ''} to clipboard{RST}\033[K")

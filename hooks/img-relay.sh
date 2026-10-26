@@ -7,7 +7,7 @@ KP="$KITTY_PID"; WID="$KITTY_WINDOW_ID"
 if [ -n "$TMUX" ]; then
     # tmux inherits STALE kitty env — use the tab-status hook's resolved cache
     map="/tmp/claude-kitty-status/.map-${PPID}"
-    now=$(date +%s); mt=$(stat -f %m "$map" 2>/dev/null || echo 0)
+    now=$(date +%s); mt=$(stat -c %Y "$map" 2>/dev/null || stat -f %m "$map" 2>/dev/null || echo 0)
     if [ $((now - mt)) -lt 300 ]; then
         cached=$(cat "$map" 2>/dev/null)
         KP="${cached%%-*}"; WID="${cached##*-}"

@@ -56,7 +56,7 @@ if [ -n "$pct" ]; then
         marker="$dir/.ctxwarn-$KITTY_PID-$KITTY_WINDOW_ID"
         if [ "$pct" -ge 90 ] && [ ! -f "$marker" ]; then
             touch "$marker"
-            osascript -e 'display notification "Session context ≥90% — wrap up or /compact before it wedges" with title "ᓚᘏᗢ Nekotron" sound name "Purr"' 2>/dev/null &
+            "$HOME/bin/nk-notify" "ᓚᘏᗢ Nekotron" "Session context ≥90% — wrap up or /compact before it wedges" &
         fi
         [ "$pct" -lt 50 ] 2>/dev/null && rm -f "$marker"
     fi
@@ -76,7 +76,7 @@ if [ -z "$(find "$dir/.esc-scan" -mmin -1 2>/dev/null)" ]; then
         esc="$dir/.esc-$base"
         [ -n "$(find "$esc" -mmin -15 2>/dev/null)" ] && continue
         touch "$esc"
-        osascript -e 'display notification "A session has been waiting on you for 10+ minutes (⌘⇧A)" with title "ᓚᘏᗢ Nekotron — still waiting" sound name "Purr"' 2>/dev/null &
+        "$HOME/bin/nk-notify" "ᓚᘏᗢ Nekotron — still waiting" "A session has been waiting on you for 10+ minutes (⌘⇧A)" &
     done
 fi
 

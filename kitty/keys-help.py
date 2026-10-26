@@ -4,6 +4,7 @@
 Parses the live `map` lines out of kitty.conf (never goes stale) and adds
 the built-in keys worth remembering. Any key dismisses.
 """
+import glob
 import os
 import re
 import sys
@@ -70,12 +71,14 @@ def main():
         seen.add(fp)
         with open(fp) as f:
             for line in f:
-                inc = re.match(r"\s*include\s+(\S+)", line)
+                inc = re.match(r"\s*(?:glob)?include\s+(\S+)", line)
                 if inc:
-                    files.append(os.path.expanduser(inc.group(1)))
+                    p = os.path.join(os.path.dirname(conf), os.path.expanduser(inc.group(1)))
+                    files.extend(sorted(glob.glob(p)))
                     continue
                 m = re.match(r"\s*map\s+(\S+)\s+(.+)", line)
-                if m:
+                # cmd+ is the Win key off macOS; the ctrl+alt+ mirrors are listed instead
+                if m and not (sys.platform != "darwin" and m.group(1).startswith("cmd+")):
                     maps.append((pretty_key(m.group(1)), describe(m.group(2).strip())))
 
     print(f"\n  {AMBER}ᓚᘏᗢ{RST}  {CYAN}KEYBINDS{RST}\n")

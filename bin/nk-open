@@ -1,0 +1,16 @@
+#!/bin/bash
+# nk-open TARGET — open a file or URL with the OS default handler.
+# WSL hands it to Windows (wslview), so links land in your Windows browser.
+wsl=""; grep -qi microsoft /proc/version 2>/dev/null && wsl=1
+if o=$(command -v open); then
+    case "$(readlink -f "$o" 2>/dev/null || echo "$o")" in
+        *openvt) ;;                                  # Linux kbd's unrelated `open`
+        /usr/bin/*|/bin/*) [ -n "$wsl" ] || exec "$o" "$@" ;;  # system xdg-open can't reach Windows
+        *) exec "$o" "$@" ;;
+    esac
+fi
+for p in wslview xdg-open; do
+    command -v "$p" >/dev/null && exec "$p" "$@"
+done
+echo "nk-open: no opener found for $*" >&2
+exit 1
